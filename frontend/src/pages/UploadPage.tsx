@@ -64,6 +64,14 @@ export function UploadPage() {
       
       if (infoRes.success) {
         setInfo(infoRes);
+        // Load saved print settings if available
+        if (infoRes.photoSize) {
+          setPhotoSize(infoRes.photoSize);
+          setOptionsConfirmed(true);
+        }
+        if (infoRes.photoType) {
+          setPhotoType(infoRes.photoType);
+        }
       } else {
         setError(infoRes.error || 'Invalid or expired link');
       }
@@ -78,8 +86,22 @@ export function UploadPage() {
     }
   };
 
-  const handleConfirmOptions = () => {
-    setOptionsConfirmed(true);
+  const handleConfirmOptions = async () => {
+    if (!token) return;
+    
+    try {
+      const result = await api.updatePrintSettings(token, photoSize, photoType);
+      if (result.success) {
+        setOptionsConfirmed(true);
+        if (info) {
+          setInfo({ ...info, photoSize, photoType });
+        }
+      } else {
+        alert(result.error || 'Failed to save settings');
+      }
+    } catch (err) {
+      alert('Failed to save settings');
+    }
   };
 
   const handleChangeOptions = () => {

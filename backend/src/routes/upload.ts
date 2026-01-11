@@ -70,6 +70,8 @@ router.get('/:token', async (req: Request, res: Response) => {
       expiresAt: magicLink.expiresAt,
       submittedForPrinting: magicLink.submittedForPrinting || false,
       submittedAt: magicLink.submittedAt,
+      photoSize: magicLink.photoSize,
+      photoType: magicLink.photoType,
     });
   } catch (error) {
     console.error('Error validating upload link:', error);
@@ -423,6 +425,53 @@ router.put('/:token/images/:imageId', upload.single('photo'), async (req: Reques
   } catch (error) {
     console.error('Error updating image:', error);
     res.status(500).json({ success: false, error: 'Failed to update image' });
+  }
+});
+
+/**
+ * PUT /api/upload/:token/settings
+ * Update print settings (size and type)
+ */
+router.put('/:token/settings', async (req: Request, res: Response) => {
+  try {
+    const token = req.params.token as string;
+    const { photoSize, photoType } = req.body;
+
+    // Validate inputs
+    if (!photoSize || !['large', 'small'].includes(photoSize)) {
+      res.status(400).json({ success: false, error: 'Invalid photo size' });
+      return;
+    }
+
+    if (!photoType || !['normal', 'polaroid'].includes(photoType)) {
+      res.status(400).json({ success: false, error: 'Invalid photo type' });
+      return;
+    }
+
+    const result = await magicLinkService.validateToken(token);
+
+    if (!result.valid || !result.magicLink) {
+      res.status(400).json({ success: false, error: result.error });
+      return;
+    }
+
+    // Check if already submitted
+    if (result.magicLink.submittedForPrinting) {
+      res.status(400).json({ success: false, error: 'Cannot change settings after submission' });
+      return;
+    }
+
+    // Update settings
+    await magicLinkService.updatePrintSettings(token, photoSize, photoType);
+
+    res.json({
+      success: true,
+      photoSize,
+      photoType,
+    });
+  } catch (error) {
+    console.error('Error updating print settings:', error);
+    res.status(500).json({ success: false, error: 'Failed to update settings' });
   }
 });
 

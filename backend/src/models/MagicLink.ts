@@ -13,6 +13,8 @@ export interface IMagicLink extends Document {
   isActive: boolean;
   submittedForPrinting: boolean;
   submittedAt?: Date;
+  photoSize?: 'large' | 'small';
+  photoType?: 'normal' | 'polaroid';
   createdBy: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
@@ -66,6 +68,14 @@ const MagicLinkSchema = new Schema<IMagicLink>(
     },
     submittedAt: {
       type: Date,
+    },
+    photoSize: {
+      type: String,
+      enum: ['large', 'small'],
+    },
+    photoType: {
+      type: String,
+      enum: ['normal', 'polaroid'],
     },
     createdBy: {
       type: Schema.Types.ObjectId,

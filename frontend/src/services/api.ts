@@ -85,6 +85,8 @@ interface UploadInfo {
   expiresAt?: string;
   submittedForPrinting?: boolean;
   submittedAt?: string;
+  photoSize?: 'large' | 'small';
+  photoType?: 'normal' | 'polaroid';
   error?: string;
 }
 
@@ -250,6 +252,22 @@ class ApiService {
   async submitForPrinting(token: string): Promise<{ success: boolean; message?: string; error?: string }> {
     const response = await fetch(`${this.baseUrl}/api/upload/${token}/submit`, {
       method: 'POST',
+    });
+
+    return response.json();
+  }
+
+  async updatePrintSettings(
+    token: string,
+    photoSize: 'large' | 'small',
+    photoType: 'normal' | 'polaroid'
+  ): Promise<{ success: boolean; error?: string }> {
+    const response = await fetch(`${this.baseUrl}/api/upload/${token}/settings`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ photoSize, photoType }),
     });
 
     return response.json();

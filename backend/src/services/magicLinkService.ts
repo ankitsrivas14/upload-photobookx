@@ -55,9 +55,10 @@ class MagicLinkService {
   }
 
   /**
-   * Validate a magic link (active, not expired, not maxed out)
+   * Validate a magic link (active, not expired)
+   * @param checkUploadLimit - if true, also checks if upload limit is reached (default: false)
    */
-  async validateToken(token: string): Promise<{ valid: boolean; magicLink?: IMagicLink; error?: string }> {
+  async validateToken(token: string, checkUploadLimit: boolean = false): Promise<{ valid: boolean; magicLink?: IMagicLink; error?: string }> {
     const magicLink = await this.findByToken(token);
 
     if (!magicLink) {
@@ -72,7 +73,8 @@ class MagicLinkService {
       return { valid: false, error: 'This link has expired' };
     }
 
-    if (magicLink.currentUploads >= magicLink.maxUploads) {
+    // Only check upload limit when explicitly requested (for upload operations)
+    if (checkUploadLimit && magicLink.currentUploads >= magicLink.maxUploads) {
       return { valid: false, error: 'Maximum upload limit reached' };
     }
 
@@ -93,6 +95,16 @@ class MagicLinkService {
     await MagicLink.updateOne(
       { token, currentUploads: { $gt: 0 } }, // Only decrement if > 0
       { $inc: { currentUploads: -1 } }
+    );
+  }
+
+  /**
+   * Update print settings
+   */
+  async updatePrintSettings(token: string, photoSize: 'large' | 'small', photoType: 'normal' | 'polaroid'): Promise<void> {
+    await MagicLink.updateOne(
+      { token },
+      { photoSize, photoType }
     );
   }
 
