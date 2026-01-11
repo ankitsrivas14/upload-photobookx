@@ -1,8 +1,10 @@
 import { useState } from 'react';
+import { api } from '../services/api';
+import type { AuthResponse } from '../services/api';
 import './AuthScreen.css';
 
 interface AuthScreenProps {
-  onLogin: (orderNo: string, mobile: string) => void;
+  onLogin: (orderData: AuthResponse['order']) => void;
 }
 
 export function AuthScreen({ onLogin }: AuthScreenProps) {
@@ -27,11 +29,20 @@ export function AuthScreen({ onLogin }: AuthScreenProps) {
 
     setIsLoading(true);
     
-    // Simulate API call - replace with actual auth logic
-    setTimeout(() => {
-      onLogin(orderNo, mobile);
+    try {
+      const response = await api.verifyAuth(orderNo.trim(), mobile.trim());
+      
+      if (response.success && response.order) {
+        onLogin(response.order);
+      } else {
+        setError(response.error || 'Authentication failed. Please check your details.');
+      }
+    } catch (err) {
+      console.error('Auth error:', err);
+      setError('Unable to connect to server. Please try again.');
+    } finally {
       setIsLoading(false);
-    }, 800);
+    }
   };
 
   return (
