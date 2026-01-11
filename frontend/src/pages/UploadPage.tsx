@@ -48,6 +48,7 @@ export function UploadPage() {
   
   // Submit state
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
 
   useEffect(() => {
     if (token) {
@@ -256,20 +257,15 @@ export function UploadPage() {
     }
   };
 
-  const handleSubmitForPrinting = async () => {
+  const handleSubmitForPrinting = () => {
+    if (!token || !info) return;
+    setShowConfirmModal(true);
+  };
+
+  const confirmSubmitForPrinting = async () => {
     if (!token || !info) return;
     
-    const confirmed = confirm(
-      'Are you sure you want to submit for printing?\n\n' +
-      'Once submitted, the printing process will begin and you will NOT be able to:\n' +
-      '• Add more photos\n' +
-      '• Delete existing photos\n' +
-      '• Make any changes\n\n' +
-      'This action cannot be undone.'
-    );
-    
-    if (!confirmed) return;
-    
+    setShowConfirmModal(false);
     setIsSubmitting(true);
     
     try {
@@ -664,6 +660,15 @@ export function UploadPage() {
                 </svg>
                 <h3>Uploaded Photos ({uploadedImages.length})</h3>
               </div>
+              
+              <div className="data-notice">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10"/>
+                  <line x1="12" y1="16" x2="12" y2="12"/>
+                  <line x1="12" y1="8" x2="12.01" y2="8"/>
+                </svg>
+                <span>Your photos will be permanently deleted from our servers after printing is complete.</span>
+              </div>
               <div className="uploaded-grid">
                 {uploadedImages.map((img) => (
                   <div key={img.id} className={`uploaded-card ${deletingImageId === img.id ? 'deleting' : ''}`}>
@@ -758,6 +763,47 @@ export function UploadPage() {
           </p>
         </div>
       </main>
+
+      {/* Confirmation Modal */}
+      {showConfirmModal && (
+        <div className="modal-overlay" onClick={() => setShowConfirmModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="6 9 6 2 18 2 18 9"/>
+                <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+                <rect x="6" y="14" width="12" height="8"/>
+              </svg>
+            </div>
+            <h2>Ready to Print?</h2>
+            <p className="modal-message">
+              You're about to submit <strong>{actualUploaded} photos</strong> for printing.
+            </p>
+            <div className="modal-warning">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                <line x1="12" y1="9" x2="12" y2="13"/>
+                <line x1="12" y1="17" x2="12.01" y2="17"/>
+              </svg>
+              <div>
+                <strong>This action cannot be undone.</strong>
+                <span>Once submitted, you won't be able to add, remove, or modify any photos.</span>
+              </div>
+            </div>
+            <div className="modal-actions">
+              <button className="modal-btn cancel" onClick={() => setShowConfirmModal(false)}>
+                Cancel
+              </button>
+              <button className="modal-btn confirm" onClick={confirmSubmitForPrinting}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="20 6 9 17 4 12"/>
+                </svg>
+                Yes, Send for Printing
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
