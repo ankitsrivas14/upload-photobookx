@@ -54,6 +54,26 @@ interface CreateMagicLinkResponse {
   error?: string;
 }
 
+// Shopify Order Types
+interface ShopifyOrder {
+  id: number;
+  name: string;
+  email?: string;
+  createdAt: string;
+  maxUploads: number;
+  lineItems?: Array<{
+    title: string;
+    quantity: number;
+    variantTitle?: string;
+  }>;
+}
+
+interface OrdersResponse {
+  success: boolean;
+  orders?: ShopifyOrder[];
+  error?: string;
+}
+
 // Upload Types
 interface UploadInfo {
   success: boolean;
@@ -154,7 +174,6 @@ class ApiService {
     customerName: string;
     customerEmail?: string;
     customerPhone?: string;
-    maxUploads?: number;
     expiresInDays?: number;
   }): Promise<CreateMagicLinkResponse> {
     return this.request<CreateMagicLinkResponse>('/api/admin/magic-links', {
@@ -169,6 +188,15 @@ class ApiService {
     });
   }
 
+  // Shopify Orders
+  async getOrders(limit = 50): Promise<OrdersResponse> {
+    return this.request<OrdersResponse>(`/api/admin/magic-links/shopify/orders?limit=${limit}`);
+  }
+
+  async getOrder(orderNumber: string): Promise<{ success: boolean; order?: ShopifyOrder; error?: string }> {
+    return this.request(`/api/admin/magic-links/shopify/orders/${encodeURIComponent(orderNumber)}`);
+  }
+
   // Upload (public - no auth needed)
   async validateUploadToken(token: string): Promise<UploadInfo> {
     return this.request<UploadInfo>(`/api/upload/${token}`);
@@ -176,4 +204,4 @@ class ApiService {
 }
 
 export const api = new ApiService();
-export type { AdminUser, MagicLinkInfo, UploadInfo };
+export type { AdminUser, MagicLinkInfo, UploadInfo, ShopifyOrder };

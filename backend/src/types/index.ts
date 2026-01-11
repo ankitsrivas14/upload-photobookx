@@ -62,18 +62,21 @@ export interface MagicLinkRequest extends Request {
 }
 
 // Shopify Order (simplified)
+export interface ShopifyLineItem {
+  id: number;
+  title: string;
+  quantity: number;
+  product_id: number;
+  variant_id: number;
+  variant_title?: string;
+}
+
 export interface ShopifyOrder {
   id: number;
   name: string;
   email?: string;
   created_at: string;
-  line_items: Array<{
-    id: number;
-    title: string;
-    quantity: number;
-    product_id: number;
-    variant_id: number;
-  }>;
+  line_items: ShopifyLineItem[];
 }
 
 export interface ShopifyOrdersResponse {

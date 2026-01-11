@@ -7,6 +7,7 @@ interface Config {
   shopify: {
     storeDomain: string;
     accessToken: string;
+    printedPhotosProductId: string;
   };
   jwt: {
     secret: string;
@@ -23,6 +24,7 @@ const config: Config = {
   shopify: {
     storeDomain: process.env.SHOPIFY_STORE_DOMAIN || '',
     accessToken: process.env.SHOPIFY_ACCESS_TOKEN || '',
+    printedPhotosProductId: process.env.PRINTED_PHOTOS_PRODUCT_ID || '9990160548160',
   },
   
   jwt: {

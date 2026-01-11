@@ -1,24 +1,21 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
-import type { AdminUser, MagicLinkInfo } from '../services/api';
+import type { AdminUser, MagicLinkInfo, ShopifyOrder } from '../services/api';
 import './AdminDashboard.css';
+
+interface OrderWithLink extends ShopifyOrder {
+  magicLink?: MagicLinkInfo;
+}
 
 export function AdminDashboard() {
   const navigate = useNavigate();
   const [user, setUser] = useState<AdminUser | null>(null);
+  const [orders, setOrders] = useState<OrderWithLink[]>([]);
   const [links, setLinks] = useState<MagicLinkInfo[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [showCreateForm, setShowCreateForm] = useState(false);
-  
-  // Create form state
-  const [orderNumber, setOrderNumber] = useState('');
-  const [customerName, setCustomerName] = useState('');
-  const [customerEmail, setCustomerEmail] = useState('');
-  const [customerPhone, setCustomerPhone] = useState('');
-  const [maxUploads, setMaxUploads] = useState('50');
-  const [createError, setCreateError] = useState('');
-  const [isCreating, setIsCreating] = useState(false);
+  const [creatingFor, setCreatingFor] = useState<string | null>(null);
+  const [copiedToken, setCopiedToken] = useState<string | null>(null);
 
   useEffect(() => {
     loadData();
@@ -26,8 +23,9 @@ export function AdminDashboard() {
 
   const loadData = async () => {
     try {
-      const [meRes, linksRes] = await Promise.all([
+      const [meRes, ordersRes, linksRes] = await Promise.all([
         api.getMe(),
+        api.getOrders(),
         api.getMagicLinks(),
       ]);
 
@@ -38,7 +36,18 @@ export function AdminDashboard() {
       }
 
       setUser(meRes.user || null);
-      setLinks(linksRes.links || []);
+      const allLinks = linksRes.links || [];
+      setLinks(allLinks);
+      
+      // Merge orders with their active magic links
+      const ordersWithLinks = (ordersRes.orders || []).map(order => {
+        const activeLink = allLinks.find(l => 
+          l.orderNumber.replace(/^#/, '') === order.name.replace(/^#/, '') && l.isActive
+        );
+        return { ...order, magicLink: activeLink };
+      });
+      
+      setOrders(ordersWithLinks);
     } catch (err) {
       console.error('Failed to load data:', err);
       api.logout();
@@ -53,62 +62,39 @@ export function AdminDashboard() {
     navigate('/admin');
   };
 
-  const handleCreateLink = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setCreateError('');
-
-    if (!orderNumber.trim() || !customerName.trim()) {
-      setCreateError('Order number and customer name are required');
-      return;
-    }
-
-    setIsCreating(true);
+  const handleCreateLink = async (order: ShopifyOrder) => {
+    setCreatingFor(order.name);
 
     try {
       const response = await api.createMagicLink({
-        orderNumber: orderNumber.trim(),
-        customerName: customerName.trim(),
-        customerEmail: customerEmail.trim() || undefined,
-        customerPhone: customerPhone.trim() || undefined,
-        maxUploads: parseInt(maxUploads, 10) || 50,
+        orderNumber: order.name,
+        customerName: order.name, // Use order name as customer name
+        // maxUploads is auto-detected from variant (12, 15, 20, or 25)
       });
 
       if (response.success && response.magicLink) {
-        setLinks([response.magicLink, ...links]);
-        setShowCreateForm(false);
-        resetForm();
-      } else {
-        setCreateError(response.error || 'Failed to create link');
+        const newLink = response.magicLink;
+        setLinks([newLink, ...links]);
+        
+        // Update the order with the new link
+        setOrders(orders.map(o => 
+          o.id === order.id ? { ...o, magicLink: newLink } : o
+        ));
+        
+        // Auto-copy to clipboard
+        copyToClipboard(newLink.uploadUrl, newLink.token);
       }
     } catch (err) {
-      setCreateError('Failed to create link');
+      console.error('Failed to create link:', err);
     } finally {
-      setIsCreating(false);
+      setCreatingFor(null);
     }
   };
 
-  const resetForm = () => {
-    setOrderNumber('');
-    setCustomerName('');
-    setCustomerEmail('');
-    setCustomerPhone('');
-    setMaxUploads('50');
-    setCreateError('');
-  };
-
-  const handleDeactivate = async (token: string) => {
-    if (!confirm('Are you sure you want to deactivate this link?')) return;
-
-    try {
-      await api.deactivateMagicLink(token);
-      setLinks(links.map(l => l.token === token ? { ...l, isActive: false } : l));
-    } catch (err) {
-      console.error('Failed to deactivate:', err);
-    }
-  };
-
-  const copyToClipboard = (text: string) => {
+  const copyToClipboard = (text: string, token: string) => {
     navigator.clipboard.writeText(text);
+    setCopiedToken(token);
+    setTimeout(() => setCopiedToken(null), 2000);
   };
 
   if (isLoading) {
@@ -137,133 +123,75 @@ export function AdminDashboard() {
       </header>
 
       <main className="dashboard-main">
-        <div className="dashboard-actions">
-          <h2>Magic Links</h2>
-          <button 
-            className="create-btn"
-            onClick={() => setShowCreateForm(!showCreateForm)}
-          >
-            {showCreateForm ? 'Cancel' : '+ Create New Link'}
-          </button>
-        </div>
-
-        {showCreateForm && (
-          <div className="create-form-card">
-            <h3>Create Magic Link</h3>
-            <form onSubmit={handleCreateLink}>
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Order Number *</label>
-                  <input
-                    type="text"
-                    value={orderNumber}
-                    onChange={(e) => setOrderNumber(e.target.value)}
-                    placeholder="#PB1001"
-                  />
-                </div>
-                <div className="form-group">
-                  <label>Customer Name *</label>
-                  <input
-                    type="text"
-                    value={customerName}
-                    onChange={(e) => setCustomerName(e.target.value)}
-                    placeholder="John Doe"
-                  />
-                </div>
-              </div>
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Email</label>
-                  <input
-                    type="email"
-                    value={customerEmail}
-                    onChange={(e) => setCustomerEmail(e.target.value)}
-                    placeholder="customer@email.com"
-                  />
-                </div>
-                <div className="form-group">
-                  <label>Phone</label>
-                  <input
-                    type="tel"
-                    value={customerPhone}
-                    onChange={(e) => setCustomerPhone(e.target.value)}
-                    placeholder="9876543210"
-                  />
-                </div>
-              </div>
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Max Uploads</label>
-                  <input
-                    type="number"
-                    value={maxUploads}
-                    onChange={(e) => setMaxUploads(e.target.value)}
-                    min="1"
-                    max="500"
-                  />
-                </div>
-              </div>
-              {createError && <div className="form-error">{createError}</div>}
-              <button type="submit" className="submit-btn" disabled={isCreating}>
-                {isCreating ? 'Creating...' : 'Create Link'}
-              </button>
-            </form>
-          </div>
-        )}
-
-        <div className="links-table">
+        <h2 className="page-title">Orders with Photo Uploads</h2>
+        
+        <div className="orders-table">
           <table>
             <thead>
               <tr>
                 <th>Order</th>
-                <th>Customer</th>
-                <th>Uploads</th>
-                <th>Status</th>
-                <th>Expires</th>
+                <th>Items</th>
+                <th>Photos</th>
+                <th>Date</th>
+                <th>Magic Link</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {links.length === 0 ? (
+              {orders.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="empty-state">
-                    No magic links created yet
+                    No orders found
                   </td>
                 </tr>
               ) : (
-                links.map((link) => (
-                  <tr key={link.token} className={!link.isActive ? 'inactive' : ''}>
-                    <td className="order-cell">{link.orderNumber}</td>
+                orders.map((order) => (
+                  <tr key={order.id}>
+                    <td className="order-cell">{order.name}</td>
                     <td>
-                      <div className="customer-info">
-                        <span className="customer-name">{link.customerName}</span>
-                        {link.customerEmail && (
-                          <span className="customer-email">{link.customerEmail}</span>
+                      <div className="items-list">
+                        {order.lineItems?.slice(0, 2).map((item, i) => (
+                          <span key={i} className="item-tag">
+                            {item.title} × {item.quantity}
+                          </span>
+                        ))}
+                        {(order.lineItems?.length || 0) > 2 && (
+                          <span className="more-items">+{(order.lineItems?.length || 0) - 2} more</span>
                         )}
                       </div>
                     </td>
-                    <td>{link.currentUploads} / {link.maxUploads}</td>
                     <td>
-                      <span className={`status-badge ${link.isActive ? 'active' : 'inactive'}`}>
-                        {link.isActive ? 'Active' : 'Inactive'}
-                      </span>
+                      <span className="photo-count">{order.maxUploads}</span>
                     </td>
-                    <td>{new Date(link.expiresAt).toLocaleDateString()}</td>
+                    <td>{new Date(order.createdAt).toLocaleDateString()}</td>
+                    <td>
+                      {order.magicLink ? (
+                        <div className="link-cell">
+                          <span className="link-url">{order.magicLink.uploadUrl}</span>
+                          <button 
+                            className={`copy-btn ${copiedToken === order.magicLink.token ? 'copied' : ''}`}
+                            onClick={() => copyToClipboard(order.magicLink!.uploadUrl, order.magicLink!.token)}
+                            title="Copy link"
+                          >
+                            {copiedToken === order.magicLink.token ? '✓' : '📋'}
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="no-link">—</span>
+                      )}
+                    </td>
                     <td className="actions-cell">
-                      <button 
-                        className="action-btn copy"
-                        onClick={() => copyToClipboard(link.uploadUrl)}
-                        title="Copy link"
-                      >
-                        📋
-                      </button>
-                      {link.isActive && (
+                      {order.magicLink ? (
+                        <span className="link-status">
+                          {order.magicLink.currentUploads}/{order.magicLink.maxUploads} uploads
+                        </span>
+                      ) : (
                         <button 
-                          className="action-btn deactivate"
-                          onClick={() => handleDeactivate(link.token)}
-                          title="Deactivate"
+                          className="action-btn create"
+                          onClick={() => handleCreateLink(order)}
+                          disabled={creatingFor === order.name}
                         >
-                          ✕
+                          {creatingFor === order.name ? 'Creating...' : 'Create Magic Link'}
                         </button>
                       )}
                     </td>

@@ -55,19 +55,23 @@ router.get('/', requireAdmin, async (req: AuthenticatedRequest, res: Response) =
  */
 router.post('/', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { orderNumber, customerName, customerEmail, customerPhone, maxUploads, expiresInDays } = req.body;
+    const { orderNumber, customerName, customerEmail, customerPhone, expiresInDays } = req.body;
 
     if (!orderNumber || !customerName) {
       res.status(400).json({ success: false, error: 'Order number and customer name are required' });
       return;
     }
 
-    // Optionally verify order exists in Shopify
+    // Get order from Shopify to determine max uploads from variant
     let orderId: string | undefined;
+    let maxUploads = 25; // Default fallback
+    
     try {
       const order = await shopifyService.findOrderByNumber(orderNumber);
       if (order) {
         orderId = String(order.id);
+        // Get max uploads from the variant (12, 15, 20, or 25)
+        maxUploads = shopifyService.getMaxUploadsForOrder(order);
       }
     } catch (e) {
       console.warn('Could not verify order in Shopify:', e);
@@ -79,7 +83,7 @@ router.post('/', requireAdmin, async (req: AuthenticatedRequest, res: Response) 
       customerName,
       customerEmail,
       customerPhone,
-      maxUploads: maxUploads || 50,
+      maxUploads,
       expiresInDays: expiresInDays || 30,
       createdBy: req.user!.userId,
     });
@@ -171,9 +175,11 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
         name: order.name,
         email: order.email,
         createdAt: order.created_at,
+        maxUploads: shopifyService.getMaxUploadsForOrder(order),
         lineItems: order.line_items?.map(item => ({
           title: item.title,
           quantity: item.quantity,
+          variantTitle: item.variant_title,
         })),
       })),
     });
