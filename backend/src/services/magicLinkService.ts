@@ -87,6 +87,29 @@ class MagicLinkService {
   }
 
   /**
+   * Decrement upload count (when image is deleted)
+   */
+  async decrementUploadCount(token: string): Promise<void> {
+    await MagicLink.updateOne(
+      { token, currentUploads: { $gt: 0 } }, // Only decrement if > 0
+      { $inc: { currentUploads: -1 } }
+    );
+  }
+
+  /**
+   * Submit for printing - marks the link as submitted and locks it
+   */
+  async submitForPrinting(token: string): Promise<void> {
+    await MagicLink.updateOne(
+      { token },
+      { 
+        submittedForPrinting: true, 
+        submittedAt: new Date(),
+      }
+    );
+  }
+
+  /**
    * Deactivate a magic link
    */
   async deactivate(token: string): Promise<void> {

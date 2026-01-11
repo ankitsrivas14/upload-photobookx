@@ -83,6 +83,8 @@ interface UploadInfo {
   currentUploads?: number;
   remainingUploads?: number;
   expiresAt?: string;
+  submittedForPrinting?: boolean;
+  submittedAt?: string;
   error?: string;
 }
 
@@ -201,6 +203,58 @@ class ApiService {
   async validateUploadToken(token: string): Promise<UploadInfo> {
     return this.request<UploadInfo>(`/api/upload/${token}`);
   }
+
+  async getUploadedImages(token: string): Promise<{
+    success: boolean;
+    images?: Array<{
+      id: string;
+      fileName: string;
+      originalName: string;
+      s3Url: string;
+      photoSize: 'large' | 'small';
+      photoType: 'normal' | 'polaroid';
+      uploadedAt: string;
+    }>;
+    error?: string;
+  }> {
+    return this.request(`/api/upload/${token}/images`);
+  }
+
+  async uploadPhoto(
+    token: string,
+    file: File | Blob,
+    size: 'large' | 'small',
+    type: 'normal' | 'polaroid'
+  ): Promise<{ success: boolean; error?: string }> {
+    const formData = new FormData();
+    formData.append('photo', file);
+    formData.append('size', size);
+    formData.append('type', type);
+
+    const response = await fetch(`${this.baseUrl}/api/upload/${token}/upload`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    return response.json();
+  }
+
+  async deleteImage(token: string, imageId: string): Promise<{ success: boolean; error?: string }> {
+    const response = await fetch(`${this.baseUrl}/api/upload/${token}/images/${imageId}`, {
+      method: 'DELETE',
+    });
+
+    return response.json();
+  }
+
+  async submitForPrinting(token: string): Promise<{ success: boolean; message?: string; error?: string }> {
+    const response = await fetch(`${this.baseUrl}/api/upload/${token}/submit`, {
+      method: 'POST',
+    });
+
+    return response.json();
+  }
+
 }
 
 export const api = new ApiService();

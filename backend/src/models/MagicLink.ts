@@ -11,6 +11,8 @@ export interface IMagicLink extends Document {
   currentUploads: number;
   expiresAt: Date;
   isActive: boolean;
+  submittedForPrinting: boolean;
+  submittedAt?: Date;
   createdBy: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
@@ -57,6 +59,13 @@ const MagicLinkSchema = new Schema<IMagicLink>(
     isActive: {
       type: Boolean,
       default: true,
+    },
+    submittedForPrinting: {
+      type: Boolean,
+      default: false,
+    },
+    submittedAt: {
+      type: Date,
     },
     createdBy: {
       type: Schema.Types.ObjectId,

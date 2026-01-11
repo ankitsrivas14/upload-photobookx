@@ -1,5 +1,8 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
+export type PhotoSize = 'large' | 'small';
+export type PhotoType = 'normal' | 'polaroid';
+
 export interface IUploadedImage extends Document {
   magicLinkId: mongoose.Types.ObjectId;
   orderNumber: string;
@@ -9,6 +12,8 @@ export interface IUploadedImage extends Document {
   s3Url: string;
   fileSize: number;
   mimeType: string;
+  photoSize: PhotoSize;
+  photoType: PhotoType;
   uploadedAt: Date;
 }
 
@@ -47,6 +52,16 @@ const UploadedImageSchema = new Schema<IUploadedImage>(
     },
     mimeType: {
       type: String,
+      required: true,
+    },
+    photoSize: {
+      type: String,
+      enum: ['large', 'small'],
+      required: true,
+    },
+    photoType: {
+      type: String,
+      enum: ['normal', 'polaroid'],
       required: true,
     },
     uploadedAt: {
