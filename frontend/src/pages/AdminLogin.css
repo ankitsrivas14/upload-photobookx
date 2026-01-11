@@ -1,0 +1,140 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');
+
+.admin-login-container {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #f5f7fa 0%, #e4e8ec 100%);
+  padding: 2rem;
+}
+
+.admin-login-card {
+  width: 100%;
+  max-width: 400px;
+  background: white;
+  border-radius: 16px;
+  padding: 2.5rem;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.08);
+}
+
+.admin-login-header {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+.admin-logo {
+  height: 48px;
+  margin-bottom: 1.5rem;
+}
+
+.admin-login-header h1 {
+  font-family: 'Poppins', sans-serif;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #1a1a2e;
+  margin: 0 0 0.5rem;
+}
+
+.admin-login-header .subtitle {
+  font-family: 'Poppins', sans-serif;
+  font-size: 0.875rem;
+  color: #64748b;
+  margin: 0;
+}
+
+.admin-login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.admin-login-form .input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.admin-login-form label {
+  font-family: 'Poppins', sans-serif;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: #374151;
+}
+
+.admin-login-form input {
+  padding: 0.75rem 1rem;
+  font-family: 'Poppins', sans-serif;
+  font-size: 0.9375rem;
+  color: #1a1a2e;
+  background: #f8fafc;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 10px;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.admin-login-form input:focus {
+  border-color: #00B8D4;
+  background: white;
+  box-shadow: 0 0 0 3px rgba(0, 184, 212, 0.1);
+}
+
+.admin-login-form input::placeholder {
+  color: #94a3b8;
+}
+
+.admin-login-form .error-message {
+  padding: 0.75rem 1rem;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  font-family: 'Poppins', sans-serif;
+  font-size: 0.8125rem;
+  color: #dc2626;
+}
+
+.admin-login-form .submit-btn {
+  margin-top: 0.5rem;
+  padding: 0.875rem 1.5rem;
+  font-family: 'Poppins', sans-serif;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: white;
+  background: linear-gradient(135deg, #00B8D4, #00838F);
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.admin-login-form .submit-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 184, 212, 0.3);
+}
+
+.admin-login-form .submit-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.toggle-mode {
+  margin-top: 1.5rem;
+  text-align: center;
+  font-family: 'Poppins', sans-serif;
+  font-size: 0.8125rem;
+  color: #64748b;
+}
+
+.toggle-mode button {
+  background: none;
+  border: none;
+  color: #00B8D4;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 0;
+}
+
+.toggle-mode button:hover {
+  text-decoration: underline;
+}

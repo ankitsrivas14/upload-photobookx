@@ -1,31 +1,68 @@
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
-interface AuthResponse {
+// Admin Auth Types
+interface AdminUser {
+  id: string;
+  email: string;
+  name: string;
+}
+
+interface LoginResponse {
   success: boolean;
   token?: string;
-  order?: {
-    id: number;
-    orderNumber: string;
-    email: string;
-    customerName: string;
-    createdAt: string;
-    lineItems: Array<{
-      id: number;
-      title: string;
-      quantity: number;
-      productId: number;
-      variantId: number;
-    }>;
+  user?: AdminUser;
+  error?: string;
+}
+
+interface MeResponse {
+  success: boolean;
+  user?: AdminUser;
+  error?: string;
+}
+
+// Magic Link Types
+interface MagicLinkInfo {
+  id: string;
+  token: string;
+  orderNumber: string;
+  customerName: string;
+  customerEmail?: string;
+  customerPhone?: string;
+  maxUploads: number;
+  currentUploads: number;
+  expiresAt: string;
+  isActive: boolean;
+  createdAt: string;
+  uploadUrl: string;
+}
+
+interface MagicLinksResponse {
+  success: boolean;
+  links?: MagicLinkInfo[];
+  pagination?: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
   };
   error?: string;
 }
 
-interface UserResponse {
+interface CreateMagicLinkResponse {
   success: boolean;
-  user?: {
-    orderId: number;
-    orderNumber: string;
-  };
+  magicLink?: MagicLinkInfo;
+  error?: string;
+}
+
+// Upload Types
+interface UploadInfo {
+  success: boolean;
+  orderNumber?: string;
+  customerName?: string;
+  maxUploads?: number;
+  currentUploads?: number;
+  remainingUploads?: number;
+  expiresAt?: string;
   error?: string;
 }
 
@@ -37,21 +74,22 @@ class ApiService {
   }
 
   private getToken(): string | null {
-    return localStorage.getItem('authToken');
+    return localStorage.getItem('adminToken');
   }
 
-  private setToken(token: string): void {
-    localStorage.setItem('authToken', token);
+  setToken(token: string): void {
+    localStorage.setItem('adminToken', token);
   }
 
-  private removeToken(): void {
-    localStorage.removeItem('authToken');
+  removeToken(): void {
+    localStorage.removeItem('adminToken');
   }
 
-  private async request<T>(
-    endpoint: string,
-    options: RequestInit = {}
-  ): Promise<T> {
+  isAuthenticated(): boolean {
+    return !!this.getToken();
+  }
+
+  private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const token = this.getToken();
     
     const headers: HeadersInit = {
@@ -68,17 +106,14 @@ class ApiService {
       headers,
     });
 
-    const data = await response.json();
-    return data;
+    return response.json();
   }
 
-  /**
-   * Verify order number and mobile number
-   */
-  async verifyAuth(orderNo: string, mobile: string): Promise<AuthResponse> {
-    const response = await this.request<AuthResponse>('/api/auth/verify', {
+  // Admin Auth
+  async login(email: string, password: string): Promise<LoginResponse> {
+    const response = await this.request<LoginResponse>('/api/admin/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ orderNo, mobile }),
+      body: JSON.stringify({ email, password }),
     });
 
     if (response.success && response.token) {
@@ -88,27 +123,57 @@ class ApiService {
     return response;
   }
 
-  /**
-   * Get current authenticated user info
-   */
-  async getCurrentUser(): Promise<UserResponse> {
-    return this.request<UserResponse>('/api/auth/me');
+  async register(email: string, password: string, name: string): Promise<LoginResponse> {
+    const response = await this.request<LoginResponse>('/api/admin/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ email, password, name }),
+    });
+
+    if (response.success && response.token) {
+      this.setToken(response.token);
+    }
+
+    return response;
   }
 
-  /**
-   * Check if user is authenticated
-   */
-  isAuthenticated(): boolean {
-    return !!this.getToken();
+  async getMe(): Promise<MeResponse> {
+    return this.request<MeResponse>('/api/admin/auth/me');
   }
 
-  /**
-   * Logout - clear token
-   */
   logout(): void {
     this.removeToken();
+  }
+
+  // Magic Links
+  async getMagicLinks(page = 1, limit = 20): Promise<MagicLinksResponse> {
+    return this.request<MagicLinksResponse>(`/api/admin/magic-links?page=${page}&limit=${limit}`);
+  }
+
+  async createMagicLink(data: {
+    orderNumber: string;
+    customerName: string;
+    customerEmail?: string;
+    customerPhone?: string;
+    maxUploads?: number;
+    expiresInDays?: number;
+  }): Promise<CreateMagicLinkResponse> {
+    return this.request<CreateMagicLinkResponse>('/api/admin/magic-links', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deactivateMagicLink(token: string): Promise<{ success: boolean; error?: string }> {
+    return this.request(`/api/admin/magic-links/${token}`, {
+      method: 'DELETE',
+    });
+  }
+
+  // Upload (public - no auth needed)
+  async validateUploadToken(token: string): Promise<UploadInfo> {
+    return this.request<UploadInfo>(`/api/upload/${token}`);
   }
 }
 
 export const api = new ApiService();
-export type { AuthResponse, UserResponse };
+export type { AdminUser, MagicLinkInfo, UploadInfo };

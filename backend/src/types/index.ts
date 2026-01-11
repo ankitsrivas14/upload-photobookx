@@ -1,108 +1,81 @@
 import { Request } from 'express';
 
-// Shopify Customer types (full customer from /customers endpoint)
-export interface ShopifyCustomerFull {
-  id: number;
-  email: string | null;
-  first_name: string | null;
-  last_name: string | null;
-  phone: string | null;
-  created_at: string;
-  updated_at: string;
-  default_address?: {
-    id: number;
-    phone: string | null;
-    address1: string | null;
-    city: string | null;
-    province: string | null;
-    country: string | null;
+// Super User (Admin)
+export interface SuperUser {
+  _id: string;
+  email: string;
+  name: string;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// Magic Link
+export interface MagicLink {
+  _id: string;
+  token: string;
+  orderNumber: string;
+  orderId?: string;
+  customerName: string;
+  customerEmail?: string;
+  customerPhone?: string;
+  maxUploads: number;
+  currentUploads: number;
+  expiresAt: Date;
+  isActive: boolean;
+  createdBy: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// Uploaded Image
+export interface UploadedImage {
+  _id: string;
+  magicLinkId: string;
+  orderNumber: string;
+  fileName: string;
+  originalName: string;
+  s3Key: string;
+  s3Url: string;
+  fileSize: number;
+  mimeType: string;
+  uploadedAt: Date;
+}
+
+// JWT Payload for admin auth
+export interface AdminJwtPayload {
+  userId: string;
+  email: string;
+}
+
+// Authenticated request with user
+export interface AuthenticatedRequest extends Request {
+  user?: {
+    userId: string;
+    email: string;
   };
 }
 
-export interface ShopifyCustomerResponse {
-  customer: ShopifyCustomerFull;
+// Magic link request (for upload pages)
+export interface MagicLinkRequest extends Request {
+  magicLink?: MagicLink;
 }
 
-// Shopify Order types (partial customer in order response)
-export interface ShopifyCustomer {
-  id: number;
-  first_name?: string;
-  last_name?: string;
-  email?: string;
-  phone?: string | null;
-  default_address?: {
-    phone?: string | null;
-  };
-}
-
-export interface ShopifyAddress {
-  phone?: string | null;
-  address1?: string;
-  city?: string;
-  country?: string;
-  first_name?: string;
-  last_name?: string;
-}
-
-export interface ShopifyLineItem {
-  id: number;
-  title: string;
-  quantity: number;
-  product_id: number;
-  variant_id: number;
-}
-
+// Shopify Order (simplified)
 export interface ShopifyOrder {
   id: number;
   name: string;
   email?: string;
-  phone?: string;
   created_at: string;
-  customer?: ShopifyCustomer | null;
-  billing_address?: ShopifyAddress | null;
-  shipping_address?: ShopifyAddress | null;
-  line_items: ShopifyLineItem[];
-  note_attributes?: Array<{ name: string; value: string }>;
+  line_items: Array<{
+    id: number;
+    title: string;
+    quantity: number;
+    product_id: number;
+    variant_id: number;
+  }>;
 }
 
 export interface ShopifyOrdersResponse {
   orders: ShopifyOrder[];
-}
-
-// Auth types
-export interface AuthUser {
-  orderId: number;
-  orderNumber: string;
-  mobile: string;
-}
-
-export interface AuthenticatedRequest extends Request {
-  user?: AuthUser;
-}
-
-export interface OrderInfo {
-  id: number;
-  orderNumber: string;
-  email: string;
-  customerName: string;
-  createdAt: string;
-  lineItems: Array<{
-    id: number;
-    title: string;
-    quantity: number;
-    productId: number;
-    variantId: number;
-  }>;
-}
-
-export interface VerifyOrderResult {
-  success: boolean;
-  error?: string;
-  order?: OrderInfo;
-}
-
-export interface JwtPayload {
-  orderId: number;
-  orderNumber: string;
-  mobile: string;
 }

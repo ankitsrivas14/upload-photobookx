@@ -1,9 +1,23 @@
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
+import mongoose from 'mongoose';
 import config from './config';
-import authRoutes from './routes/auth';
+import adminAuthRoutes from './routes/adminAuth';
+import magicLinksRoutes from './routes/magicLinks';
+import uploadRoutes from './routes/upload';
 
 const app = express();
+
+// Connect to MongoDB
+mongoose
+  .connect(config.mongoUri)
+  .then(() => {
+    console.log('📦 Connected to MongoDB');
+  })
+  .catch((err) => {
+    console.error('❌ MongoDB connection error:', err);
+    process.exit(1);
+  });
 
 // Middleware
 app.use(cors({
@@ -13,7 +27,9 @@ app.use(cors({
 app.use(express.json());
 
 // Routes
-app.use('/api/auth', authRoutes);
+app.use('/api/admin/auth', adminAuthRoutes);
+app.use('/api/admin/magic-links', magicLinksRoutes);
+app.use('/api/upload', uploadRoutes);
 
 // Health check
 app.get('/api/health', (_req: Request, res: Response) => {
