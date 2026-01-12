@@ -25,18 +25,10 @@ const upload = multer({
   },
 });
 
-// Configure S3 client
+// Configure S3 client (use default AWS credential provider chain; works with EC2 IAM role)
 const getS3Client = () => {
-  if (!config.aws.accessKeyId || !config.aws.secretAccessKey || !config.aws.s3Bucket) {
-    console.warn('AWS S3 not configured properly. Check AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_S3_BUCKET env vars.');
-  }
-  
   return new S3Client({
     region: config.aws.region,
-    credentials: {
-      accessKeyId: config.aws.accessKeyId,
-      secretAccessKey: config.aws.secretAccessKey,
-    },
     // Use path-style URLs for better compatibility
     forcePathStyle: false,
   });
