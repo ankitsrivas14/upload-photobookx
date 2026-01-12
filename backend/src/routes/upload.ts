@@ -6,6 +6,7 @@ import magicLinkService from '../services/magicLinkService';
 import { UploadedImage } from '../models';
 import type { PhotoSize, PhotoType } from '../models/UploadedImage';
 import config from '../config';
+import { fromInstanceMetadata } from "@aws-sdk/credential-provider-imds";
 
 const router = Router();
 
@@ -29,7 +30,7 @@ const upload = multer({
 const getS3Client = () => {
   return new S3Client({
     region: config.aws.region,
-    // Use path-style URLs for better compatibility
+    credentials: fromInstanceMetadata(),
     forcePathStyle: false,
   });
 };
