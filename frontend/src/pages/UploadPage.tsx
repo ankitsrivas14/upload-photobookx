@@ -327,6 +327,10 @@ export function UploadPage() {
           submittedForPrinting: true,
           submittedAt: new Date().toISOString(),
         });
+        // Scroll to top to show the submitted state
+        if (typeof window !== 'undefined') {
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
       } else {
         alert(result.error || 'Failed to submit for printing');
       }
@@ -374,6 +378,10 @@ export function UploadPage() {
 
   // If already submitted, show success state
   if (isSubmitted) {
+    const submittedCount = uploadedImages.length > 0 
+      ? uploadedImages.length 
+      : info.currentUploads || actualUploaded || maxUploads;
+
     return (
       <div className="upload-page">
         <header className="header">
@@ -396,7 +404,7 @@ export function UploadPage() {
               <h1>Submitted for Printing!</h1>
               <p className="submitted-order">Order {info.orderNumber}</p>
               <p className="submitted-message">
-                Your {info.currentUploads} photos have been submitted successfully. 
+                Your {submittedCount} photos have been submitted successfully. 
                 The printing process has begun.
               </p>
               <div className="submitted-details">
