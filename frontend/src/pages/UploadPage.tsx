@@ -13,6 +13,7 @@ interface SelectedFile {
   uploading: boolean;
   uploaded: boolean;
   error?: string;
+  previewError?: boolean;
 }
 
 interface UploadedImage {
@@ -23,6 +24,7 @@ interface UploadedImage {
   photoSize: PhotoSize;
   photoType: PhotoType;
   uploadedAt: string;
+  orientation?: 'landscape' | 'portrait' | 'square';
 }
 
 export function UploadPage() {
@@ -45,10 +47,48 @@ export function UploadPage() {
   // Uploaded images
   const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
   const [deletingImageId, setDeletingImageId] = useState<string | null>(null);
+  const [imageOrientations, setImageOrientations] = useState<Record<string, 'landscape' | 'portrait' | 'square'>>({});
+  const [imageLoadFailures, setImageLoadFailures] = useState<Record<string, boolean>>({});
   
   // Submit state
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+
+  // Detect image orientation when image loads
+  const handleImageLoad = (imageId: string, event: React.SyntheticEvent<HTMLImageElement>) => {
+    const img = event.currentTarget;
+    const ratio = img.naturalWidth / img.naturalHeight;
+    let orientation: 'landscape' | 'portrait' | 'square' = 'square';
+    
+    if (ratio > 1.1) {
+      orientation = 'landscape';
+    } else if (ratio < 0.9) {
+      orientation = 'portrait';
+    }
+    
+    setImageOrientations(prev => ({ ...prev, [imageId]: orientation }));
+  };
+
+  // Handle image load failure (common for unsupported formats like HEIC in some browsers)
+  const handleImageError = (imageId: string) => {
+    setImageLoadFailures(prev => ({ ...prev, [imageId]: true }));
+    // Default to square to keep container sizing stable
+    setImageOrientations(prev => ({ ...prev, [imageId]: 'square' }));
+  };
+
+  // Mark preview URL failure (for local previews before upload)
+  const markPreviewError = (previewUrl: string) => {
+    setSelectedFiles(prev => prev.map(f => 
+      f.preview === previewUrl ? { ...f, previewError: true } : f
+    ));
+  };
+
+  // Get CSS class for image based on size and orientation
+  const getImageClass = (imageId: string): string => {
+    const orientation = imageOrientations[imageId] || 'loading';
+    const size = photoSize; // Use current selected size
+    return `uploaded-card ${size}-${orientation}`;
+  };
 
   useEffect(() => {
     if (token) {
@@ -130,12 +170,18 @@ export function UploadPage() {
     if (files) addFiles(Array.from(files));
   };
 
+  const isSupportedImage = (file: File) => {
+    if (file.type.startsWith('image/')) return true;
+    // Fallback on extension check for formats with missing/unknown MIME types (e.g., HEIC)
+    return /\.(heic|heif|jpg|jpeg|png|gif|webp|bmp|tiff)$/i.test(file.name);
+  };
+
   const addFiles = (files: File[]) => {
     if (!info) return;
     // Calculate remaining slots based on actual uploaded images
     const currentRemaining = Math.max(0, (info.maxUploads || 0) - uploadedImages.length);
     const remainingSlots = currentRemaining - selectedFiles.filter(f => !f.uploaded).length;
-    const imageFiles = files.filter(f => f.type.startsWith('image/'));
+    const imageFiles = files.filter(isSupportedImage);
     const filesToAdd = imageFiles.slice(0, Math.max(0, remainingSlots));
 
     const newFiles: SelectedFile[] = filesToAdd.map(file => ({
@@ -239,6 +285,10 @@ export function UploadPage() {
       const result = await api.deleteImage(token, imageId);
       
       if (result.success) {
+        setImageLoadFailures(prev => {
+          const { [imageId]: _, ...rest } = prev;
+          return rest;
+        });
         setUploadedImages(prev => prev.filter(img => img.id !== imageId));
         if (info) {
           setInfo({
@@ -380,8 +430,12 @@ export function UploadPage() {
                   </div>
                   <div className="uploaded-grid">
                     {uploadedImages.map((img) => (
-                      <div key={img.id} className="uploaded-card readonly">
-                        <img src={img.s3Url} alt={img.originalName} />
+                      <div key={img.id} className={`${getImageClass(img.id)} readonly`}>
+                        <img 
+                          src={img.s3Url} 
+                          alt={img.originalName}
+                          onLoad={(e) => handleImageLoad(img.id, e)}
+                        />
                       </div>
                     ))}
                   </div>
@@ -446,7 +500,8 @@ export function UploadPage() {
                 </div>
               </div>
 
-              <div className="options-section">
+              {/* Photo Size Section */}
+              <div className="option-section-block">
                 <div className="option-group">
                   <label className="option-label">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -478,7 +533,19 @@ export function UploadPage() {
                     </button>
                   </div>
                 </div>
+                
+                <div className="info-banner recommendation">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M12 16v-4"/>
+                    <path d="M12 8h.01"/>
+                  </svg>
+                  <span>Small photos (3"×4") are recommended for <strong>Small Photobooks</strong>. Large photos (4"×6") are ideal for <strong>Large Photobooks</strong>.</span>
+                </div>
+              </div>
 
+              {/* Print Style Section */}
+              <div className="option-section-block">
                 <div className="option-group">
                   <label className="option-label">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -566,7 +633,7 @@ export function UploadPage() {
                     <input
                       ref={fileInputRef}
                       type="file"
-                      accept="image/*"
+                      accept="image/*,.heic,.heif,.jpg,.jpeg,.png,.webp,.gif,.bmp,.tiff"
                       multiple
                       onChange={handleFileSelect}
                       hidden
@@ -612,7 +679,23 @@ export function UploadPage() {
                           key={index} 
                           className={`preview-card ${file.uploaded ? 'uploaded' : ''} ${file.uploading ? 'uploading' : ''} ${file.error ? 'error' : ''}`}
                         >
-                          <img src={file.preview} alt="" />
+                          {!file.previewError ? (
+                            <img 
+                              src={file.preview} 
+                              alt={file.file.name} 
+                              onError={() => markPreviewError(file.preview)}
+                            />
+                          ) : (
+                            <div className="image-fallback">
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                                <line x1="9" y1="3" x2="9" y2="21"/>
+                                <circle cx="14.5" cy="8.5" r="1.5"/>
+                              </svg>
+                              <p>Preview not available</p>
+                              <span className="fallback-name">{file.file.name}</span>
+                            </div>
+                          )}
                           {file.uploading && (
                             <div className="preview-overlay">
                               <div className="preview-loader"></div>
@@ -671,8 +754,25 @@ export function UploadPage() {
               </div>
               <div className="uploaded-grid">
                 {uploadedImages.map((img) => (
-                  <div key={img.id} className={`uploaded-card ${deletingImageId === img.id ? 'deleting' : ''}`}>
-                    <img src={img.s3Url} alt={img.originalName} />
+                  <div key={img.id} className={`${getImageClass(img.id)} ${deletingImageId === img.id ? 'deleting' : ''}`}>
+                    {imageLoadFailures[img.id] ? (
+                      <div className="image-fallback">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                          <line x1="9" y1="3" x2="9" y2="21"/>
+                          <circle cx="14.5" cy="8.5" r="1.5"/>
+                        </svg>
+                        <p>Preview not available</p>
+                        <span className="fallback-name">{img.originalName}</span>
+                      </div>
+                    ) : (
+                      <img 
+                        src={img.s3Url} 
+                        alt={img.originalName} 
+                        onLoad={(e) => handleImageLoad(img.id, e)}
+                        onError={() => handleImageError(img.id)}
+                      />
+                    )}
                     {deletingImageId === img.id ? (
                       <div className="delete-overlay">
                         <div className="delete-loader"></div>
