@@ -244,6 +244,7 @@ router.get('/shopify/products', requireAdmin, async (_req: AuthenticatedRequest,
           id: variant.id,
           title: variant.title,
           price: variant.price,
+          compareAtPrice: variant.compare_at_price,
           sku: variant.sku,
           inventoryQuantity: variant.inventory_quantity,
           weight: variant.weight,
@@ -287,6 +288,7 @@ router.get('/shopify/products/:productId', requireAdmin, async (req: Authenticat
           id: variant.id,
           title: variant.title,
           price: variant.price,
+          compareAtPrice: variant.compare_at_price,
           sku: variant.sku,
           inventoryQuantity: variant.inventory_quantity,
           weight: variant.weight,
@@ -298,6 +300,80 @@ router.get('/shopify/products/:productId', requireAdmin, async (req: Authenticat
   } catch (error) {
     console.error('Error fetching product:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch product' });
+  }
+});
+
+/**
+ * PUT /api/admin/magic-links/shopify/products/bulk-update-prices
+ * Bulk update prices for multiple products
+ */
+router.put('/shopify/products/bulk-update-prices', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const {
+      productIds,
+      variant1Price,
+      variant1CompareAtPrice,
+      variant2Price,
+      variant2CompareAtPrice,
+      priceChangePercent,
+      priceChangeAmount,
+      updateType,
+    } = req.body;
+
+    if (!productIds || !Array.isArray(productIds) || productIds.length === 0) {
+      res.status(400).json({ success: false, error: 'Product IDs are required' });
+      return;
+    }
+
+    if (!updateType || !['set', 'increase', 'decrease'].includes(updateType)) {
+      res.status(400).json({ success: false, error: 'Valid update type is required' });
+      return;
+    }
+
+    if (updateType === 'set') {
+      if (!variant1Price && !variant2Price && !variant1CompareAtPrice && !variant2CompareAtPrice) {
+        res.status(400).json({ success: false, error: 'At least one price field is required' });
+        return;
+      }
+    } else {
+      if (!priceChangePercent && !priceChangeAmount) {
+        res.status(400).json({ success: false, error: 'Percentage or amount change is required' });
+        return;
+      }
+    }
+
+    const updates: any = {
+      updateType,
+    };
+
+    if (updateType === 'set') {
+      if (variant1Price) updates.variant1Price = variant1Price;
+      if (variant1CompareAtPrice !== undefined) updates.variant1CompareAtPrice = variant1CompareAtPrice || null;
+      if (variant2Price) updates.variant2Price = variant2Price;
+      if (variant2CompareAtPrice !== undefined) updates.variant2CompareAtPrice = variant2CompareAtPrice || null;
+    } else {
+      if (priceChangePercent) updates.priceChangePercent = parseFloat(priceChangePercent);
+      if (priceChangeAmount) updates.priceChangeAmount = parseFloat(priceChangeAmount);
+    }
+
+    const results = await shopifyService.bulkUpdateProductPrices(productIds, updates);
+
+    const successCount = results.filter(r => r.success).length;
+    const failureCount = results.filter(r => !r.success).length;
+
+    res.json({
+      success: true,
+      results,
+      summary: {
+        total: productIds.length,
+        successful: successCount,
+        failed: failureCount,
+      },
+    });
+  } catch (error) {
+    console.error('Error bulk updating prices:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Failed to update prices';
+    res.status(500).json({ success: false, error: errorMessage });
   }
 });
 

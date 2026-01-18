@@ -20,6 +20,7 @@ interface Product {
     id: number;
     title: string;
     price: string;
+    compareAtPrice?: string | null;
     sku: string;
     inventoryQuantity: number;
     weight: number;
@@ -47,6 +48,17 @@ export function AdminDashboard() {
   const [productSearch, setProductSearch] = useState('');
   const [productStatusFilter, setProductStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [selectedProducts, setSelectedProducts] = useState<Set<number>>(new Set());
+  
+  // Bulk price update modal
+  const [showPriceUpdateModal, setShowPriceUpdateModal] = useState(false);
+  const [isUpdatingPrices, setIsUpdatingPrices] = useState(false);
+  const [priceUpdateType, setPriceUpdateType] = useState<'set' | 'increase' | 'decrease'>('set');
+  const [variant1Price, setVariant1Price] = useState('');
+  const [variant2Price, setVariant2Price] = useState('');
+  const [variant1CompareAtPrice, setVariant1CompareAtPrice] = useState('');
+  const [variant2CompareAtPrice, setVariant2CompareAtPrice] = useState('');
+  const [priceChangePercent, setPriceChangePercent] = useState('');
+  const [priceChangeAmount, setPriceChangeAmount] = useState('');
 
   // Determine current view from URL or default to 'orders'
   const currentView: ViewType = (view as ViewType) || 'orders';
@@ -154,6 +166,77 @@ export function AdminDashboard() {
   };
 
   const allSelected = filteredProducts.length > 0 && selectedProducts.size === filteredProducts.length;
+
+  const handleBulkPriceUpdate = () => {
+    setShowPriceUpdateModal(true);
+  };
+
+  const applyPriceUpdate = async () => {
+    if (selectedProducts.size === 0) return;
+
+    setIsUpdatingPrices(true);
+
+    try {
+      const productIds = Array.from(selectedProducts);
+
+      const updateData: any = {
+        productIds,
+        updateType: priceUpdateType,
+      };
+
+      if (priceUpdateType === 'set') {
+        if (variant1Price) updateData.variant1Price = variant1Price;
+        if (variant1CompareAtPrice !== '') {
+          updateData.variant1CompareAtPrice = variant1CompareAtPrice || null;
+        }
+        if (variant2Price) updateData.variant2Price = variant2Price;
+        if (variant2CompareAtPrice !== '') {
+          updateData.variant2CompareAtPrice = variant2CompareAtPrice || null;
+        }
+      } else {
+        if (priceChangePercent) updateData.priceChangePercent = priceChangePercent;
+        if (priceChangeAmount) updateData.priceChangeAmount = priceChangeAmount;
+      }
+
+      const result = await api.bulkUpdateProductPrices(updateData);
+
+      if (result.success && result.results && result.summary) {
+        const { successful, failed, total } = result.summary;
+        
+        if (successful === total) {
+          alert(`✅ Successfully updated prices for ${successful} product${successful !== 1 ? 's' : ''}!`);
+        } else {
+          alert(
+            `⚠️ Updated ${successful} product${successful !== 1 ? 's' : ''}, ${failed} failed.\n\n` +
+            `Failed products:\n${result.results
+              .filter(r => !r.success)
+              .map(r => `Product ID ${r.productId}: ${r.error}`)
+              .join('\n')}`
+          );
+        }
+
+        // Reload products to reflect changes
+        await loadProducts();
+        
+        // Reset and close modal
+        setShowPriceUpdateModal(false);
+        setVariant1Price('');
+        setVariant2Price('');
+        setVariant1CompareAtPrice('');
+        setVariant2CompareAtPrice('');
+        setPriceChangePercent('');
+        setPriceChangeAmount('');
+        setSelectedProducts(new Set());
+      } else {
+        alert(result.error || 'Failed to update prices');
+      }
+    } catch (error) {
+      console.error('Error updating prices:', error);
+      alert('An error occurred while updating prices. Please try again.');
+    } finally {
+      setIsUpdatingPrices(false);
+    }
+  };
 
   const handleLogout = () => {
     api.logout();
@@ -564,6 +647,16 @@ export function AdminDashboard() {
                       <div className="selection-info">
                         <span>{selectedProducts.size} selected</span>
                         <button 
+                          className="bulk-action-btn"
+                          onClick={handleBulkPriceUpdate}
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <line x1="12" y1="1" x2="12" y2="23"/>
+                            <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+                          </svg>
+                          Update Prices
+                        </button>
+                        <button 
                           className="clear-selection-btn"
                           onClick={() => setSelectedProducts(new Set())}
                         >
@@ -710,6 +803,193 @@ export function AdminDashboard() {
           )}
         </main>
       </div>
+
+      {/* Bulk Price Update Modal */}
+      {showPriceUpdateModal && (
+        <div className="modal-overlay" onClick={() => setShowPriceUpdateModal(false)}>
+          <div className="modal-content price-update-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Update Prices</h2>
+              <button className="modal-close" onClick={() => setShowPriceUpdateModal(false)}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18"/>
+                  <line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+              </button>
+            </div>
+
+            <div className="modal-body">
+              <div className="price-update-tabs">
+                <button 
+                  className={`tab-btn ${priceUpdateType === 'set' ? 'active' : ''}`}
+                  onClick={() => setPriceUpdateType('set')}
+                >
+                  Set Price
+                </button>
+                <button 
+                  className={`tab-btn ${priceUpdateType === 'increase' ? 'active' : ''}`}
+                  onClick={() => setPriceUpdateType('increase')}
+                >
+                  + Increase
+                </button>
+                <button 
+                  className={`tab-btn ${priceUpdateType === 'decrease' ? 'active' : ''}`}
+                  onClick={() => setPriceUpdateType('decrease')}
+                >
+                  − Decrease
+                </button>
+              </div>
+
+              {priceUpdateType === 'set' && (
+                <div className="price-inputs">
+                  <div className="variant-price-section">
+                    <label className="variant-section-label">{products[0]?.variants[0]?.title || 'Variant 1'}</label>
+                    <div className="variant-inputs-row">
+                      <div className="input-group compact">
+                        <label>Price</label>
+                        <div className="input-with-prefix">
+                          <span className="input-prefix">₹</span>
+                          <input
+                            type="number"
+                            placeholder="New price"
+                            value={variant1Price}
+                            onChange={(e) => setVariant1Price(e.target.value)}
+                            step="0.01"
+                            min="0"
+                          />
+                        </div>
+                      </div>
+                      <div className="input-group compact">
+                        <label>Compare at</label>
+                        <div className="input-with-prefix">
+                          <span className="input-prefix">₹</span>
+                          <input
+                            type="number"
+                            placeholder="Compare at"
+                            value={variant1CompareAtPrice}
+                            onChange={(e) => setVariant1CompareAtPrice(e.target.value)}
+                            step="0.01"
+                            min="0"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="variant-price-section">
+                    <label className="variant-section-label">{products[0]?.variants[1]?.title || 'Variant 2'}</label>
+                    <div className="variant-inputs-row">
+                      <div className="input-group compact">
+                        <label>Price</label>
+                        <div className="input-with-prefix">
+                          <span className="input-prefix">₹</span>
+                          <input
+                            type="number"
+                            placeholder="New price"
+                            value={variant2Price}
+                            onChange={(e) => setVariant2Price(e.target.value)}
+                            step="0.01"
+                            min="0"
+                          />
+                        </div>
+                      </div>
+                      <div className="input-group compact">
+                        <label>Compare at</label>
+                        <div className="input-with-prefix">
+                          <span className="input-prefix">₹</span>
+                          <input
+                            type="number"
+                            placeholder="Compare at"
+                            value={variant2CompareAtPrice}
+                            onChange={(e) => setVariant2CompareAtPrice(e.target.value)}
+                            step="0.01"
+                            min="0"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <p className="input-hint">Leave blank to skip • Applies to {selectedProducts.size} product{selectedProducts.size !== 1 ? 's' : ''}</p>
+                </div>
+              )}
+
+              {(priceUpdateType === 'increase' || priceUpdateType === 'decrease') && (
+                <div className="price-inputs">
+                  <div className="input-group">
+                    <label>Percentage</label>
+                    <div className="input-with-suffix">
+                      <input
+                        type="number"
+                        placeholder="10"
+                        value={priceChangePercent}
+                        onChange={(e) => {
+                          setPriceChangePercent(e.target.value);
+                          setPriceChangeAmount('');
+                        }}
+                        step="0.1"
+                        min="0"
+                        max="100"
+                      />
+                      <span className="input-suffix">%</span>
+                    </div>
+                  </div>
+
+                  <div className="divider">OR</div>
+
+                  <div className="input-group">
+                    <label>Fixed Amount</label>
+                    <div className="input-with-prefix">
+                      <span className="input-prefix">₹</span>
+                      <input
+                        type="number"
+                        placeholder="100"
+                        value={priceChangeAmount}
+                        onChange={(e) => {
+                          setPriceChangeAmount(e.target.value);
+                          setPriceChangePercent('');
+                        }}
+                        step="0.01"
+                        min="0"
+                      />
+                    </div>
+                  </div>
+
+                  <p className="input-hint">Applies to both price & compare at price • {selectedProducts.size} product{selectedProducts.size !== 1 ? 's' : ''} selected</p>
+                </div>
+              )}
+            </div>
+
+            <div className="modal-footer">
+              <button 
+                className="modal-btn cancel"
+                onClick={() => setShowPriceUpdateModal(false)}
+              >
+                Cancel
+              </button>
+              <button 
+                className="modal-btn confirm"
+                onClick={applyPriceUpdate}
+                disabled={
+                  isUpdatingPrices ||
+                  (priceUpdateType === 'set' 
+                    ? !variant1Price && !variant2Price && !variant1CompareAtPrice && !variant2CompareAtPrice
+                    : !priceChangePercent && !priceChangeAmount)
+                }
+              >
+                {isUpdatingPrices ? (
+                  <>
+                    <div className="btn-loader"></div>
+                    Updating...
+                  </>
+                ) : (
+                  'Update Prices'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

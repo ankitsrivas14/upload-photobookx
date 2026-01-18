@@ -227,6 +227,27 @@ class ApiService {
     return this.request(`/api/admin/magic-links/shopify/products/${productId}`);
   }
 
+  async bulkUpdateProductPrices(data: {
+    productIds: number[];
+    variant1Price?: string;
+    variant1CompareAtPrice?: string | null;
+    variant2Price?: string;
+    variant2CompareAtPrice?: string | null;
+    priceChangePercent?: string;
+    priceChangeAmount?: string;
+    updateType: 'set' | 'increase' | 'decrease';
+  }): Promise<{
+    success: boolean;
+    results?: Array<{ productId: number; success: boolean; error?: string }>;
+    summary?: { total: number; successful: number; failed: number };
+    error?: string;
+  }> {
+    return this.request('/api/admin/magic-links/shopify/products/bulk-update-prices', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
   // Upload (public - no auth needed)
   async validateUploadToken(token: string): Promise<UploadInfo> {
     return this.request<UploadInfo>(`/api/upload/${token}`);

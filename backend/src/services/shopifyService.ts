@@ -22,16 +22,23 @@ class ShopifyService {
     return `https://${this.storeDomain}/admin/api/${this.apiVersion}`;
   }
 
-  private async makeRequest<T>(endpoint: string): Promise<T> {
+  private async makeRequest<T>(endpoint: string, options?: { method?: string; body?: any }): Promise<T> {
     const url = `${this.getBaseUrl()}${endpoint}`;
+    const method = options?.method || 'GET';
     
-    const response = await fetch(url, {
-      method: 'GET',
+    const fetchOptions: RequestInit = {
+      method,
       headers: {
         'X-Shopify-Access-Token': this.accessToken,
         'Content-Type': 'application/json',
       },
-    });
+    };
+
+    if (options?.body && (method === 'PUT' || method === 'POST')) {
+      fetchOptions.body = JSON.stringify(options.body);
+    }
+
+    const response = await fetch(url, fetchOptions);
 
     if (!response.ok) {
       const error = await response.text();
@@ -171,6 +178,197 @@ class ShopifyService {
       console.error('Error fetching product:', error);
       throw error;
     }
+  }
+
+  /**
+   * Update a product's variants with new prices and compare_at_prices
+   */
+  async updateProductVariants(productId: string, variantUpdates: Array<{
+    variantId: string;
+    price?: string;
+    compareAtPrice?: string | null;
+  }>): Promise<any> {
+    try {
+      // First get the product to get current variant data
+      const product = await this.getProduct(productId);
+      
+      if (!product) {
+        throw new Error('Product not found');
+      }
+
+      // Map updates by variant ID for quick lookup
+      const updatesMap = new Map(
+        variantUpdates.map(update => [update.variantId, update])
+      );
+
+      // Update variants with new prices
+      const updatedVariants = product.variants.map((variant: any) => {
+        const update = updatesMap.get(String(variant.id));
+        if (!update) {
+          return variant; // Keep unchanged variants as-is
+        }
+
+        const updatedVariant: any = {
+          id: variant.id,
+          price: update.price !== undefined ? update.price : variant.price,
+        };
+
+        // Only include compare_at_price if explicitly set (including null to remove it)
+        if (update.compareAtPrice !== undefined) {
+          updatedVariant.compare_at_price = update.compareAtPrice;
+        } else {
+          // Keep existing compare_at_price if not specified
+          if (variant.compare_at_price) {
+            updatedVariant.compare_at_price = variant.compare_at_price;
+          }
+        }
+
+        return updatedVariant;
+      });
+
+      // Update the product
+      const updateData = {
+        product: {
+          id: productId,
+          variants: updatedVariants,
+        },
+      };
+
+      const result = await this.makeRequest<{ product: any }>(
+        `/products/${productId}.json`,
+        {
+          method: 'PUT',
+          body: updateData,
+        }
+      );
+
+      return result.product;
+    } catch (error) {
+      console.error('Error updating product variants:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Bulk update prices for multiple products
+   */
+  async bulkUpdateProductPrices(
+    productIds: number[],
+    updates: {
+      variant1Price?: string;
+      variant1CompareAtPrice?: string | null;
+      variant2Price?: string;
+      variant2CompareAtPrice?: string | null;
+      priceChangePercent?: number;
+      priceChangeAmount?: number;
+      updateType: 'set' | 'increase' | 'decrease';
+    }
+  ): Promise<Array<{ productId: number; success: boolean; error?: string }>> {
+    const results: Array<{ productId: number; success: boolean; error?: string }> = [];
+
+    for (const productId of productIds) {
+      try {
+        const product = await this.getProduct(String(productId));
+        
+        if (!product || !product.variants || product.variants.length === 0) {
+          results.push({
+            productId,
+            success: false,
+            error: 'Product not found or has no variants',
+          });
+          continue;
+        }
+
+        const variantUpdates: Array<{
+          variantId: string;
+          price?: string;
+          compareAtPrice?: string | null;
+        }> = [];
+
+        if (updates.updateType === 'set') {
+          // Set specific prices
+          if (product.variants[0] && updates.variant1Price) {
+            variantUpdates.push({
+              variantId: String(product.variants[0].id),
+              price: updates.variant1Price,
+              compareAtPrice: updates.variant1CompareAtPrice,
+            });
+          }
+
+          if (product.variants[1] && updates.variant2Price) {
+            variantUpdates.push({
+              variantId: String(product.variants[1].id),
+              price: updates.variant2Price,
+              compareAtPrice: updates.variant2CompareAtPrice,
+            });
+          }
+        } else {
+          // Increase or decrease all variants
+          const isIncrease = updates.updateType === 'increase';
+
+          for (const variant of product.variants) {
+            let newPrice: number = parseFloat(variant.price || '0');
+            let newCompareAtPrice: number | null = variant.compare_at_price 
+              ? parseFloat(variant.compare_at_price) 
+              : null;
+
+            if (updates.priceChangePercent) {
+              const percentChange = updates.priceChangePercent / 100;
+              if (isIncrease) {
+                newPrice = newPrice * (1 + percentChange);
+                if (newCompareAtPrice !== null) {
+                  newCompareAtPrice = newCompareAtPrice * (1 + percentChange);
+                }
+              } else {
+                newPrice = newPrice * (1 - percentChange);
+                if (newCompareAtPrice !== null) {
+                  newCompareAtPrice = newCompareAtPrice * (1 - percentChange);
+                }
+              }
+            } else if (updates.priceChangeAmount) {
+              const amount = updates.priceChangeAmount;
+              if (isIncrease) {
+                newPrice = newPrice + amount;
+                if (newCompareAtPrice !== null) {
+                  newCompareAtPrice = newCompareAtPrice + amount;
+                }
+              } else {
+                newPrice = Math.max(0, newPrice - amount);
+                if (newCompareAtPrice !== null) {
+                  newCompareAtPrice = Math.max(0, newCompareAtPrice - amount);
+                }
+              }
+            }
+
+            variantUpdates.push({
+              variantId: String(variant.id),
+              price: newPrice.toFixed(2),
+              compareAtPrice: newCompareAtPrice !== null ? newCompareAtPrice.toFixed(2) : null,
+            });
+          }
+        }
+
+        if (variantUpdates.length > 0) {
+          await this.updateProductVariants(String(productId), variantUpdates);
+          results.push({ productId, success: true });
+        } else {
+          results.push({
+            productId,
+            success: false,
+            error: 'No updates to apply',
+          });
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        results.push({
+          productId,
+          success: false,
+          error: errorMessage,
+        });
+      }
+    }
+
+    return results;
   }
 }
 
