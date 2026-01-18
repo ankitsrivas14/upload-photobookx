@@ -28,7 +28,7 @@ function App() {
         {/* Admin routes */}
         <Route path="/admin" element={<AdminLogin />} />
         <Route 
-          path="/admin/dashboard" 
+          path="/admin/:view" 
           element={
             <ProtectedRoute>
               <AdminDashboard />

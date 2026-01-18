@@ -222,4 +222,83 @@ router.get('/shopify/orders/:orderNumber', requireAdmin, async (req: Authenticat
   }
 });
 
+/**
+ * GET /api/admin/magic-links/shopify/products
+ * Get all products from Shopify
+ */
+router.get('/shopify/products', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const products = await shopifyService.getProducts(100);
+
+    res.json({
+      success: true,
+      products: products.map(product => ({
+        id: product.id,
+        title: product.title,
+        vendor: product.vendor,
+        productType: product.product_type,
+        status: product.status,
+        createdAt: product.created_at,
+        updatedAt: product.updated_at,
+        variants: product.variants?.map((variant: any) => ({
+          id: variant.id,
+          title: variant.title,
+          price: variant.price,
+          sku: variant.sku,
+          inventoryQuantity: variant.inventory_quantity,
+          weight: variant.weight,
+          weightUnit: variant.weight_unit,
+        })) || [],
+        image: product.images?.[0]?.src || product.image?.src || null,
+      })),
+    });
+  } catch (error) {
+    console.error('Error fetching products:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch products' });
+  }
+});
+
+/**
+ * GET /api/admin/magic-links/shopify/products/:productId
+ * Get a single product by ID
+ */
+router.get('/shopify/products/:productId', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const productId = req.params.productId;
+    const product = await shopifyService.getProduct(productId);
+
+    if (!product) {
+      res.status(404).json({ success: false, error: 'Product not found' });
+      return;
+    }
+
+    res.json({
+      success: true,
+      product: {
+        id: product.id,
+        title: product.title,
+        vendor: product.vendor,
+        productType: product.product_type,
+        status: product.status,
+        description: product.body_html,
+        createdAt: product.created_at,
+        updatedAt: product.updated_at,
+        variants: product.variants?.map((variant: any) => ({
+          id: variant.id,
+          title: variant.title,
+          price: variant.price,
+          sku: variant.sku,
+          inventoryQuantity: variant.inventory_quantity,
+          weight: variant.weight,
+          weightUnit: variant.weight_unit,
+        })) || [],
+        images: product.images?.map((img: any) => img.src) || [],
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching product:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch product' });
+  }
+});
+
 export default router;

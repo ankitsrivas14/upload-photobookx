@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams, Link } from 'react-router-dom';
 import { api } from '../services/api';
 import type { AdminUser, MagicLinkInfo, ShopifyOrder } from '../services/api';
 import './AdminDashboard.css';
@@ -8,18 +8,65 @@ interface OrderWithLink extends ShopifyOrder {
   magicLink?: MagicLinkInfo;
 }
 
+interface Product {
+  id: number;
+  title: string;
+  vendor: string;
+  productType: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+  variants: Array<{
+    id: number;
+    title: string;
+    price: string;
+    sku: string;
+    inventoryQuantity: number;
+    weight: number;
+    weightUnit: string;
+  }>;
+  image: string | null;
+}
+
+type ViewType = 'orders' | 'magic-links' | 'products' | 'settings';
+
 export function AdminDashboard() {
   const navigate = useNavigate();
+  const { view } = useParams<{ view?: string }>();
   const [user, setUser] = useState<AdminUser | null>(null);
   const [orders, setOrders] = useState<OrderWithLink[]>([]);
   const [links, setLinks] = useState<MagicLinkInfo[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingProducts, setIsLoadingProducts] = useState(false);
   const [creatingFor, setCreatingFor] = useState<string | null>(null);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  
+  // Product filters
+  const [productSearch, setProductSearch] = useState('');
+  const [productStatusFilter, setProductStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [selectedProducts, setSelectedProducts] = useState<Set<number>>(new Set());
+
+  // Determine current view from URL or default to 'orders'
+  const currentView: ViewType = (view as ViewType) || 'orders';
 
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    if (currentView === 'products' && products.length === 0) {
+      loadProducts();
+    }
+  }, [currentView]);
+
+  // Redirect to orders if no view is specified
+  useEffect(() => {
+    if (!view) {
+      navigate('/admin/orders', { replace: true });
+    }
+  }, [view, navigate]);
 
   const loadData = async () => {
     try {
@@ -57,6 +104,57 @@ export function AdminDashboard() {
     }
   };
 
+  const loadProducts = async () => {
+    setIsLoadingProducts(true);
+    try {
+      const response = await api.getProducts();
+      if (response.success && response.products) {
+        setProducts(response.products);
+      }
+    } catch (err) {
+      console.error('Failed to load products:', err);
+    } finally {
+      setIsLoadingProducts(false);
+    }
+  };
+
+  // Filter products
+  const filteredProducts = products.filter(product => {
+    const matchesSearch = product.title.toLowerCase().includes(productSearch.toLowerCase());
+    
+    let matchesStatus = true;
+    if (productStatusFilter === 'active') {
+      matchesStatus = product.status === 'active';
+    } else if (productStatusFilter === 'inactive') {
+      // Shopify uses 'draft' or other statuses for inactive products
+      matchesStatus = product.status !== 'active';
+    }
+    
+    return matchesSearch && matchesStatus;
+  });
+
+  const toggleProductSelection = (productId: number) => {
+    setSelectedProducts(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(productId)) {
+        newSet.delete(productId);
+      } else {
+        newSet.add(productId);
+      }
+      return newSet;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedProducts.size === filteredProducts.length && filteredProducts.length > 0) {
+      setSelectedProducts(new Set());
+    } else {
+      setSelectedProducts(new Set(filteredProducts.map(p => p.id)));
+    }
+  };
+
+  const allSelected = filteredProducts.length > 0 && selectedProducts.size === filteredProducts.length;
+
   const handleLogout = () => {
     api.logout();
     navigate('/admin');
@@ -68,20 +166,17 @@ export function AdminDashboard() {
     try {
       const response = await api.createMagicLink({
         orderNumber: order.name,
-        customerName: order.name, // Use order name as customer name
-        // maxUploads is auto-detected from variant (12, 15, 20, or 25)
+        customerName: order.name,
       });
 
       if (response.success && response.magicLink) {
         const newLink = response.magicLink;
         setLinks([newLink, ...links]);
         
-        // Update the order with the new link
         setOrders(orders.map(o => 
           o.id === order.id ? { ...o, magicLink: newLink } : o
         ));
         
-        // Auto-copy to clipboard
         copyToClipboard(newLink.uploadUrl, newLink.token);
       }
     } catch (err) {
@@ -105,103 +200,516 @@ export function AdminDashboard() {
     );
   }
 
+  const stats = [
+    { 
+      label: 'Total Orders', 
+      value: orders.length, 
+      icon: '📦',
+      color: '#00B8D4'
+    },
+    { 
+      label: 'Active Links', 
+      value: links.filter(l => l.isActive).length, 
+      icon: '🔗',
+      color: '#7c3aed'
+    },
+    { 
+      label: 'Total Uploads', 
+      value: links.reduce((sum, l) => sum + l.currentUploads, 0), 
+      icon: '📸',
+      color: '#f59e0b'
+    },
+    { 
+      label: 'Completed', 
+      value: orders.filter(o => o.magicLink && o.magicLink.currentUploads >= o.magicLink.maxUploads).length, 
+      icon: '✅',
+      color: '#10b981'
+    },
+  ];
+
   return (
     <div className="admin-dashboard">
-      <header className="dashboard-header">
-        <div className="header-left">
+      {/* Sidebar */}
+      <aside className={`sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
+        <div className="sidebar-header">
           <img 
             src="https://photobookx.com/cdn/shop/files/Screenshot_2025-05-18_at_9.30.14_PM-removebg-preview.png?v=1747584052" 
             alt="PhotoBookX" 
-            className="header-logo"
+            className="sidebar-logo"
           />
-          <span className="header-title">Admin Portal</span>
+          {!sidebarCollapsed && <span className="sidebar-title">Admin</span>}
         </div>
-        <div className="header-right">
-          <span className="user-name">{user?.name}</span>
-          <button onClick={handleLogout} className="logout-btn">Logout</button>
-        </div>
-      </header>
 
-      <main className="dashboard-main">
-        <h2 className="page-title">Orders with Photo Uploads</h2>
-        
-        <div className="orders-table">
-          <table>
-            <thead>
-              <tr>
-                <th>Order</th>
-                <th>Items</th>
-                <th>Photos</th>
-                <th>Date</th>
-                <th>Magic Link</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {orders.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="empty-state">
-                    No orders found
-                  </td>
-                </tr>
+        <nav className="sidebar-nav">
+          <Link 
+            to="/admin/orders"
+            className={`nav-item ${currentView === 'orders' ? 'active' : ''}`}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M20 7h-9"/>
+              <path d="M14 17H5"/>
+              <circle cx="17" cy="17" r="3"/>
+              <circle cx="7" cy="7" r="3"/>
+            </svg>
+            {!sidebarCollapsed && <span>Orders & Links</span>}
+          </Link>
+
+          <Link 
+            to="/admin/magic-links"
+            className={`nav-item ${currentView === 'magic-links' ? 'active' : ''}`}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+            </svg>
+            {!sidebarCollapsed && <span>Magic Links</span>}
+          </Link>
+
+          <Link 
+            to="/admin/products"
+            className={`nav-item ${currentView === 'products' ? 'active' : ''}`}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="3" y="3" width="18" height="18" rx="2"/>
+              <path d="M3 9h18"/>
+              <path d="M9 21V9"/>
+            </svg>
+            {!sidebarCollapsed && <span>Products</span>}
+          </Link>
+
+          <Link 
+            to="/admin/settings"
+            className={`nav-item ${currentView === 'settings' ? 'active' : ''}`}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M12 1v6m0 6v6m8.66-15l-5.2 3m-2.92 5.2l-5.2 3M23 12h-6m-6 0H1m20.66 7l-5.2-3m-2.92-5.2l-5.2-3"/>
+            </svg>
+            {!sidebarCollapsed && <span>Settings</span>}
+          </Link>
+        </nav>
+
+        <button 
+          className="sidebar-toggle"
+          onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <polyline points={sidebarCollapsed ? "9 18 15 12 9 6" : "15 18 9 12 15 6"}/>
+          </svg>
+        </button>
+      </aside>
+
+      {/* Main Content */}
+      <div className="main-wrapper">
+        <header className="dashboard-header">
+          <div className="header-breadcrumb">
+            <span className="breadcrumb-item active">
+              {currentView === 'orders' && 'Orders & Links'}
+              {currentView === 'magic-links' && 'Magic Links'}
+              {currentView === 'products' && 'Products'}
+              {currentView === 'settings' && 'Settings'}
+            </span>
+          </div>
+          <div className="header-right">
+            <div className="user-menu">
+              <div className="user-avatar">{user?.name?.charAt(0) || 'A'}</div>
+              <span className="user-name">{user?.name}</span>
+            </div>
+            <button onClick={handleLogout} className="logout-btn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                <polyline points="16 17 21 12 16 7"/>
+                <line x1="21" y1="12" x2="9" y2="12"/>
+              </svg>
+              Logout
+            </button>
+          </div>
+        </header>
+
+        <main className="dashboard-main">
+          {/* Stats Cards */}
+          {currentView === 'orders' && (
+            <>
+              <div className="stats-grid">
+                {stats.map((stat, idx) => (
+                  <div key={idx} className="stat-card">
+                    <div className="stat-icon" style={{ backgroundColor: `${stat.color}15`, color: stat.color }}>
+                      {stat.icon}
+                    </div>
+                    <div className="stat-content">
+                      <div className="stat-value">{stat.value}</div>
+                      <div className="stat-label">{stat.label}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="content-section">
+                <div className="section-header">
+                  <h2>Recent Orders</h2>
+                  <p>Orders that require photo uploads from customers</p>
+                </div>
+
+                <div className="table-card">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Order</th>
+                        <th>Items</th>
+                        <th>Photos</th>
+                        <th>Date</th>
+                        <th>Magic Link</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {orders.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="empty-state">
+                            <div className="empty-icon">📦</div>
+                            <div className="empty-text">No orders found</div>
+                          </td>
+                        </tr>
+                      ) : (
+                        orders.map((order) => (
+                          <tr key={order.id}>
+                            <td className="order-cell">
+                              <span className="order-number">{order.name}</span>
+                            </td>
+                            <td>
+                              <div className="items-list">
+                                {order.lineItems?.slice(0, 1).map((item, i) => (
+                                  <span key={i} className="item-tag">
+                                    {item.title} × {item.quantity}
+                                  </span>
+                                ))}
+                                {(order.lineItems?.length || 0) > 1 && (
+                                  <span className="more-items">+{(order.lineItems?.length || 0) - 1}</span>
+                                )}
+                              </div>
+                            </td>
+                            <td>
+                              <span className="photo-badge">{order.maxUploads}</span>
+                            </td>
+                            <td className="date-cell">{new Date(order.createdAt).toLocaleDateString()}</td>
+                            <td>
+                              {order.magicLink ? (
+                                <div className="link-cell">
+                                  <span className="link-url">{order.magicLink.uploadUrl}</span>
+                                  <button 
+                                    className={`icon-btn copy ${copiedToken === order.magicLink.token ? 'copied' : ''}`}
+                                    onClick={() => copyToClipboard(order.magicLink!.uploadUrl, order.magicLink!.token)}
+                                    title="Copy link"
+                                  >
+                                    {copiedToken === order.magicLink.token ? (
+                                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <polyline points="20 6 9 17 4 12"/>
+                                      </svg>
+                                    ) : (
+                                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                                      </svg>
+                                    )}
+                                  </button>
+                                </div>
+                              ) : (
+                                <span className="no-link">—</span>
+                              )}
+                            </td>
+                            <td className="status-cell">
+                              {order.magicLink ? (
+                                <div className="status-badge">
+                                  <div className="progress-ring">
+                                    <span>{order.magicLink.currentUploads}/{order.magicLink.maxUploads}</span>
+                                  </div>
+                                </div>
+                              ) : (
+                                <button 
+                                  className="action-btn primary"
+                                  onClick={() => handleCreateLink(order)}
+                                  disabled={creatingFor === order.name}
+                                >
+                                  {creatingFor === order.name ? 'Creating...' : 'Create Link'}
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          )}
+
+          {currentView === 'magic-links' && (
+            <div className="content-section">
+              <div className="section-header">
+                <h2>All Magic Links</h2>
+                <p>Manage all generated upload links</p>
+              </div>
+
+              <div className="table-card">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Order</th>
+                      <th>Customer</th>
+                      <th>Uploads</th>
+                      <th>Created</th>
+                      <th>Expires</th>
+                      <th>Link</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {links.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="empty-state">
+                          <div className="empty-icon">🔗</div>
+                          <div className="empty-text">No magic links created yet</div>
+                        </td>
+                      </tr>
+                    ) : (
+                      links.map((link) => (
+                        <tr key={link.id}>
+                          <td className="order-cell">
+                            <span className="order-number">{link.orderNumber}</span>
+                          </td>
+                          <td>{link.customerName}</td>
+                          <td>
+                            <div className="progress-inline">
+                              <span className="progress-text">{link.currentUploads}/{link.maxUploads}</span>
+                            </div>
+                          </td>
+                          <td className="date-cell">{new Date(link.createdAt).toLocaleDateString()}</td>
+                          <td className="date-cell">{new Date(link.expiresAt).toLocaleDateString()}</td>
+                          <td>
+                            <div className="link-cell">
+                              <span className="link-url">{link.uploadUrl}</span>
+                              <button 
+                                className={`icon-btn copy ${copiedToken === link.token ? 'copied' : ''}`}
+                                onClick={() => copyToClipboard(link.uploadUrl, link.token)}
+                              >
+                                {copiedToken === link.token ? (
+                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <polyline points="20 6 9 17 4 12"/>
+                                  </svg>
+                                ) : (
+                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                                  </svg>
+                                )}
+                              </button>
+                            </div>
+                          </td>
+                          <td>
+                            <span className={`status-dot ${link.isActive ? 'active' : 'inactive'}`}>
+                              {link.isActive ? 'Active' : 'Inactive'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {currentView === 'products' && (
+            <div className="content-section">
+              <div className="section-header">
+                <h2>Products Management</h2>
+                <p>Manage your photobook products and variants</p>
+              </div>
+
+              {isLoadingProducts ? (
+                <div className="loading-section">
+                  <div className="spinner"></div>
+                  <p>Loading products...</p>
+                </div>
               ) : (
-                orders.map((order) => (
-                  <tr key={order.id}>
-                    <td className="order-cell">{order.name}</td>
-                    <td>
-                      <div className="items-list">
-                        {order.lineItems?.slice(0, 2).map((item, i) => (
-                          <span key={i} className="item-tag">
-                            {item.title} × {item.quantity}
-                          </span>
-                        ))}
-                        {(order.lineItems?.length || 0) > 2 && (
-                          <span className="more-items">+{(order.lineItems?.length || 0) - 2} more</span>
-                        )}
-                      </div>
-                    </td>
-                    <td>
-                      <span className="photo-count">{order.maxUploads}</span>
-                    </td>
-                    <td>{new Date(order.createdAt).toLocaleDateString()}</td>
-                    <td>
-                      {order.magicLink ? (
-                        <div className="link-cell">
-                          <span className="link-url">{order.magicLink.uploadUrl}</span>
-                          <button 
-                            className={`copy-btn ${copiedToken === order.magicLink.token ? 'copied' : ''}`}
-                            onClick={() => copyToClipboard(order.magicLink!.uploadUrl, order.magicLink!.token)}
-                            title="Copy link"
-                          >
-                            {copiedToken === order.magicLink.token ? '✓' : '📋'}
-                          </button>
-                        </div>
-                      ) : (
-                        <span className="no-link">—</span>
-                      )}
-                    </td>
-                    <td className="actions-cell">
-                      {order.magicLink ? (
-                        <span className="link-status">
-                          {order.magicLink.currentUploads}/{order.magicLink.maxUploads} uploads
-                        </span>
-                      ) : (
+                <>
+                  <div className="filters-bar">
+                    <div className="filter-search">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <circle cx="11" cy="11" r="8"/>
+                        <path d="m21 21-4.35-4.35"/>
+                      </svg>
+                      <input
+                        type="text"
+                        placeholder="Search products..."
+                        value={productSearch}
+                        onChange={(e) => setProductSearch(e.target.value)}
+                      />
+                    </div>
+
+                    <div className="filter-group">
+                      <label>Status:</label>
+                      <select 
+                        value={productStatusFilter} 
+                        onChange={(e) => setProductStatusFilter(e.target.value as 'all' | 'active' | 'inactive')}
+                      >
+                        <option value="all">All</option>
+                        <option value="active">Active</option>
+                        <option value="inactive">Inactive</option>
+                      </select>
+                    </div>
+
+                    {selectedProducts.size > 0 && (
+                      <div className="selection-info">
+                        <span>{selectedProducts.size} selected</span>
                         <button 
-                          className="action-btn create"
-                          onClick={() => handleCreateLink(order)}
-                          disabled={creatingFor === order.name}
+                          className="clear-selection-btn"
+                          onClick={() => setSelectedProducts(new Set())}
                         >
-                          {creatingFor === order.name ? 'Creating...' : 'Create Magic Link'}
+                          Clear
                         </button>
-                      )}
-                    </td>
-                  </tr>
-                ))
+                      </div>
+                    )}
+
+                    <div className="filter-results">
+                      <span>{filteredProducts.length} product{filteredProducts.length !== 1 ? 's' : ''}</span>
+                    </div>
+                  </div>
+
+                  <div className="table-card">
+                    <table className="data-table products-table compact">
+                      <thead>
+                        <tr>
+                          <th style={{ width: '40px' }}>
+                            <input
+                              type="checkbox"
+                              className="table-checkbox"
+                              checked={allSelected}
+                              onChange={toggleSelectAll}
+                            />
+                          </th>
+                          <th>Product</th>
+                          <th>{products[0]?.variants[0]?.title || 'Variant 1'}</th>
+                          <th>{products[0]?.variants[1]?.title || 'Variant 2'}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredProducts.length === 0 ? (
+                          <tr>
+                            <td colSpan={4} className="empty-state">
+                              <div className="empty-icon">📦</div>
+                              <div className="empty-text">
+                                {productSearch || productStatusFilter !== 'all' 
+                                  ? 'No products match your filters' 
+                                  : 'No products found'}
+                              </div>
+                            </td>
+                          </tr>
+                        ) : (
+                          filteredProducts.map((product) => {
+                            const isSelected = selectedProducts.has(product.id);
+                            return (
+                              <tr key={product.id} className={`product-row ${isSelected ? 'selected' : ''}`}>
+                                <td>
+                                  <input
+                                    type="checkbox"
+                                    className="table-checkbox"
+                                    checked={isSelected}
+                                    onChange={() => toggleProductSelection(product.id)}
+                                  />
+                                </td>
+                                <td>
+                                  <div className="product-cell">
+                                    <span className={`status-indicator ${product.status === 'active' ? 'active' : 'inactive'}`}></span>
+                                    {product.image && (
+                                      <img src={product.image} alt={product.title} className="product-image" />
+                                    )}
+                                    <div className="product-info">
+                                      <span className="product-title">{product.title}</span>
+                                      <span className="product-meta">ID: {product.id}</span>
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="variant-column">
+                                  {product.variants[0] ? (
+                                    <span className="variant-price">₹{product.variants[0].price}</span>
+                                  ) : (
+                                    <span className="no-variant">—</span>
+                                  )}
+                                </td>
+                                <td className="variant-column">
+                                  {product.variants[1] ? (
+                                    <span className="variant-price">₹{product.variants[1].price}</span>
+                                  ) : (
+                                    <span className="no-variant">—</span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
               )}
-            </tbody>
-          </table>
-        </div>
-      </main>
+            </div>
+          )}
+
+          {currentView === 'settings' && (
+            <div className="content-section">
+              <div className="section-header">
+                <h2>Settings</h2>
+                <p>Configure your admin portal preferences</p>
+              </div>
+
+              <div className="settings-grid">
+                <div className="settings-card">
+                  <div className="settings-card-header">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                      <circle cx="8.5" cy="7" r="4"/>
+                      <polyline points="17 11 19 13 23 9"/>
+                    </svg>
+                    <h3>Account</h3>
+                  </div>
+                  <div className="settings-card-body">
+                    <div className="setting-item">
+                      <label>Name</label>
+                      <input type="text" value={user?.name || ''} disabled />
+                    </div>
+                    <div className="setting-item">
+                      <label>Email</label>
+                      <input type="email" value={user?.email || ''} disabled />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="settings-card">
+                  <div className="settings-card-header">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
+                      <circle cx="12" cy="10" r="3"/>
+                    </svg>
+                    <h3>Link Settings</h3>
+                  </div>
+                  <div className="settings-card-body">
+                    <div className="setting-item">
+                      <label>Default Expiry (days)</label>
+                      <input type="number" value="7" disabled />
+                    </div>
+                    <div className="setting-item">
+                      <label>Max File Size (MB)</label>
+                      <input type="number" value="30" disabled />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </main>
+      </div>
     </div>
   );
 }

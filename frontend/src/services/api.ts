@@ -201,6 +201,32 @@ class ApiService {
     return this.request(`/api/admin/magic-links/shopify/orders/${encodeURIComponent(orderNumber)}`);
   }
 
+  async getProducts(): Promise<{ success: boolean; products?: Array<{
+    id: number;
+    title: string;
+    vendor: string;
+    productType: string;
+    status: string;
+    createdAt: string;
+    updatedAt: string;
+    variants: Array<{
+      id: number;
+      title: string;
+      price: string;
+      sku: string;
+      inventoryQuantity: number;
+      weight: number;
+      weightUnit: string;
+    }>;
+    image: string | null;
+  }>; error?: string }> {
+    return this.request('/api/admin/magic-links/shopify/products');
+  }
+
+  async getProduct(productId: string): Promise<{ success: boolean; product?: any; error?: string }> {
+    return this.request(`/api/admin/magic-links/shopify/products/${productId}`);
+  }
+
   // Upload (public - no auth needed)
   async validateUploadToken(token: string): Promise<UploadInfo> {
     return this.request<UploadInfo>(`/api/upload/${token}`);

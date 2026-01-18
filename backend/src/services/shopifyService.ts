@@ -140,6 +140,38 @@ class ShopifyService {
   async getRecentOrders(limit: number = 50): Promise<ShopifyOrder[]> {
     return this.getOrdersWithPrintedPhotos(limit);
   }
+
+  /**
+   * Get all products with their variants
+   */
+  async getProducts(limit: number = 50): Promise<any[]> {
+    try {
+      const data = await this.makeRequest<{ products: any[] }>(
+        `/products.json?limit=${limit}`
+      );
+      
+      return data.products || [];
+    } catch (error) {
+      console.error('Error fetching products:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get a single product by ID with its variants
+   */
+  async getProduct(productId: string): Promise<any | null> {
+    try {
+      const data = await this.makeRequest<{ product: any }>(
+        `/products/${productId}.json`
+      );
+      
+      return data.product || null;
+    } catch (error) {
+      console.error('Error fetching product:', error);
+      throw error;
+    }
+  }
 }
 
 export default new ShopifyService();

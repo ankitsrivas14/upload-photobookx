@@ -34,7 +34,7 @@ export function AdminLogin() {
         : await api.register(email, password, name);
 
       if (response.success) {
-        navigate('/admin/dashboard');
+        navigate('/admin/orders');
       } else {
         setError(response.error || 'Authentication failed');
       }
