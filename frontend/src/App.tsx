@@ -1,6 +1,8 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AdminLogin } from './pages/AdminLogin';
 import { AdminDashboard } from './pages/AdminDashboard';
+import { ExpensesPage } from './pages/ExpensesPage';
+import { MetaAdsPage } from './pages/MetaAdsPage';
 import { UploadPage } from './pages/UploadPage';
 import { api } from './services/api';
 
@@ -32,6 +34,14 @@ function App() {
           element={
             <ProtectedRoute>
               <AdminDashboard />
+            </ProtectedRoute>
+          } 
+        />
+        <Route 
+          path="/admin/expenses/*" 
+          element={
+            <ProtectedRoute>
+              <ExpensesPage />
             </ProtectedRoute>
           } 
         />
