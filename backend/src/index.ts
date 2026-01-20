@@ -5,6 +5,7 @@ import config from './config';
 import adminAuthRoutes from './routes/adminAuth';
 import magicLinksRoutes from './routes/magicLinks';
 import uploadRoutes from './routes/upload';
+import expensesRoutes from './routes/expenses';
 
 const app = express();
 
@@ -35,6 +36,7 @@ app.use(express.json());
 // Routes
 app.use('/api/admin/auth', adminAuthRoutes);
 app.use('/api/admin/magic-links', magicLinksRoutes);
+app.use('/api/admin/expenses', expensesRoutes);
 app.use('/api/upload', uploadRoutes);
 
 // Health check

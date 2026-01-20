@@ -248,6 +248,73 @@ class ApiService {
     });
   }
 
+  // Expenses
+  async getExpenseSources(): Promise<{
+    success: boolean;
+    sources?: Array<{ id: string; name: string; category: string; createdAt: string }>;
+    error?: string;
+  }> {
+    return this.request('/api/admin/expenses/sources');
+  }
+
+  async createExpenseSource(name: string): Promise<{
+    success: boolean;
+    source?: { id: string; name: string; category: string; createdAt: string };
+    error?: string;
+  }> {
+    return this.request('/api/admin/expenses/sources', {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    });
+  }
+
+  async getMetaAdsExpenses(page = 1, limit = 50): Promise<{
+    success: boolean;
+    expenses?: Array<{
+      id: string;
+      amount: number;
+      date: string;
+      sourceId: string;
+      sourceName: string;
+      notes?: string;
+      createdAt: string;
+    }>;
+    pagination?: { page: number; limit: number; total: number; totalPages: number };
+    error?: string;
+  }> {
+    return this.request(`/api/admin/expenses/meta-ads?page=${page}&limit=${limit}`);
+  }
+
+  async createMetaAdsExpense(data: {
+    amount: number;
+    date: string;
+    sourceId: string;
+    notes?: string;
+  }): Promise<{
+    success: boolean;
+    expense?: {
+      id: string;
+      amount: number;
+      date: string;
+      sourceId: string;
+      sourceName: string;
+      notes?: string;
+      createdAt: string;
+    };
+    error?: string;
+  }> {
+    return this.request('/api/admin/expenses/meta-ads', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteMetaAdsExpense(expenseId: string): Promise<{ success: boolean; error?: string }> {
+    return this.request(`/api/admin/expenses/meta-ads/${expenseId}`, {
+      method: 'DELETE',
+    });
+  }
+
   // Upload (public - no auth needed)
   async validateUploadToken(token: string): Promise<UploadInfo> {
     return this.request<UploadInfo>(`/api/upload/${token}`);
