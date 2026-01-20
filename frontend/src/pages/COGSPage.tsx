@@ -7,6 +7,8 @@ interface CostField {
   name: string;
   smallValue: number;
   largeValue: number;
+  type: 'cogs' | 'ndr' | 'both';
+  calculationType: 'fixed' | 'percentage';
 }
 
 export function COGSPage() {
@@ -24,7 +26,13 @@ export function COGSPage() {
       setIsLoading(true);
       const config = await api.getCOGSConfiguration();
       if (config && config.fields) {
-        setCostFields(config.fields);
+        // Ensure all fields have type and calculationType properties (for backwards compatibility)
+        const fieldsWithDefaults = config.fields.map(field => ({
+          ...field,
+          type: field.type ?? 'cogs',
+          calculationType: field.calculationType ?? 'fixed',
+        }));
+        setCostFields(fieldsWithDefaults);
       }
     } catch (error) {
       console.error('Failed to load COGS configuration:', error);
@@ -41,6 +49,8 @@ export function COGSPage() {
       name: newFieldName.trim(),
       smallValue: 0,
       largeValue: 0,
+      type: 'cogs',
+      calculationType: 'fixed',
     };
 
     setCostFields([...costFields, newField]);
@@ -60,6 +70,18 @@ export function COGSPage() {
   const handleUpdateLargeValue = (id: string, value: number) => {
     setCostFields(costFields.map(field => 
       field.id === id ? { ...field, largeValue: value } : field
+    ));
+  };
+
+  const handleUpdateType = (id: string, type: 'cogs' | 'ndr' | 'both') => {
+    setCostFields(costFields.map(field => 
+      field.id === id ? { ...field, type } : field
+    ));
+  };
+
+  const handleUpdateCalculationType = (id: string, calculationType: 'fixed' | 'percentage') => {
+    setCostFields(costFields.map(field => 
+      field.id === id ? { ...field, calculationType } : field
     ));
   };
 
@@ -139,9 +161,28 @@ export function COGSPage() {
           <div className={styles['fields-list']}>
             {costFields.map((field) => (
               <div key={field.id} className={styles['field-item']}>
-                <label className={styles['field-label']}>{field.name}</label>
+                <div className={styles['field-header']}>
+                  <label className={styles['field-label']}>{field.name}</label>
+                  <select
+                    value={field.type}
+                    onChange={(e) => handleUpdateType(field.id, e.target.value as 'cogs' | 'ndr' | 'both')}
+                    className={styles['type-select']}
+                  >
+                    <option value="cogs">COGS Only</option>
+                    <option value="ndr">NDR Only</option>
+                    <option value="both">Both</option>
+                  </select>
+                </div>
                 <div className={styles['field-input-group']}>
-                  <span className={styles['currency-symbol']}>₹</span>
+                  <select
+                    value={field.calculationType}
+                    onChange={(e) => handleUpdateCalculationType(field.id, e.target.value as 'fixed' | 'percentage')}
+                    className={styles['calc-type-select']}
+                    title="Calculation type"
+                  >
+                    <option value="fixed">₹</option>
+                    <option value="percentage">%</option>
+                  </select>
                   <input
                     type="number"
                     min="0"
@@ -149,6 +190,7 @@ export function COGSPage() {
                     value={field.smallValue}
                     onChange={(e) => handleUpdateSmallValue(field.id, parseFloat(e.target.value) || 0)}
                     className={styles['field-input']}
+                    placeholder={field.calculationType === 'percentage' ? 'Enter %' : 'Enter ₹'}
                   />
                   <button
                     onClick={() => handleDeleteField(field.id)}
@@ -176,9 +218,28 @@ export function COGSPage() {
           <div className={styles['fields-list']}>
             {costFields.map((field) => (
               <div key={field.id} className={styles['field-item']}>
-                <label className={styles['field-label']}>{field.name}</label>
+                <div className={styles['field-header']}>
+                  <label className={styles['field-label']}>{field.name}</label>
+                  <select
+                    value={field.type}
+                    onChange={(e) => handleUpdateType(field.id, e.target.value as 'cogs' | 'ndr' | 'both')}
+                    className={styles['type-select']}
+                  >
+                    <option value="cogs">COGS Only</option>
+                    <option value="ndr">NDR Only</option>
+                    <option value="both">Both</option>
+                  </select>
+                </div>
                 <div className={styles['field-input-group']}>
-                  <span className={styles['currency-symbol']}>₹</span>
+                  <select
+                    value={field.calculationType}
+                    onChange={(e) => handleUpdateCalculationType(field.id, e.target.value as 'fixed' | 'percentage')}
+                    className={styles['calc-type-select']}
+                    title="Calculation type"
+                  >
+                    <option value="fixed">₹</option>
+                    <option value="percentage">%</option>
+                  </select>
                   <input
                     type="number"
                     min="0"
@@ -186,6 +247,7 @@ export function COGSPage() {
                     value={field.largeValue}
                     onChange={(e) => handleUpdateLargeValue(field.id, parseFloat(e.target.value) || 0)}
                     className={styles['field-input']}
+                    placeholder={field.calculationType === 'percentage' ? 'Enter %' : 'Enter ₹'}
                   />
                   <button
                     onClick={() => handleDeleteField(field.id)}

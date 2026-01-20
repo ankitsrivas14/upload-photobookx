@@ -5,6 +5,8 @@ const COGSFieldSchema = new mongoose.Schema({
   name: { type: String, required: true },
   smallValue: { type: Number, required: true, default: 0 },
   largeValue: { type: Number, required: true, default: 0 },
+  type: { type: String, enum: ['cogs', 'ndr', 'both'], default: 'cogs' },
+  calculationType: { type: String, enum: ['fixed', 'percentage'], default: 'fixed' },
 });
 
 const COGSConfigurationSchema = new mongoose.Schema({

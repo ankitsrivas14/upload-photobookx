@@ -13,6 +13,8 @@ interface COGSField {
   name: string;
   smallValue: number;
   largeValue: number;
+  type: 'cogs' | 'ndr' | 'both';
+  calculationType: 'fixed' | 'percentage';
 }
 
 interface COGSConfiguration {
