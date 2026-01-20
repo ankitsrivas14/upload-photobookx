@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { api } from '../services/api';
 import './MetaAdsPage.css';
 
@@ -34,11 +34,7 @@ export function MetaAdsPage() {
   const [selectedSourceId, setSelectedSourceId] = useState('');
   const [notes, setNotes] = useState('');
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setIsLoading(true);
     try {
       const [expensesRes, sourcesRes] = await Promise.all([
@@ -61,7 +57,11 @@ export function MetaAdsPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [selectedSourceId]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const handleAddSource = async () => {
     if (!newSourceName.trim()) {
@@ -152,6 +152,70 @@ export function MetaAdsPage() {
 
   const totalAmount = expenses.reduce((sum, expense) => sum + expense.amount, 0);
 
+  // Calculate average daily spend for current month
+  const getDailySpendAverage = () => {
+    const currentMonth = new Date().getMonth();
+    const currentYear = new Date().getFullYear();
+    
+    // Filter expenses for current month
+    const monthExpenses = expenses.filter(expense => {
+      const expenseDate = new Date(expense.date);
+      return expenseDate.getMonth() === currentMonth && expenseDate.getFullYear() === currentYear;
+    });
+    
+    if (monthExpenses.length === 0) {
+      return { averageDailySpend: 0, totalSpend: 0, daysCount: 0, startDate: null, endDate: null };
+    }
+    
+    // Find first and last transaction dates
+    const sortedExpenses = [...monthExpenses].sort((a, b) => 
+      new Date(a.date).getTime() - new Date(b.date).getTime()
+    );
+    
+    const startDate = new Date(sortedExpenses[0].date);
+    const endDate = new Date(sortedExpenses[sortedExpenses.length - 1].date);
+    
+    // Calculate number of days between first and last transaction (inclusive)
+    const daysCount = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    
+    // Calculate total spend for the month
+    const totalSpend = monthExpenses.reduce((sum, expense) => sum + expense.amount, 0);
+    
+    // Calculate average
+    const averageDailySpend = totalSpend / daysCount;
+    
+    return { averageDailySpend, totalSpend, daysCount, startDate, endDate };
+  };
+
+  // Calculate monthly spend per source
+  const getMonthlySpendBySource = () => {
+    const currentMonth = new Date().getMonth();
+    const currentYear = new Date().getFullYear();
+    
+    // Use source name as key to ensure proper grouping
+    const sourceMap = new Map<string, { name: string; amount: number }>();
+    
+    expenses.forEach(expense => {
+      const expenseDate = new Date(expense.date);
+      if (expenseDate.getMonth() === currentMonth && expenseDate.getFullYear() === currentYear) {
+        // Use sourceName as key to ensure all expenses from same source are grouped
+        const key = expense.sourceName;
+        if (sourceMap.has(key)) {
+          const existing = sourceMap.get(key)!;
+          sourceMap.set(key, { name: existing.name, amount: existing.amount + expense.amount });
+        } else {
+          sourceMap.set(key, { name: expense.sourceName, amount: expense.amount });
+        }
+      }
+    });
+    
+    return Array.from(sourceMap.values()).sort((a, b) => b.amount - a.amount);
+  };
+
+  const dailySpendData = getDailySpendAverage();
+  const monthlySpendBySource = getMonthlySpendBySource();
+  const currentMonthTotal = monthlySpendBySource.reduce((sum, s) => sum + s.amount, 0);
+
   if (isLoading) {
     return (
       <div className="loading-section">
@@ -162,7 +226,8 @@ export function MetaAdsPage() {
   }
 
   return (
-    <div className="meta-ads-page">
+    <div className="meta-ads-page-wrapper">
+      <div className="meta-ads-page">
       <div className="content-section">
         <div className="section-header">
           <h2>Meta Ads Expenses</h2>
@@ -413,6 +478,92 @@ export function MetaAdsPage() {
           </div>
         </div>
       )}
+      </div>
+
+      {/* Right Sidebar */}
+      <aside className="stats-sidebar">
+        <div className="sidebar-section">
+          <h3 className="sidebar-section-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 2v20"/>
+              <path d="M17 12H3"/>
+              <path d="M19 18l2-2-2-2"/>
+              <path d="M5 6L3 8l2 2"/>
+            </svg>
+            Average Daily Spend
+          </h3>
+          {dailySpendData.daysCount > 0 ? (
+            <div className="avg-daily-spend">
+              <div className="avg-spend-card">
+                <div className="avg-spend-label">Average per Day</div>
+                <div className="avg-spend-value">
+                  ₹{dailySpendData.averageDailySpend.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+              </div>
+              <div className="avg-spend-details">
+                <div className="detail-row">
+                  <span className="detail-label">Total this month:</span>
+                  <span className="detail-value">₹{dailySpendData.totalSpend.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                </div>
+                <div className="detail-row">
+                  <span className="detail-label">Days counted:</span>
+                  <span className="detail-value">{dailySpendData.daysCount}</span>
+                </div>
+                <div className="detail-row">
+                  <span className="detail-label">Period:</span>
+                  <span className="detail-value">
+                    {dailySpendData.startDate?.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} - {dailySpendData.endDate?.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                  </span>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="no-data">No expenses this month</div>
+          )}
+        </div>
+
+        <div className="sidebar-section">
+          <h3 className="sidebar-section-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="3" y="3" width="18" height="18" rx="2"/>
+              <path d="M3 9h18"/>
+              <path d="M9 21V9"/>
+            </svg>
+            This Month by Source
+          </h3>
+          <div className="month-total">
+            <span className="month-label">Total This Month</span>
+            <span className="month-amount">₹{currentMonthTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+          </div>
+          <div className="source-spend-list">
+            {monthlySpendBySource.length === 0 ? (
+              <div className="no-data">No expenses this month</div>
+            ) : (
+              monthlySpendBySource.map((source) => (
+                <div key={source.name} className="source-spend-item">
+                  <div className="source-info">
+                    <div className="source-name">{source.name}</div>
+                    <div className="source-amount">
+                      ₹{source.amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                    </div>
+                  </div>
+                  <div className="source-bar">
+                    <div 
+                      className="source-bar-fill" 
+                      style={{ 
+                        width: `${currentMonthTotal > 0 ? (source.amount / currentMonthTotal) * 100 : 0}%` 
+                      }}
+                    ></div>
+                  </div>
+                  <div className="source-percentage">
+                    {currentMonthTotal > 0 ? ((source.amount / currentMonthTotal) * 100).toFixed(1) : 0}%
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </aside>
     </div>
   );
 }

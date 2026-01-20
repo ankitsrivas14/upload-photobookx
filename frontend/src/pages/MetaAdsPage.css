@@ -1,5 +1,14 @@
-.meta-ads-page {
+/* Main Layout */
+.meta-ads-page-wrapper {
+  display: flex;
+  gap: 1rem;
   width: 100%;
+  max-width: 100%;
+}
+
+.meta-ads-page {
+  flex: 1;
+  min-width: 0;
 }
 
 /* Stats */
@@ -385,8 +394,207 @@ tr:hover .delete-btn {
   animation: spin 0.8s linear infinite;
 }
 
+/* Stats Sidebar */
+.stats-sidebar {
+  width: 320px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.sidebar-section {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.sidebar-section-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #0f172a;
+  margin: 0 0 0.875rem;
+}
+
+.sidebar-section-title svg {
+  width: 16px;
+  height: 16px;
+  color: #00B8D4;
+}
+
+/* Average Daily Spend */
+.avg-daily-spend {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.avg-spend-card {
+  padding: 1rem;
+  background: linear-gradient(135deg, #f0fdfa, #ccfbf1);
+  border-radius: 8px;
+  text-align: center;
+  border: 1px solid #99f6e4;
+}
+
+.avg-spend-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: #0f766e;
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
+  margin-bottom: 0.375rem;
+}
+
+.avg-spend-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #115e59;
+  line-height: 1;
+}
+
+.avg-spend-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background: #f8fafc;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+}
+
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.detail-label {
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: #64748b;
+}
+
+.detail-value {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+/* Monthly Spend by Source */
+.month-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem;
+  background: linear-gradient(135deg, #e0f2fe, #dbeafe);
+  border-radius: 6px;
+  margin-bottom: 0.875rem;
+}
+
+.month-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: #0284c7;
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
+}
+
+.month-amount {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #0c4a6e;
+}
+
+.source-spend-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.source-spend-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.source-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.source-name {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.source-amount {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #00B8D4;
+}
+
+.source-bar {
+  height: 6px;
+  background: #f1f5f9;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.source-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #10b981, #059669);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.source-percentage {
+  font-size: 0.625rem;
+  font-weight: 500;
+  color: #64748b;
+  text-align: right;
+}
+
+.no-data {
+  text-align: center;
+  padding: 1.5rem;
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
 /* Responsive */
+@media (max-width: 1200px) {
+  .stats-sidebar {
+    width: 280px;
+  }
+}
+
+@media (max-width: 1024px) {
+  .meta-ads-page-wrapper {
+    flex-direction: column;
+  }
+
+  .stats-sidebar {
+    width: 100%;
+    flex-direction: row;
+  }
+
+  .sidebar-section {
+    flex: 1;
+  }
+}
+
 @media (max-width: 768px) {
+  .stats-sidebar {
+    flex-direction: column;
+  }
+
   .form-row {
     grid-template-columns: 1fr;
   }
