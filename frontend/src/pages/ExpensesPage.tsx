@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { api } from '../services/api';
 import type { AdminUser } from '../services/api';
 import { MetaAdsPage } from './MetaAdsPage';
+import { ExpensesOverview } from './ExpensesOverview';
 import './ExpensesPage.css';
 
 export function ExpensesPage() {
@@ -170,23 +171,7 @@ export function ExpensesPage() {
           </div>
 
           <Routes>
-            <Route 
-              path="overview" 
-              element={
-                <div className="content-section">
-                  <div className="section-header">
-                    <h2>Expenses Overview</h2>
-                    <p>Track and manage your business expenses</p>
-                  </div>
-
-                  <div className="coming-soon">
-                    <div className="coming-soon-icon">📊</div>
-                    <h3>Coming Soon</h3>
-                    <p>Expenses overview will be available here</p>
-                  </div>
-                </div>
-              } 
-            />
+            <Route path="overview" element={<ExpensesOverview />} />
             <Route path="meta-ads" element={<MetaAdsPage />} />
           </Routes>
         </main>

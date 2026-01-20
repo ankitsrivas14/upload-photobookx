@@ -41,7 +41,7 @@ export function MetaAdsPage() {
     setIsLoading(true);
     try {
       const [expensesRes, sourcesRes] = await Promise.all([
-        api.getMetaAdsExpenses(),
+        api.getMetaAdsExpenses(1, 1000), // Load all expenses
         api.getExpenseSources(),
       ]);
 
@@ -191,6 +191,8 @@ export function MetaAdsPage() {
   };
 
   const filteredExpenses = getFilteredExpenses();
+  
+  // Raw total - no tax deduction
   const totalAmount = filteredExpenses.reduce((sum, expense) => sum + expense.amount, 0);
 
   // Calculate average daily spend for filtered period
@@ -325,7 +327,7 @@ export function MetaAdsPage() {
             </div>
             <div className="stat-content">
               <div className="stat-value">₹{totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-              <div className="stat-label">Total Expenses</div>
+              <div className="stat-label">Total Amount Paid</div>
             </div>
           </div>
           <div className="stat-card">
