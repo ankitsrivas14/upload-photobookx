@@ -6,3 +6,4 @@ export { MetaAdsExpense, IMetaAdsExpense } from './MetaAdsExpense';
 export { default as DiscardedOrder, IDiscardedOrder } from './DiscardedOrder';
 export { default as RTOOrder, IRTOOrder } from './RTOOrder';
 export { COGSConfiguration } from './COGSConfiguration';
+export { DailyAdSpend } from './DailyAdSpend';

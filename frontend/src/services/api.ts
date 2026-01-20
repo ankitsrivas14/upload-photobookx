@@ -391,6 +391,48 @@ class ApiService {
     });
   }
 
+  // Daily Ad Spend
+  async getDailyAdSpend(): Promise<{
+    success: boolean;
+    entries?: Array<{
+      id: string;
+      date: string;
+      amount: number;
+      notes: string;
+      createdAt: string;
+    }>;
+    error?: string;
+  }> {
+    return this.request('/api/admin/expenses/daily-ad-spend');
+  }
+
+  async createDailyAdSpend(data: {
+    date: string;
+    amount: number;
+    notes?: string;
+  }): Promise<{
+    success: boolean;
+    entry?: {
+      id: string;
+      date: string;
+      amount: number;
+      notes: string;
+      createdAt: string;
+    };
+    error?: string;
+  }> {
+    return this.request('/api/admin/expenses/daily-ad-spend', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteDailyAdSpend(entryId: string): Promise<{ success: boolean; error?: string }> {
+    return this.request(`/api/admin/expenses/daily-ad-spend/${entryId}`, {
+      method: 'DELETE',
+    });
+  }
+
   // Upload (public - no auth needed)
   async validateUploadToken(token: string): Promise<UploadInfo> {
     return this.request<UploadInfo>(`/api/upload/${token}`);

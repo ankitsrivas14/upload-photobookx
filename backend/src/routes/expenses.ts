@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { requireAdmin } from './adminAuth';
-import { ExpenseSource, MetaAdsExpense } from '../models';
+import { ExpenseSource, MetaAdsExpense, DailyAdSpend } from '../models';
 import type { AuthenticatedRequest } from '../types';
 
 const router = Router();
@@ -194,6 +194,95 @@ router.delete('/meta-ads/:expenseId', requireAdmin, async (req: AuthenticatedReq
   } catch (error) {
     console.error('Error deleting Meta Ads expense:', error);
     res.status(500).json({ success: false, error: 'Failed to delete expense' });
+  }
+});
+
+/**
+ * GET /api/admin/expenses/daily-ad-spend
+ * Get all daily ad spend entries
+ */
+router.get('/daily-ad-spend', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const entries = await DailyAdSpend.find()
+      .sort({ date: -1, createdAt: -1 });
+
+    res.json({
+      success: true,
+      entries: entries.map(entry => ({
+        id: entry._id,
+        date: entry.date,
+        amount: entry.amount,
+        notes: entry.notes,
+        createdAt: entry.createdAt,
+      })),
+    });
+  } catch (error) {
+    console.error('Error fetching daily ad spend:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch daily ad spend' });
+  }
+});
+
+/**
+ * POST /api/admin/expenses/daily-ad-spend
+ * Create a new daily ad spend entry
+ */
+router.post('/daily-ad-spend', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { date, amount, notes } = req.body;
+
+    if (!date) {
+      res.status(400).json({ success: false, error: 'Date is required' });
+      return;
+    }
+
+    if (!amount || amount <= 0) {
+      res.status(400).json({ success: false, error: 'Valid amount is required' });
+      return;
+    }
+
+    const entry = new DailyAdSpend({
+      date: new Date(date),
+      amount: parseFloat(amount),
+      notes: notes?.trim() || '',
+    });
+
+    await entry.save();
+
+    res.status(201).json({
+      success: true,
+      entry: {
+        id: entry._id,
+        date: entry.date,
+        amount: entry.amount,
+        notes: entry.notes,
+        createdAt: entry.createdAt,
+      },
+    });
+  } catch (error) {
+    console.error('Error creating daily ad spend:', error);
+    res.status(500).json({ success: false, error: 'Failed to create daily ad spend entry' });
+  }
+});
+
+/**
+ * DELETE /api/admin/expenses/daily-ad-spend/:entryId
+ * Delete a daily ad spend entry
+ */
+router.delete('/daily-ad-spend/:entryId', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const entryId = req.params.entryId;
+
+    const entry = await DailyAdSpend.findByIdAndDelete(entryId);
+
+    if (!entry) {
+      res.status(404).json({ success: false, error: 'Entry not found' });
+      return;
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting daily ad spend:', error);
+    res.status(500).json({ success: false, error: 'Failed to delete entry' });
   }
 });
 
