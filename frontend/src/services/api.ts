@@ -7,6 +7,18 @@ interface AdminUser {
   name: string;
 }
 
+// COGS Configuration Types
+interface COGSField {
+  id: string;
+  name: string;
+  smallValue: number;
+  largeValue: number;
+}
+
+interface COGSConfiguration {
+  fields: COGSField[];
+}
+
 interface LoginResponse {
   success: boolean;
   token?: string;
@@ -444,6 +456,40 @@ class ApiService {
       },
       body: JSON.stringify({ photoSize, photoType }),
     });
+
+    return response.json();
+  }
+
+  // COGS Configuration
+  async getCOGSConfiguration(): Promise<COGSConfiguration> {
+    const token = localStorage.getItem('adminToken');
+    const response = await fetch(`${this.baseUrl}/api/admin/cogs/configuration`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to fetch COGS configuration');
+    }
+
+    return response.json();
+  }
+
+  async saveCOGSConfiguration(config: COGSConfiguration): Promise<{ success: boolean; message?: string }> {
+    const token = localStorage.getItem('adminToken');
+    const response = await fetch(`${this.baseUrl}/api/admin/cogs/configuration`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(config),
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to save COGS configuration');
+    }
 
     return response.json();
   }

@@ -5,3 +5,4 @@ export { ExpenseSource, IExpenseSource } from './ExpenseSource';
 export { MetaAdsExpense, IMetaAdsExpense } from './MetaAdsExpense';
 export { default as DiscardedOrder, IDiscardedOrder } from './DiscardedOrder';
 export { default as RTOOrder, IRTOOrder } from './RTOOrder';
+export { COGSConfiguration } from './COGSConfiguration';

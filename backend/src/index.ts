@@ -7,6 +7,7 @@ import magicLinksRoutes from './routes/magicLinks';
 import uploadRoutes from './routes/upload';
 import expensesRoutes from './routes/expenses';
 import salesRoutes from './routes/sales';
+import cogsRoutes from './routes/cogs';
 
 const app = express();
 
@@ -39,6 +40,7 @@ app.use('/api/admin/auth', adminAuthRoutes);
 app.use('/api/admin/magic-links', magicLinksRoutes);
 app.use('/api/admin/expenses', expensesRoutes);
 app.use('/api/admin/sales', salesRoutes);
+app.use('/api/admin/cogs', cogsRoutes);
 app.use('/api/upload', uploadRoutes);
 
 // Health check
