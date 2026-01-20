@@ -6,6 +6,7 @@ export interface IMetaAdsExpense extends Document {
   sourceId: Types.ObjectId;
   sourceName: string; // Denormalized for easier queries
   notes?: string;
+  isTaxExempt?: boolean;
   createdBy: Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
@@ -34,6 +35,10 @@ const MetaAdsExpenseSchema = new Schema<IMetaAdsExpense>(
     notes: {
       type: String,
       trim: true,
+    },
+    isTaxExempt: {
+      type: Boolean,
+      default: false,
     },
     createdBy: {
       type: Schema.Types.ObjectId,

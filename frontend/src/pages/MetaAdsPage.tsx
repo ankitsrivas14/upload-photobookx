@@ -16,6 +16,7 @@ interface MetaAdsExpense {
   sourceId: string;
   sourceName: string;
   notes?: string;
+  isTaxExempt?: boolean;
   createdAt: string;
 }
 
@@ -27,12 +28,14 @@ export function MetaAdsPage() {
   const [showAddSourceModal, setShowAddSourceModal] = useState(false);
   const [newSourceName, setNewSourceName] = useState('');
   const [isAddingSource, setIsAddingSource] = useState(false);
+  const [selectedMonthFilter, setSelectedMonthFilter] = useState<string>('current'); // 'current', 'all', or 'YYYY-MM'
 
   // Form state
   const [amount, setAmount] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [selectedSourceId, setSelectedSourceId] = useState('');
   const [notes, setNotes] = useState('');
+  const [isTaxExempt, setIsTaxExempt] = useState(false);
 
   const loadData = useCallback(async () => {
     setIsLoading(true);
@@ -113,14 +116,13 @@ export function MetaAdsPage() {
         date,
         sourceId: selectedSourceId,
         notes: notes.trim() || undefined,
+        isTaxExempt,
       });
 
       if (response.success && response.expense) {
         setExpenses([response.expense, ...expenses]);
-        // Reset form
+        // Reset only amount field
         setAmount('');
-        setDate(new Date().toISOString().split('T')[0]);
-        setNotes('');
       } else {
         alert(response.error || 'Failed to create expense');
       }
@@ -150,18 +152,70 @@ export function MetaAdsPage() {
     }
   };
 
-  const totalAmount = expenses.reduce((sum, expense) => sum + expense.amount, 0);
-
-  // Calculate average daily spend for current month
-  const getDailySpendAverage = () => {
-    const currentMonth = new Date().getMonth();
-    const currentYear = new Date().getFullYear();
-    
-    // Filter expenses for current month
-    const monthExpenses = expenses.filter(expense => {
+  // Get available months from expenses
+  const getAvailableMonths = () => {
+    const monthsSet = new Set<string>();
+    expenses.forEach(expense => {
       const expenseDate = new Date(expense.date);
-      return expenseDate.getMonth() === currentMonth && expenseDate.getFullYear() === currentYear;
+      const monthKey = `${expenseDate.getFullYear()}-${String(expenseDate.getMonth() + 1).padStart(2, '0')}`;
+      monthsSet.add(monthKey);
     });
+    return Array.from(monthsSet).sort().reverse();
+  };
+
+  const availableMonths = getAvailableMonths();
+
+  // Filter expenses based on selected month
+  const getFilteredExpenses = () => {
+    if (selectedMonthFilter === 'all') {
+      return expenses;
+    }
+    
+    let targetMonth: number;
+    let targetYear: number;
+    
+    if (selectedMonthFilter === 'current') {
+      targetMonth = new Date().getMonth();
+      targetYear = new Date().getFullYear();
+    } else {
+      // Format: YYYY-MM
+      const [year, month] = selectedMonthFilter.split('-');
+      targetYear = parseInt(year);
+      targetMonth = parseInt(month) - 1;
+    }
+    
+    return expenses.filter(expense => {
+      const expenseDate = new Date(expense.date);
+      return expenseDate.getMonth() === targetMonth && expenseDate.getFullYear() === targetYear;
+    });
+  };
+
+  const filteredExpenses = getFilteredExpenses();
+  const totalAmount = filteredExpenses.reduce((sum, expense) => sum + expense.amount, 0);
+
+  // Calculate average daily spend for filtered period
+  const getDailySpendAverage = () => {
+    if (selectedMonthFilter === 'all') {
+      // For "All Time", calculate across all expenses
+      if (filteredExpenses.length === 0) {
+        return { averageDailySpend: 0, totalSpend: 0, daysCount: 0, startDate: null, endDate: null };
+      }
+      
+      const sortedExpenses = [...filteredExpenses].sort((a, b) => 
+        new Date(a.date).getTime() - new Date(b.date).getTime()
+      );
+      
+      const startDate = new Date(sortedExpenses[0].date);
+      const endDate = new Date(sortedExpenses[sortedExpenses.length - 1].date);
+      const daysCount = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+      const totalSpend = filteredExpenses.reduce((sum, expense) => sum + expense.amount, 0);
+      const averageDailySpend = totalSpend / daysCount;
+      
+      return { averageDailySpend, totalSpend, daysCount, startDate, endDate };
+    }
+    
+    // For specific month - use filtered expenses
+    const monthExpenses = filteredExpenses;
     
     if (monthExpenses.length === 0) {
       return { averageDailySpend: 0, totalSpend: 0, daysCount: 0, startDate: null, endDate: null };
@@ -187,25 +241,19 @@ export function MetaAdsPage() {
     return { averageDailySpend, totalSpend, daysCount, startDate, endDate };
   };
 
-  // Calculate monthly spend per source
+  // Calculate spend per source for filtered period
   const getMonthlySpendBySource = () => {
-    const currentMonth = new Date().getMonth();
-    const currentYear = new Date().getFullYear();
-    
     // Use source name as key to ensure proper grouping
     const sourceMap = new Map<string, { name: string; amount: number }>();
     
-    expenses.forEach(expense => {
-      const expenseDate = new Date(expense.date);
-      if (expenseDate.getMonth() === currentMonth && expenseDate.getFullYear() === currentYear) {
-        // Use sourceName as key to ensure all expenses from same source are grouped
-        const key = expense.sourceName;
-        if (sourceMap.has(key)) {
-          const existing = sourceMap.get(key)!;
-          sourceMap.set(key, { name: existing.name, amount: existing.amount + expense.amount });
-        } else {
-          sourceMap.set(key, { name: expense.sourceName, amount: expense.amount });
-        }
+    filteredExpenses.forEach(expense => {
+      // Use sourceName as key to ensure all expenses from same source are grouped
+      const key = expense.sourceName;
+      if (sourceMap.has(key)) {
+        const existing = sourceMap.get(key)!;
+        sourceMap.set(key, { name: existing.name, amount: existing.amount + expense.amount });
+      } else {
+        sourceMap.set(key, { name: expense.sourceName, amount: expense.amount });
       }
     });
     
@@ -214,7 +262,20 @@ export function MetaAdsPage() {
 
   const dailySpendData = getDailySpendAverage();
   const monthlySpendBySource = getMonthlySpendBySource();
-  const currentMonthTotal = monthlySpendBySource.reduce((sum, s) => sum + s.amount, 0);
+  const periodTotal = monthlySpendBySource.reduce((sum, s) => sum + s.amount, 0);
+
+  // Get month label for display
+  const getMonthLabel = (monthKey: string) => {
+    const [year, month] = monthKey.split('-');
+    const date = new Date(parseInt(year), parseInt(month) - 1);
+    return date.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+  };
+
+  const getCurrentFilterLabel = () => {
+    if (selectedMonthFilter === 'all') return 'All Time';
+    if (selectedMonthFilter === 'current') return 'This Month';
+    return getMonthLabel(selectedMonthFilter);
+  };
 
   if (isLoading) {
     return (
@@ -230,8 +291,30 @@ export function MetaAdsPage() {
       <div className="meta-ads-page">
       <div className="content-section">
         <div className="section-header">
-          <h2>Meta Ads Expenses</h2>
-          <p>Track and manage your Meta (Facebook/Instagram) advertising expenses</p>
+          <div className="header-content">
+            <div>
+              <h2>Meta Ads Expenses</h2>
+              <p>Track and manage your Meta (Facebook/Instagram) advertising expenses</p>
+            </div>
+            <div className="month-filter">
+              <label htmlFor="month-select">Period:</label>
+              <select 
+                id="month-select"
+                value={selectedMonthFilter} 
+                onChange={(e) => setSelectedMonthFilter(e.target.value)}
+                className="filter-select"
+              >
+                <option value="current">This Month</option>
+                <option value="all">All Time</option>
+                {availableMonths.length > 0 && <option disabled>───────────</option>}
+                {availableMonths.map(monthKey => (
+                  <option key={monthKey} value={monthKey}>
+                    {getMonthLabel(monthKey)}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
         </div>
 
         {/* Stats */}
@@ -327,7 +410,25 @@ export function MetaAdsPage() {
               />
             </div>
 
-            <button type="submit" className="submit-btn" disabled={isSubmitting}>
+            <div className="form-actions">
+              <div className="checkbox-group">
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={isTaxExempt}
+                    onChange={(e) => setIsTaxExempt(e.target.checked)}
+                    className="checkbox-input"
+                  />
+                  <span className="checkbox-text">
+                    <svg className="checkbox-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                      <polyline points="20 6 9 17 4 12"/>
+                    </svg>
+                    Tax Exempt
+                  </span>
+                </label>
+              </div>
+
+              <button type="submit" className="submit-btn" disabled={isSubmitting}>
               {isSubmitting ? (
                 <>
                   <div className="btn-loader"></div>
@@ -342,18 +443,19 @@ export function MetaAdsPage() {
                   Add Expense
                 </>
               )}
-            </button>
+              </button>
+            </div>
           </form>
         </div>
 
         {/* Expenses List */}
         <div className="expenses-list">
           <div className="list-header">
-            <h3>Expense History</h3>
-            <span className="entry-count">{expenses.length} entries</span>
+            <h3>Expense History ({getCurrentFilterLabel()})</h3>
+            <span className="entry-count">{filteredExpenses.length} entries</span>
           </div>
 
-          {expenses.length === 0 ? (
+          {filteredExpenses.length === 0 ? (
             <div className="empty-state">
               <div className="empty-icon">📝</div>
               <div className="empty-text">No expenses logged yet</div>
@@ -367,12 +469,13 @@ export function MetaAdsPage() {
                     <th>Amount</th>
                     <th>Source</th>
                     <th>Notes</th>
+                    <th>Tax</th>
                     <th>Added</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {expenses.map((expense) => (
+                  {filteredExpenses.map((expense) => (
                     <tr key={expense.id}>
                       <td className="date-cell">
                         {new Date(expense.date).toLocaleDateString('en-IN', {
@@ -389,6 +492,13 @@ export function MetaAdsPage() {
                       </td>
                       <td className="notes-cell">
                         {expense.notes || <span className="no-notes">—</span>}
+                      </td>
+                      <td>
+                        {expense.isTaxExempt ? (
+                          <span className="tax-badge exempt">Exempt</span>
+                        ) : (
+                          <span className="tax-badge taxable">Taxable</span>
+                        )}
                       </td>
                       <td className="date-cell">
                         {new Date(expense.createdAt).toLocaleDateString('en-IN', {
@@ -529,15 +639,15 @@ export function MetaAdsPage() {
               <path d="M3 9h18"/>
               <path d="M9 21V9"/>
             </svg>
-            This Month by Source
+            By Source
           </h3>
           <div className="month-total">
-            <span className="month-label">Total This Month</span>
-            <span className="month-amount">₹{currentMonthTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+            <span className="month-label">Total ({getCurrentFilterLabel()})</span>
+            <span className="month-amount">₹{periodTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
           </div>
           <div className="source-spend-list">
             {monthlySpendBySource.length === 0 ? (
-              <div className="no-data">No expenses this month</div>
+              <div className="no-data">No expenses for this period</div>
             ) : (
               monthlySpendBySource.map((source) => (
                 <div key={source.name} className="source-spend-item">
@@ -551,12 +661,12 @@ export function MetaAdsPage() {
                     <div 
                       className="source-bar-fill" 
                       style={{ 
-                        width: `${currentMonthTotal > 0 ? (source.amount / currentMonthTotal) * 100 : 0}%` 
+                        width: `${periodTotal > 0 ? (source.amount / periodTotal) * 100 : 0}%` 
                       }}
                     ></div>
                   </div>
                   <div className="source-percentage">
-                    {currentMonthTotal > 0 ? ((source.amount / currentMonthTotal) * 100).toFixed(1) : 0}%
+                    {periodTotal > 0 ? ((source.amount / periodTotal) * 100).toFixed(1) : 0}%
                   </div>
                 </div>
               ))

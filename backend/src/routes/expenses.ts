@@ -98,6 +98,7 @@ router.get('/meta-ads', requireAdmin, async (req: AuthenticatedRequest, res: Res
         sourceId: expense.sourceId,
         sourceName: expense.sourceName,
         notes: expense.notes,
+        isTaxExempt: expense.isTaxExempt,
         createdAt: expense.createdAt,
       })),
       pagination: {
@@ -119,7 +120,7 @@ router.get('/meta-ads', requireAdmin, async (req: AuthenticatedRequest, res: Res
  */
 router.post('/meta-ads', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { amount, date, sourceId, notes } = req.body;
+    const { amount, date, sourceId, notes, isTaxExempt } = req.body;
 
     if (!amount || amount <= 0) {
       res.status(400).json({ success: false, error: 'Valid amount is required' });
@@ -149,6 +150,7 @@ router.post('/meta-ads', requireAdmin, async (req: AuthenticatedRequest, res: Re
       sourceId,
       sourceName: source.name,
       notes: notes?.trim() || undefined,
+      isTaxExempt: isTaxExempt === true,
       createdBy: req.user!.userId,
     });
 
@@ -163,6 +165,7 @@ router.post('/meta-ads', requireAdmin, async (req: AuthenticatedRequest, res: Re
         sourceId: expense.sourceId,
         sourceName: expense.sourceName,
         notes: expense.notes,
+        isTaxExempt: expense.isTaxExempt,
         createdAt: expense.createdAt,
       },
     });

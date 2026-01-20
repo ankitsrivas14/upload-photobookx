@@ -277,6 +277,7 @@ class ApiService {
       sourceId: string;
       sourceName: string;
       notes?: string;
+      isTaxExempt?: boolean;
       createdAt: string;
     }>;
     pagination?: { page: number; limit: number; total: number; totalPages: number };
@@ -290,6 +291,7 @@ class ApiService {
     date: string;
     sourceId: string;
     notes?: string;
+    isTaxExempt?: boolean;
   }): Promise<{
     success: boolean;
     expense?: {
@@ -299,6 +301,7 @@ class ApiService {
       sourceId: string;
       sourceName: string;
       notes?: string;
+      isTaxExempt?: boolean;
       createdAt: string;
     };
     error?: string;

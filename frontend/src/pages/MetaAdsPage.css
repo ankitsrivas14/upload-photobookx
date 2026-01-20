@@ -11,6 +11,53 @@
   min-width: 0;
 }
 
+/* Section Header */
+.section-header .header-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  width: 100%;
+}
+
+.month-filter {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.month-filter label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+.filter-select {
+  padding: 0.5rem 0.75rem;
+  font-family: inherit;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: #0f172a;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  min-width: 160px;
+}
+
+.filter-select:hover {
+  border-color: #cbd5e1;
+}
+
+.filter-select:focus {
+  outline: none;
+  border-color: #00B8D4;
+  box-shadow: 0 0 0 3px rgba(0, 184, 212, 0.1);
+}
+
 /* Stats */
 .expense-stats {
   display: grid;
@@ -63,8 +110,9 @@
   background: white;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
-  padding: 1rem;
+  padding: 1rem 1.25rem;
   margin-bottom: 1.25rem;
+  max-width: 100%;
 }
 
 .add-expense-form h3 {
@@ -77,16 +125,96 @@
 .add-expense-form form {
   display: flex;
   flex-direction: column;
+  gap: 0.75rem;
+}
+
+.form-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 0.25rem;
 }
 
 .add-expense-form form > button {
-  align-self: flex-start;
-  margin-top: 0.5rem;
+  margin: 0;
+}
+
+/* Checkbox Group */
+.checkbox-group {
+  margin: 0;
+}
+
+.checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.checkbox-input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.checkbox-text {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: #475569;
+  position: relative;
+  padding-left: 1.75rem;
+}
+
+.checkbox-text::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  width: 18px;
+  height: 18px;
+  border: 2px solid #cbd5e1;
+  border-radius: 4px;
+  background: white;
+  transition: all 0.15s ease;
+}
+
+.checkbox-input:checked + .checkbox-text::before {
+  background: linear-gradient(135deg, #10b981, #059669);
+  border-color: #10b981;
+}
+
+.checkbox-icon {
+  position: absolute;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  color: white;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  pointer-events: none;
+}
+
+.checkbox-input:checked + .checkbox-text .checkbox-icon {
+  opacity: 1;
+}
+
+.checkbox-label:hover .checkbox-text::before {
+  border-color: #94a3b8;
+}
+
+.checkbox-input:focus + .checkbox-text::before {
+  outline: none;
+  border-color: #00B8D4;
+  box-shadow: 0 0 0 3px rgba(0, 184, 212, 0.1);
 }
 
 .form-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  grid-template-columns: 200px 180px 1fr;
   gap: 0.75rem;
   margin-bottom: 0.75rem;
 }
@@ -290,6 +418,25 @@
   color: #0284c7;
   background: #e0f2fe;
   border-radius: 4px;
+}
+
+.tax-badge {
+  display: inline-block;
+  padding: 0.1875rem 0.5rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.tax-badge.exempt {
+  color: #059669;
+  background: #d1fae5;
+}
+
+.tax-badge.taxable {
+  color: #64748b;
+  background: #f1f5f9;
 }
 
 .notes-cell {
@@ -591,6 +738,20 @@ tr:hover .delete-btn {
 }
 
 @media (max-width: 768px) {
+  .section-header .header-content {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .month-filter {
+    width: 100%;
+  }
+
+  .filter-select {
+    flex: 1;
+    min-width: 0;
+  }
+
   .stats-sidebar {
     flex-direction: column;
   }
