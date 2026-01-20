@@ -211,6 +211,7 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
           deliveryStatus: deliveryStatus,
           paymentMethod: paymentMethod,
           maxUploads: shopifyService.getMaxUploadsForOrder(order),
+          totalPrice: order.current_total_price ? parseFloat(order.current_total_price) : undefined,
           lineItems: order.line_items?.map(item => ({
             title: item.title,
             quantity: item.quantity,

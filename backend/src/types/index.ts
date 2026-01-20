@@ -90,6 +90,8 @@ export interface ShopifyOrder {
   gateway?: string;
   payment_gateway_names?: string[];
   tags?: string;
+  total_price?: string;
+  current_total_price?: string;
 }
 
 export interface ShopifyOrdersResponse {

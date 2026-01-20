@@ -78,6 +78,7 @@ interface ShopifyOrder {
   deliveryStatus?: string | null;
   paymentMethod?: string;
   maxUploads: number;
+  totalPrice?: number;
   lineItems?: Array<{
     title: string;
     quantity: number;
