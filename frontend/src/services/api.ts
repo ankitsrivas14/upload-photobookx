@@ -60,6 +60,9 @@ interface ShopifyOrder {
   name: string;
   email?: string;
   createdAt: string;
+  fulfillmentStatus?: string | null;
+  deliveryStatus?: string | null;
+  paymentMethod?: string;
   maxUploads: number;
   lineItems?: Array<{
     title: string;
@@ -193,12 +196,40 @@ class ApiService {
   }
 
   // Shopify Orders
-  async getOrders(limit = 50): Promise<OrdersResponse> {
-    return this.request<OrdersResponse>(`/api/admin/magic-links/shopify/orders?limit=${limit}`);
+  async getOrders(limit = 50, allOrders = false): Promise<OrdersResponse> {
+    const allParam = allOrders ? '&all=true' : '';
+    return this.request<OrdersResponse>(`/api/admin/magic-links/shopify/orders?limit=${limit}${allParam}`);
   }
 
   async getOrder(orderNumber: string): Promise<{ success: boolean; order?: ShopifyOrder; error?: string }> {
     return this.request(`/api/admin/magic-links/shopify/orders/${encodeURIComponent(orderNumber)}`);
+  }
+
+  // Sales - Discarded Orders
+  async getDiscardedOrderIds(): Promise<{ success: boolean; discardedOrderIds: number[] }> {
+    return this.request<{ success: boolean; discardedOrderIds: number[] }>(
+      '/api/admin/sales/discarded-orders'
+    );
+  }
+
+  async discardOrders(orderIds: number[], orderNames: string[]): Promise<{ success: boolean; message?: string; error?: string }> {
+    return this.request<{ success: boolean; message?: string; error?: string }>(
+      '/api/admin/sales/discard-orders',
+      {
+        method: 'POST',
+        body: JSON.stringify({ orderIds, orderNames }),
+      }
+    );
+  }
+
+  async restoreOrders(orderIds: number[]): Promise<{ success: boolean; message?: string; error?: string }> {
+    return this.request<{ success: boolean; message?: string; error?: string }>(
+      '/api/admin/sales/discard-orders',
+      {
+        method: 'DELETE',
+        body: JSON.stringify({ orderIds }),
+      }
+    );
   }
 
   async getProducts(): Promise<{ success: boolean; products?: Array<{

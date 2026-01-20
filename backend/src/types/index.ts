@@ -71,12 +71,25 @@ export interface ShopifyLineItem {
   variant_title?: string;
 }
 
+export interface ShopifyFulfillment {
+  id: number;
+  status: string;
+  shipment_status?: string | null;
+  tracking_number?: string;
+  tracking_url?: string;
+}
+
 export interface ShopifyOrder {
   id: number;
   name: string;
   email?: string;
   created_at: string;
   line_items: ShopifyLineItem[];
+  fulfillment_status?: string | null;
+  fulfillments?: ShopifyFulfillment[];
+  gateway?: string;
+  payment_gateway_names?: string[];
+  tags?: string;
 }
 
 export interface ShopifyOrdersResponse {

@@ -4,6 +4,8 @@ import { api } from '../services/api';
 import type { AdminUser } from '../services/api';
 import { MetaAdsPage } from './MetaAdsPage';
 import { ExpensesOverview } from './ExpensesOverview';
+import { SalesPage } from './SalesPage';
+import { COGSPage } from './COGSPage';
 import './ExpensesPage.css';
 
 export function ExpensesPage() {
@@ -14,8 +16,10 @@ export function ExpensesPage() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const currentPath = location.pathname;
-  const isOverview = currentPath === '/admin/expenses' || currentPath === '/admin/expenses/';
+  const isOverview = currentPath === '/admin/expenses' || currentPath === '/admin/expenses/' || currentPath === '/admin/expenses/overview';
   const isMetaAds = currentPath === '/admin/expenses/meta-ads';
+  const isSales = currentPath === '/admin/expenses/sales';
+  const isCOGS = currentPath === '/admin/expenses/cogs';
 
   useEffect(() => {
     loadUser();
@@ -168,11 +172,25 @@ export function ExpensesPage() {
             >
               Meta Ads
             </Link>
+            <Link 
+              to="/admin/expenses/sales"
+              className={`expenses-nav-item ${isSales ? 'active' : ''}`}
+            >
+              Sales
+            </Link>
+            <Link 
+              to="/admin/expenses/cogs"
+              className={`expenses-nav-item ${isCOGS ? 'active' : ''}`}
+            >
+              COGS
+            </Link>
           </div>
 
           <Routes>
             <Route path="overview" element={<ExpensesOverview />} />
             <Route path="meta-ads" element={<MetaAdsPage />} />
+            <Route path="sales" element={<SalesPage />} />
+            <Route path="cogs" element={<COGSPage />} />
           </Routes>
         </main>
       </div>

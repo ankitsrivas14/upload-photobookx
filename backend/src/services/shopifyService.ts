@@ -149,6 +149,26 @@ class ShopifyService {
   }
 
   /**
+   * Get ALL recent orders (not filtered by product)
+   * For sales tracking and general order management
+   */
+  async getAllOrders(limit: number = 50): Promise<ShopifyOrder[]> {
+    try {
+      // Shopify max is 250 per request
+      const fetchLimit = Math.min(limit, 250);
+      
+      const data = await this.makeRequest<ShopifyOrdersResponse>(
+        `/orders.json?status=any&limit=${fetchLimit}`
+      );
+      
+      return data.orders || [];
+    } catch (error) {
+      console.error('Error fetching all orders:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Get all products with their variants
    */
   async getProducts(limit: number = 50): Promise<any[]> {

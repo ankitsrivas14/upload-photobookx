@@ -166,22 +166,58 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
   try {
     const limitParam = req.query.limit;
     const limit = parseInt(typeof limitParam === 'string' ? limitParam : '50', 10) || 50;
-    const orders = await shopifyService.getRecentOrders(limit);
+    
+    // Check if we want all orders or just printed photos orders
+    const allOrders = req.query.all === 'true';
+    const orders = allOrders 
+      ? await shopifyService.getAllOrders(limit)
+      : await shopifyService.getRecentOrders(limit);
     
     res.json({
       success: true,
-      orders: orders.map(order => ({
-        id: order.id,
-        name: order.name,
-        email: order.email,
-        createdAt: order.created_at,
-        maxUploads: shopifyService.getMaxUploadsForOrder(order),
-        lineItems: order.line_items?.map(item => ({
-          title: item.title,
-          quantity: item.quantity,
-          variantTitle: item.variant_title,
-        })),
-      })),
+      orders: orders.map(order => {
+        // Get delivery status from the latest fulfillment
+        let deliveryStatus = null;
+        if (order.fulfillments && order.fulfillments.length > 0) {
+          // Get the most recent fulfillment's shipment status
+          const latestFulfillment = order.fulfillments[order.fulfillments.length - 1];
+          deliveryStatus = latestFulfillment.shipment_status;
+        }
+        
+        // Determine payment method (Prepaid or COD)
+        let paymentMethod = 'Prepaid'; // Default to prepaid
+        
+        // Check gateway field
+        const gateway = order.gateway?.toLowerCase() || '';
+        const paymentGateways = order.payment_gateway_names?.map(g => g.toLowerCase()) || [];
+        const tags = order.tags?.toLowerCase() || '';
+        
+        // Check if it's COD
+        if (
+          gateway.includes('cash on delivery') ||
+          gateway.includes('cod') ||
+          paymentGateways.some(g => g.includes('cash on delivery') || g.includes('cod')) ||
+          tags.includes('cod')
+        ) {
+          paymentMethod = 'COD';
+        }
+        
+        return {
+          id: order.id,
+          name: order.name,
+          email: order.email,
+          createdAt: order.created_at,
+          fulfillmentStatus: order.fulfillment_status,
+          deliveryStatus: deliveryStatus,
+          paymentMethod: paymentMethod,
+          maxUploads: shopifyService.getMaxUploadsForOrder(order),
+          lineItems: order.line_items?.map(item => ({
+            title: item.title,
+            quantity: item.quantity,
+            variantTitle: item.variant_title,
+          })),
+        };
+      }),
     });
   } catch (error) {
     console.error('Error fetching orders:', error);
