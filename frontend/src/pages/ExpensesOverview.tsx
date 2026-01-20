@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { api } from '../services/api';
-import './ExpensesOverview.css';
+import styles from './ExpensesOverview.module.css';
 
 interface MetaAdsExpense {
   id: string;
@@ -74,34 +74,30 @@ export function ExpensesOverview() {
 
   if (isLoading) {
     return (
-      <div className="loading-section">
-        <div className="spinner"></div>
+      <div className={styles['loading-section']}>
+        <div className={styles.spinner}></div>
         <p>Loading...</p>
       </div>
     );
   }
 
   return (
-    <div className="expenses-overview">
-      <div className="content-section">
-        <div className="section-header">
-          <h2>Expenses Overview</h2>
-          <p>Track and analyze your business advertising expenses</p>
-        </div>
+    <div className={styles['expenses-overview']}>
+      <div className={styles['content-section']}>
 
         {/* Main Ad Spend Metric */}
-        <div className="hero-stat">
-          <div className="hero-stat-content">
-            <div className="hero-stat-label">Total Actual Ad Spend</div>
-            <div className="hero-stat-value">₹{stats.totalActualSpend.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-            <div className="hero-stat-description">
+        <div className={styles['hero-stat']}>
+          <div className={styles['hero-stat-content']}>
+            <div className={styles['hero-stat-label']}>Total Actual Ad Spend</div>
+            <div className={styles['hero-stat-value']}>₹{stats.totalActualSpend.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+            <div className={styles['hero-stat-description']}>
               Pre-tax advertising expenses • {expenses.length} total transactions
             </div>
           </div>
         </div>
 
         {/* Placeholder for future stats and charts */}
-        <div className="future-stats-placeholder">
+        <div className={styles['future-stats-placeholder']}>
           {/* More stats and charts will be added here */}
         </div>
       </div>

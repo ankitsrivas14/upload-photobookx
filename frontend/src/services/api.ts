@@ -232,6 +232,33 @@ class ApiService {
     );
   }
 
+  // Sales - RTO Orders
+  async getRTOOrderIds(): Promise<{ success: boolean; rtoOrderIds: number[] }> {
+    return this.request<{ success: boolean; rtoOrderIds: number[] }>(
+      '/api/admin/sales/rto-orders'
+    );
+  }
+
+  async markOrdersAsRTO(orderIds: number[], orderNames: string[], notes?: string): Promise<{ success: boolean; message?: string; error?: string }> {
+    return this.request<{ success: boolean; message?: string; error?: string }>(
+      '/api/admin/sales/mark-rto',
+      {
+        method: 'POST',
+        body: JSON.stringify({ orderIds, orderNames, notes }),
+      }
+    );
+  }
+
+  async unmarkOrdersAsRTO(orderIds: number[]): Promise<{ success: boolean; message?: string; error?: string }> {
+    return this.request<{ success: boolean; message?: string; error?: string }>(
+      '/api/admin/sales/mark-rto',
+      {
+        method: 'DELETE',
+        body: JSON.stringify({ orderIds }),
+      }
+    );
+  }
+
   async getProducts(): Promise<{ success: boolean; products?: Array<{
     id: number;
     title: string;

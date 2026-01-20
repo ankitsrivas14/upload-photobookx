@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { api } from '../services/api';
-import './SalesPage.css';
+import styles from './SalesPage.module.css';
 
 interface ShopifyOrder {
   id: number;
@@ -22,6 +22,7 @@ export function SalesPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [orders, setOrders] = useState<ShopifyOrder[]>([]);
   const [discardedOrderIds, setDiscardedOrderIds] = useState<Set<number>>(new Set());
+  const [rtoOrderIds, setRTOOrderIds] = useState<Set<number>>(new Set());
   const [selectedOrders, setSelectedOrders] = useState<Set<number>>(new Set());
   const [selectAll, setSelectAll] = useState(false);
   const [selectedMonthFilter, setSelectedMonthFilter] = useState<string>('all'); // 'all', 'current', or 'YYYY-MM'
@@ -35,9 +36,10 @@ export function SalesPage() {
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [ordersResponse, discardedResponse] = await Promise.all([
+      const [ordersResponse, discardedResponse, rtoResponse] = await Promise.all([
         api.getOrders(250, true), // Fetch all orders (not filtered)
         api.getDiscardedOrderIds(),
+        api.getRTOOrderIds(),
       ]);
       
       if (ordersResponse.success && ordersResponse.orders) {
@@ -46,6 +48,10 @@ export function SalesPage() {
       
       if (discardedResponse.success) {
         setDiscardedOrderIds(new Set(discardedResponse.discardedOrderIds));
+      }
+      
+      if (rtoResponse.success) {
+        setRTOOrderIds(new Set(rtoResponse.rtoOrderIds));
       }
     } catch (err) {
       console.error('Failed to load data:', err);
@@ -167,6 +173,57 @@ export function SalesPage() {
     }
   };
 
+  const handleMarkAsRTO = async () => {
+    if (selectedOrders.size === 0) return;
+    
+    setIsProcessing(true);
+    try {
+      const orderIds = Array.from(selectedOrders);
+      const orderNames = orderIds.map(id => {
+        const order = orders.find(o => o.id === id);
+        return order?.name || '';
+      });
+      
+      const response = await api.markOrdersAsRTO(orderIds, orderNames);
+      if (response.success) {
+        // Update local state
+        setRTOOrderIds(new Set([...rtoOrderIds, ...orderIds]));
+        setSelectedOrders(new Set());
+        setSelectAll(false);
+        setShowBulkMenu(false);
+      }
+    } catch (err) {
+      console.error('Failed to mark orders as RTO:', err);
+      alert('Failed to mark orders as RTO');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleUnmarkRTO = async () => {
+    if (selectedOrders.size === 0) return;
+    
+    setIsProcessing(true);
+    try {
+      const orderIds = Array.from(selectedOrders);
+      const response = await api.unmarkOrdersAsRTO(orderIds);
+      if (response.success) {
+        // Update local state
+        const newRTO = new Set(rtoOrderIds);
+        orderIds.forEach(id => newRTO.delete(id));
+        setRTOOrderIds(newRTO);
+        setSelectedOrders(new Set());
+        setSelectAll(false);
+        setShowBulkMenu(false);
+      }
+    } catch (err) {
+      console.error('Failed to unmark RTO orders:', err);
+      alert('Failed to unmark RTO orders');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const getMonthLabel = (monthKey: string) => {
     const [year, month] = monthKey.split('-');
     const date = new Date(parseInt(year), parseInt(month) - 1);
@@ -203,24 +260,22 @@ export function SalesPage() {
 
   if (isLoading) {
     return (
-      <div className="loading-section">
-        <div className="spinner"></div>
+      <div className={styles['loading-section']}>
+        <div className={styles.spinner}></div>
         <p>Loading orders...</p>
       </div>
     );
   }
 
   return (
-    <div className="sales-page">
-      <div className="content-section">
-        <div className="section-header">
-          <div className="header-content">
+    <div className={styles['sales-page']}>
+      <div className={styles['content-section']}>
+        <div className={styles['section-header']}>
+          <div className={styles['header-content']}>
             <div>
-              <h2>Sales</h2>
-              <p>Shopify orders • {filteredOrders.length} orders</p>
             </div>
-            <div className="header-actions">
-              <div className="month-filter">
+            <div className={styles['header-actions']}>
+              <div className={styles['month-filter']}>
                 <label htmlFor="month-select">Period:</label>
                 <select 
                   id="month-select"
@@ -230,7 +285,7 @@ export function SalesPage() {
                     setSelectedOrders(new Set());
                     setSelectAll(false);
                   }}
-                  className="filter-select"
+                  className={styles['filter-select']}
                 >
                   <option value="all">All Time</option>
                   <option value="current">This Month</option>
@@ -243,11 +298,11 @@ export function SalesPage() {
                 </select>
               </div>
               {selectedOrders.size > 0 && (
-                <div className="bulk-actions">
-                  <span className="selected-count">{selectedOrders.size} selected</span>
-                  <div className="bulk-action-dropdown">
+                <div className={styles['bulk-actions']}>
+                  <span className={styles['selected-count']}>{selectedOrders.size} selected</span>
+                  <div className={styles['bulk-action-dropdown']}>
                     <button 
-                      className="bulk-action-btn"
+                      className={styles['bulk-action-btn']}
                       onClick={() => setShowBulkMenu(!showBulkMenu)}
                       disabled={isProcessing}
                     >
@@ -258,14 +313,38 @@ export function SalesPage() {
                       {isProcessing ? 'Processing...' : 'Actions'}
                     </button>
                     {showBulkMenu && (
-                      <div className="bulk-menu">
+                      <div className={styles['bulk-menu']}>
                         <button 
-                          className="bulk-menu-item discard"
-                          onClick={handleDiscardOrders}
+                          className={`${styles['bulk-menu-item']} ${styles.rto}`}
+                          onClick={handleMarkAsRTO}
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M9 11l-6 6v-6h6z"/>
+                            <path d="M20 12h-8"/>
+                            <path d="M20 12l-4-4"/>
+                            <path d="M20 12l-4 4"/>
+                          </svg>
+                          Mark as RTO
+                        </button>
+                        <button 
+                          className={`${styles['bulk-menu-item']} ${styles['unmark-rto']}`}
+                          onClick={handleUnmarkRTO}
                         >
                           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <path d="M18 6L6 18"/>
                             <path d="M6 6l12 12"/>
+                          </svg>
+                          Unmark RTO
+                        </button>
+                        <div className={styles['menu-divider']}></div>
+                        <button 
+                          className={`${styles['bulk-menu-item']} ${styles.discard}`}
+                          onClick={handleDiscardOrders}
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <path d="M15 9l-6 6"/>
+                            <path d="M9 9l6 6"/>
                           </svg>
                           Discard Orders
                         </button>
@@ -279,53 +358,57 @@ export function SalesPage() {
         </div>
 
         {/* Orders Table */}
-        <div className="orders-table-container">
-          <table className="orders-table">
+        <div className={styles['orders-table-container']}>
+          <table className={styles['orders-table']}>
             <thead>
               <tr>
-                <th className="checkbox-cell">
+                <th className={styles['checkbox-cell']}>
                   <input
                     type="checkbox"
                     checked={selectAll}
                     onChange={handleSelectAll}
-                    className="table-checkbox"
+                    className={styles['table-checkbox']}
                   />
                 </th>
                 <th>Order</th>
                 <th>Items</th>
-                <th>Payment</th>
-                <th>Delivery Status</th>
+                <th>Tags</th>
                 <th>Date</th>
               </tr>
             </thead>
             <tbody>
               {filteredOrders.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="empty-state">
-                    <div className="empty-icon">📦</div>
-                    <div className="empty-text">No orders found</div>
+                  <td colSpan={5} className={styles['empty-state']}>
+                    <div className={styles['empty-icon']}>📦</div>
+                    <div className={styles['empty-text']}>No orders found</div>
                   </td>
                 </tr>
               ) : (
                 filteredOrders.map((order) => (
                   <tr
                     key={order.id}
-                    className={selectedOrders.has(order.id) ? 'selected' : ''}
+                    className={selectedOrders.has(order.id) ? styles.selected : ''}
                   >
-                    <td className="checkbox-cell">
+                    <td className={styles['checkbox-cell']}>
                       <input
                         type="checkbox"
                         checked={selectedOrders.has(order.id)}
                         onChange={() => handleSelectOrder(order.id)}
-                        className="table-checkbox"
+                        className={styles['table-checkbox']}
                       />
                     </td>
-                    <td className="order-name">{order.name}</td>
-                    <td className="line-items">
+                    <td className={styles['order-name']}>
+                      <div className={styles['order-name-wrapper']}>
+                        <span className={`${styles['payment-dot']} ${styles[order.paymentMethod?.toLowerCase() || 'prepaid']}`}></span>
+                        <span className={styles['order-number']}>{order.name}</span>
+                      </div>
+                    </td>
+                    <td className={styles['line-items']}>
                       {order.lineItems && order.lineItems.length > 0 ? (
-                        <div className="items-list">
+                        <div className={styles['items-list']}>
                           {order.lineItems.map((item, idx) => (
-                            <div key={idx} className="item">
+                            <div key={idx} className={styles.item}>
                               {item.quantity}x {item.title}
                               {item.variantTitle && ` (${item.variantTitle})`}
                             </div>
@@ -335,24 +418,22 @@ export function SalesPage() {
                         '—'
                       )}
                     </td>
-                    <td className="payment-method">
-                      <span className={`payment-badge ${order.paymentMethod?.toLowerCase() || 'prepaid'}`}>
-                        {order.paymentMethod || 'Prepaid'}
-                      </span>
+                    <td className={styles['order-tags']}>
+                      <div className={styles['tags-wrapper']}>
+                        {(() => {
+                          const deliveryBadge = getDeliveryStatusBadge(order.deliveryStatus);
+                          return deliveryBadge.text !== '—' && (
+                            <span className={`${styles['tag-badge']} ${styles[`delivery-${deliveryBadge.className}`]}`}>
+                              {deliveryBadge.text}
+                            </span>
+                          );
+                        })()}
+                        {rtoOrderIds.has(order.id) && (
+                          <span className={`${styles['tag-badge']} ${styles.rto}`}>RTO</span>
+                        )}
+                      </div>
                     </td>
-                    <td className="delivery-status">
-                      {(() => {
-                        const badge = getDeliveryStatusBadge(order.deliveryStatus);
-                        return badge.text === '—' ? (
-                          <span className="status-empty">—</span>
-                        ) : (
-                          <span className={`status-badge ${badge.className}`}>
-                            {badge.text}
-                          </span>
-                        );
-                      })()}
-                    </td>
-                    <td className="order-date">
+                    <td className={styles['order-date']}>
                       {new Date(order.createdAt).toLocaleDateString('en-IN', {
                         year: 'numeric',
                         month: 'short',

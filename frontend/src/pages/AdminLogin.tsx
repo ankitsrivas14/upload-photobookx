@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
-import './AdminLogin.css';
+import styles from './AdminLogin.module.css';
 
 export function AdminLogin() {
   const navigate = useNavigate();
@@ -46,21 +46,21 @@ export function AdminLogin() {
   };
 
   return (
-    <div className="admin-login-container">
-      <div className="admin-login-card">
-        <div className="admin-login-header">
+    <div className={styles['admin-login-container']}>
+      <div className={styles['admin-login-card']}>
+        <div className={styles['admin-login-header']}>
           <img 
             src="https://photobookx.com/cdn/shop/files/Screenshot_2025-05-18_at_9.30.14_PM-removebg-preview.png?v=1747584052" 
             alt="PhotoBookX" 
-            className="admin-logo"
+            className={styles['admin-logo']}
           />
           <h1>Admin Portal</h1>
-          <p className="subtitle">{isLogin ? 'Sign in to manage orders' : 'Create admin account'}</p>
+          <p className={styles.subtitle}>{isLogin ? 'Sign in to manage orders' : 'Create admin account'}</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="admin-login-form">
+        <form onSubmit={handleSubmit} className={styles['admin-login-form']}>
           {!isLogin && (
-            <div className="input-group">
+            <div className={styles['input-group']}>
               <label htmlFor="name">Name</label>
               <input
                 type="text"
@@ -73,7 +73,7 @@ export function AdminLogin() {
             </div>
           )}
 
-          <div className="input-group">
+          <div className={styles['input-group']}>
             <label htmlFor="email">Email</label>
             <input
               type="email"
@@ -85,7 +85,7 @@ export function AdminLogin() {
             />
           </div>
 
-          <div className="input-group">
+          <div className={styles['input-group']}>
             <label htmlFor="password">Password</label>
             <input
               type="password"
@@ -97,14 +97,14 @@ export function AdminLogin() {
             />
           </div>
 
-          {error && <div className="error-message">{error}</div>}
+          {error && <div className={styles['error-message']}>{error}</div>}
 
-          <button type="submit" className="submit-btn" disabled={isLoading}>
+          <button type="submit" className={styles['submit-btn']} disabled={isLoading}>
             {isLoading ? 'Please wait...' : (isLogin ? 'Sign In' : 'Create Account')}
           </button>
         </form>
 
-        <p className="toggle-mode">
+        <p className={styles['toggle-mode']}>
           {isLogin ? "Don't have an account? " : 'Already have an account? '}
           <button type="button" onClick={() => setIsLogin(!isLogin)}>
             {isLogin ? 'Register' : 'Sign In'}

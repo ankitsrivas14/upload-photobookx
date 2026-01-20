@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../services/api';
 import type { UploadInfo } from '../services/api';
-import './UploadPage.css';
+import styles from './UploadPage.module.css';
 
 type PhotoSize = 'large' | 'small';
 type PhotoType = 'normal' | 'polaroid';
@@ -352,8 +352,8 @@ export function UploadPage() {
 
   if (isLoading) {
     return (
-      <div className="upload-page loading">
-        <div className="loader"></div>
+      <div className={`${styles['upload-page']} ${styles.loading}`}>
+        <div className={styles.loader}></div>
         <p>Loading...</p>
       </div>
     );
@@ -361,16 +361,16 @@ export function UploadPage() {
 
   if (error || !info) {
     return (
-      <div className="upload-page error-page">
-        <div className="error-container">
-          <svg className="error-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <div className={`${styles['upload-page']} ${styles['error-page']}`}>
+        <div className={styles['error-container']}>
+          <svg className={styles['error-icon']} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <circle cx="12" cy="12" r="10"/>
             <line x1="12" y1="8" x2="12" y2="12"/>
             <line x1="12" y1="16" x2="12.01" y2="16"/>
           </svg>
           <h1>Link Invalid</h1>
           <p>{error || 'This upload link is invalid or has expired.'}</p>
-          <a href="https://photobookx.com" className="primary-btn">Visit PhotoBookX</a>
+          <a href="https://photobookx.com" className={styles['primary-btn']}>Visit PhotoBookX</a>
         </div>
       </div>
     );
@@ -383,32 +383,32 @@ export function UploadPage() {
       : info.currentUploads || actualUploaded || maxUploads;
 
     return (
-      <div className="upload-page">
-        <header className="header">
+      <div className={styles['upload-page']}>
+        <header className={styles.header}>
           <img 
             src="https://photobookx.com/cdn/shop/files/Screenshot_2025-05-18_at_9.30.14_PM-removebg-preview.png?v=1747584052" 
             alt="PhotoBookX" 
-            className="logo"
+            className={styles.logo}
           />
         </header>
 
-        <main className="main-content">
-          <div className="upload-container">
-            <div className="submitted-success">
-              <div className="success-icon-wrapper">
+        <main className={styles['main-content']}>
+          <div className={styles['upload-container']}>
+            <div className={styles['submitted-success']}>
+              <div className={styles['success-icon-wrapper']}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
                   <polyline points="22 4 12 14.01 9 11.01"/>
                 </svg>
               </div>
               <h1>Submitted for Printing!</h1>
-              <p className="submitted-order">Order {info.orderNumber}</p>
-              <p className="submitted-message">
+              <p className={styles['submitted-order']}>Order {info.orderNumber}</p>
+              <p className={styles['submitted-message']}>
                 Your {submittedCount} photos have been submitted successfully. 
                 The printing process has begun.
               </p>
-              <div className="submitted-details">
-                <div className="detail-item">
+              <div className={styles['submitted-details']}>
+                <div className={styles['detail-item']}>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
                     <line x1="16" y1="2" x2="16" y2="6"/>
@@ -427,8 +427,8 @@ export function UploadPage() {
               
               {/* Show uploaded photos in read-only mode */}
               {uploadedImages.length > 0 && (
-                <div className="uploaded-section readonly">
-                  <div className="section-header">
+                <div className={`${styles['uploaded-section']} ${styles.readonly}`}>
+                  <div className={styles['section-header']}>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
                       <circle cx="8.5" cy="8.5" r="1.5"/>
@@ -436,7 +436,7 @@ export function UploadPage() {
                     </svg>
                     <h3>Your Photos ({uploadedImages.length})</h3>
                   </div>
-                  <div className="uploaded-grid">
+                  <div className={styles['uploaded-grid']}>
                     {uploadedImages.map((img) => (
                       <div key={img.id} className={`${getImageClass(img.id)} readonly`}>
                         <img 
@@ -450,7 +450,7 @@ export function UploadPage() {
                 </div>
               )}
 
-              <a href="https://photobookx.com" className="primary-btn">
+              <a href="https://photobookx.com" className={styles['primary-btn']}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
                   <polyline points="9 22 9 12 15 12 15 22"/>
@@ -465,30 +465,30 @@ export function UploadPage() {
   }
 
   return (
-    <div className="upload-page">
-      <header className="header">
+    <div className={styles['upload-page']}>
+      <header className={styles.header}>
         <img 
           src="https://photobookx.com/cdn/shop/files/Screenshot_2025-05-18_at_9.30.14_PM-removebg-preview.png?v=1747584052" 
           alt="PhotoBookX" 
-          className="logo"
+          className={styles.logo}
         />
       </header>
 
-      <main className="main-content">
-        <div className="upload-container">
+      <main className={styles['main-content']}>
+        <div className={styles['upload-container']}>
           {/* Order Info */}
-          <div className="order-info">
+          <div className={styles['order-info']}>
             <h1>Upload Photos</h1>
-            <p className="order-number">Order {info.orderNumber}</p>
-            <div className="stats-row">
-              <div className="stat-item">
+            <p className={styles['order-number']}>Order {info.orderNumber}</p>
+            <div className={styles['stats-row']}>
+              <div className={styles['stat-item']}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
                   <circle cx="12" cy="13" r="4"/>
                 </svg>
                 <span><strong>{actualRemaining}</strong> remaining</span>
               </div>
-              <div className="stat-item uploaded">
+              <div className={`${styles['stat-item']} ${styles.uploaded}`}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <polyline points="20 6 9 17 4 12"/>
                 </svg>
@@ -499,26 +499,26 @@ export function UploadPage() {
 
           {/* Step 1: Options Selection */}
           {!optionsConfirmed ? (
-            <div className="options-step">
-              <div className="step-header">
-                <div className="step-number">1</div>
-                <div className="step-info">
+            <div className={styles['options-step']}>
+              <div className={styles['step-header']}>
+                <div className={styles['step-number']}>1</div>
+                <div className={styles['step-info']}>
                   <h2>Choose Print Settings</h2>
                   <p>These settings will apply to <strong>all photos</strong> you upload</p>
                 </div>
               </div>
 
               {/* Photo Size Section */}
-              <div className="option-section-block">
-                <div className="option-group">
-                  <label className="option-label">
+              <div className={styles['option-section-block']}>
+                <div className={styles['option-group']}>
+                  <label className={styles['option-label']}>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
                       <line x1="9" y1="3" x2="9" y2="21"/>
                     </svg>
                     Photo Size
                   </label>
-                  <div className="toggle-group">
+                  <div className={styles['toggle-group']}>
                     <button 
                       className={`toggle-btn ${photoSize === 'small' ? 'active' : ''}`}
                       onClick={() => setPhotoSize('small')}
@@ -526,8 +526,8 @@ export function UploadPage() {
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <rect x="5" y="5" width="14" height="14" rx="2"/>
                       </svg>
-                      <span className="toggle-label">Small</span>
-                      <span className="toggle-desc">3" × 4"</span>
+                      <span className={styles['toggle-label']}>Small</span>
+                      <span className={styles['toggle-desc']}>3" × 4"</span>
                     </button>
                     <button 
                       className={`toggle-btn ${photoSize === 'large' ? 'active' : ''}`}
@@ -536,13 +536,13 @@ export function UploadPage() {
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <rect x="3" y="3" width="18" height="18" rx="2"/>
                       </svg>
-                      <span className="toggle-label">Large</span>
-                      <span className="toggle-desc">4" × 6"</span>
+                      <span className={styles['toggle-label']}>Large</span>
+                      <span className={styles['toggle-desc']}>4" × 6"</span>
                     </button>
                   </div>
                 </div>
                 
-                <div className="info-banner recommendation">
+                <div className={`${styles['info-banner']} ${styles.recommendation}`}>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <circle cx="12" cy="12" r="10"/>
                     <path d="M12 16v-4"/>
@@ -553,9 +553,9 @@ export function UploadPage() {
               </div>
 
               {/* Print Style Section */}
-              <div className="option-section-block">
-                <div className="option-group">
-                  <label className="option-label">
+              <div className={styles['option-section-block']}>
+                <div className={styles['option-group']}>
+                  <label className={styles['option-label']}>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
                       <circle cx="8.5" cy="8.5" r="1.5"/>
@@ -563,7 +563,7 @@ export function UploadPage() {
                     </svg>
                     Print Style
                   </label>
-                  <div className="toggle-group">
+                  <div className={styles['toggle-group']}>
                     <button 
                       className={`toggle-btn ${photoType === 'normal' ? 'active' : ''}`}
                       onClick={() => setPhotoType('normal')}
@@ -571,8 +571,8 @@ export function UploadPage() {
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <rect x="3" y="3" width="18" height="18" rx="2"/>
                       </svg>
-                      <span className="toggle-label">Normal</span>
-                      <span className="toggle-desc">Edge to edge</span>
+                      <span className={styles['toggle-label']}>Normal</span>
+                      <span className={styles['toggle-desc']}>Edge to edge</span>
                     </button>
                     <button 
                       className={`toggle-btn ${photoType === 'polaroid' ? 'active' : ''}`}
@@ -582,14 +582,14 @@ export function UploadPage() {
                         <rect x="3" y="1" width="18" height="22" rx="2"/>
                         <rect x="5" y="3" width="14" height="12" rx="1"/>
                       </svg>
-                      <span className="toggle-label">Polaroid</span>
-                      <span className="toggle-desc">White border</span>
+                      <span className={styles['toggle-label']}>Polaroid</span>
+                      <span className={styles['toggle-desc']}>White border</span>
                     </button>
                   </div>
                 </div>
               </div>
 
-              <div className="info-banner">
+              <div className={styles['info-banner']}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <circle cx="12" cy="12" r="10"/>
                   <line x1="12" y1="16" x2="12" y2="12"/>
@@ -598,7 +598,7 @@ export function UploadPage() {
                 <span>All photos will be printed with these settings. You cannot mix sizes or styles in the same order.</span>
               </div>
 
-              <button className="confirm-options-btn" onClick={handleConfirmOptions}>
+              <button className={styles['confirm-options-btn']} onClick={handleConfirmOptions}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <polyline points="20 6 9 17 4 12"/>
                 </svg>
@@ -608,22 +608,22 @@ export function UploadPage() {
           ) : (
             <>
               {/* Confirmed Options Banner */}
-              <div className="confirmed-options">
-                <div className="confirmed-info">
-                  <span className="confirmed-label">Print Settings:</span>
-                  <span className="option-tag">{photoSize === 'large' ? 'Large (4"×6")' : 'Small (3"×4")'}</span>
-                  <span className="option-tag">{photoType === 'normal' ? 'Normal' : 'Polaroid'}</span>
+              <div className={styles['confirmed-options']}>
+                <div className={styles['confirmed-info']}>
+                  <span className={styles['confirmed-label']}>Print Settings:</span>
+                  <span className={styles['option-tag']}>{photoSize === 'large' ? 'Large (4"×6")' : 'Small (3"×4")'}</span>
+                  <span className={styles['option-tag']}>{photoType === 'normal' ? 'Normal' : 'Polaroid'}</span>
                 </div>
-                <button className="change-options-btn" onClick={handleChangeOptions}>
+                <button className={styles['change-options-btn']} onClick={handleChangeOptions}>
                   Change
                 </button>
               </div>
 
               {/* Step 2: Upload */}
-              <div className="upload-step">
-                <div className="step-header">
-                  <div className="step-number">2</div>
-                  <div className="step-info">
+              <div className={styles['upload-step']}>
+                <div className={styles['step-header']}>
+                  <div className={styles['step-number']}>2</div>
+                  <div className={styles['step-info']}>
                     <h2>Upload Your Photos</h2>
                     <p>Add up to {actualRemaining} more photos</p>
                   </div>
@@ -646,26 +646,26 @@ export function UploadPage() {
                       onChange={handleFileSelect}
                       hidden
                     />
-                    <svg className="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <svg className={styles['upload-icon']} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
                       <polyline points="17 8 12 3 7 8"/>
                       <line x1="12" y1="3" x2="12" y2="15"/>
                     </svg>
-                    <p className="upload-text">Drop photos here or click to browse</p>
-                    <p className="upload-hint">JPG, PNG up to 20MB each</p>
+                    <p className={styles['upload-text']}>Drop photos here or click to browse</p>
+                    <p className={styles['upload-hint']}>JPG, PNG up to 20MB each</p>
                   </div>
                 )}
 
                 {/* Selected Files Preview */}
                 {selectedFiles.length > 0 && (
-                  <div className="preview-section">
-                    <div className="preview-header">
-                      <span className="preview-count">{selectedFiles.length} photo{selectedFiles.length !== 1 ? 's' : ''} selected</span>
+                  <div className={styles['preview-section']}>
+                    <div className={styles['preview-header']}>
+                      <span className={styles['preview-count']}>{selectedFiles.length} photo{selectedFiles.length !== 1 ? 's' : ''} selected</span>
                       {pendingCount > 0 && (
-                        <button className="upload-btn" onClick={handleUpload} disabled={isUploading}>
+                        <button className={styles['upload-btn']} onClick={handleUpload} disabled={isUploading}>
                           {isUploading ? (
                             <>
-                              <div className="btn-loader"></div>
+                              <div className={styles['btn-loader']}></div>
                               Uploading...
                             </>
                           ) : (
@@ -681,7 +681,7 @@ export function UploadPage() {
                         </button>
                       )}
                     </div>
-                    <div className="preview-grid">
+                    <div className={styles['preview-grid']}>
                       {selectedFiles.map((file, index) => (
                         <div 
                           key={index} 
@@ -694,30 +694,30 @@ export function UploadPage() {
                               onError={() => markPreviewError(file.preview)}
                             />
                           ) : (
-                            <div className="image-fallback">
+                            <div className={styles['image-fallback']}>
                               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                 <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
                                 <line x1="9" y1="3" x2="9" y2="21"/>
                                 <circle cx="14.5" cy="8.5" r="1.5"/>
                               </svg>
                               <p>Preview not available</p>
-                              <span className="fallback-name">{file.file.name}</span>
+                              <span className={styles['fallback-name']}>{file.file.name}</span>
                             </div>
                           )}
                           {file.uploading && (
-                            <div className="preview-overlay">
-                              <div className="preview-loader"></div>
+                            <div className={styles['preview-overlay']}>
+                              <div className={styles['preview-loader']}></div>
                             </div>
                           )}
                           {file.uploaded && (
-                            <div className="preview-overlay success">
+                            <div className={`${styles['preview-overlay']} ${styles.success}`}>
                               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
                                 <polyline points="20 6 9 17 4 12"/>
                               </svg>
                             </div>
                           )}
                           {file.error && (
-                            <div className="preview-overlay error">
+                            <div className={`${styles['preview-overlay']} ${styles.error}`}>
                               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                 <line x1="18" y1="6" x2="6" y2="18"/>
                                 <line x1="6" y1="6" x2="18" y2="18"/>
@@ -725,7 +725,7 @@ export function UploadPage() {
                             </div>
                           )}
                           {!file.uploaded && !file.uploading && (
-                            <button className="remove-btn" onClick={(e) => { e.stopPropagation(); removeFile(index); }}>
+                            <button className={styles['remove-btn']} onClick={(e) => { e.stopPropagation(); removeFile(index); }}>
                               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                 <line x1="18" y1="6" x2="6" y2="18"/>
                                 <line x1="6" y1="6" x2="18" y2="18"/>
@@ -743,8 +743,8 @@ export function UploadPage() {
 
           {/* Uploaded Images Section */}
           {uploadedImages.length > 0 && (
-            <div className="uploaded-section">
-              <div className="section-header">
+            <div className={styles['uploaded-section']}>
+              <div className={styles['section-header']}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
                   <polyline points="22 4 12 14.01 9 11.01"/>
@@ -752,7 +752,7 @@ export function UploadPage() {
                 <h3>Uploaded Photos ({uploadedImages.length})</h3>
               </div>
               
-              <div className="data-notice">
+              <div className={styles['data-notice']}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <circle cx="12" cy="12" r="10"/>
                   <line x1="12" y1="16" x2="12" y2="12"/>
@@ -760,18 +760,18 @@ export function UploadPage() {
                 </svg>
                 <span>Your photos will be permanently deleted from our servers after printing is complete.</span>
               </div>
-              <div className="uploaded-grid">
+              <div className={styles['uploaded-grid']}>
                 {uploadedImages.map((img) => (
                   <div key={img.id} className={`${getImageClass(img.id)} ${deletingImageId === img.id ? 'deleting' : ''}`}>
                     {imageLoadFailures[img.id] ? (
-                      <div className="image-fallback">
+                      <div className={styles['image-fallback']}>
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                           <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
                           <line x1="9" y1="3" x2="9" y2="21"/>
                           <circle cx="14.5" cy="8.5" r="1.5"/>
                         </svg>
                         <p>Preview not available</p>
-                        <span className="fallback-name">{img.originalName}</span>
+                        <span className={styles['fallback-name']}>{img.originalName}</span>
                       </div>
                     ) : (
                       <img 
@@ -782,18 +782,18 @@ export function UploadPage() {
                       />
                     )}
                     {deletingImageId === img.id ? (
-                      <div className="delete-overlay">
-                        <div className="delete-loader"></div>
+                      <div className={styles['delete-overlay']}>
+                        <div className={styles['delete-loader']}></div>
                       </div>
                     ) : (
                       <>
-                        <div className="uploaded-check">
+                        <div className={styles['uploaded-check']}>
                           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
                             <polyline points="20 6 9 17 4 12"/>
                           </svg>
                         </div>
                         <button 
-                          className="delete-btn" 
+                          className={styles['delete-btn']} 
                           onClick={() => handleDeleteImage(img.id)}
                           title="Delete photo"
                         >
@@ -813,10 +813,10 @@ export function UploadPage() {
           )}
 
           {/* Send for Printing Section */}
-          <div className="submit-section">
+          <div className={styles['submit-section']}>
             {allPhotosUploaded ? (
               <>
-                <div className="submit-ready">
+                <div className={styles['submit-ready']}>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
                     <polyline points="22 4 12 14.01 9 11.01"/>
@@ -824,13 +824,13 @@ export function UploadPage() {
                   <span>All {maxUploads} photos uploaded! Ready to print.</span>
                 </div>
                 <button 
-                  className="submit-btn" 
+                  className={styles['submit-btn']} 
                   onClick={handleSubmitForPrinting}
                   disabled={isSubmitting}
                 >
                   {isSubmitting ? (
                     <>
-                      <div className="btn-loader"></div>
+                      <div className={styles['btn-loader']}></div>
                       Submitting...
                     </>
                   ) : (
@@ -847,14 +847,14 @@ export function UploadPage() {
               </>
             ) : (
               <>
-                <div className="submit-pending">
+                <div className={styles['submit-pending']}>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <circle cx="12" cy="12" r="10"/>
                     <polyline points="12 6 12 12 16 14"/>
                   </svg>
                   <span>Upload {actualRemaining} more photo{actualRemaining !== 1 ? 's' : ''} to submit for printing</span>
                 </div>
-                <button className="submit-btn disabled" disabled>
+                <button className={`${styles['submit-btn']} ${styles.disabled}`} disabled>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <polyline points="6 9 6 2 18 2 18 9"/>
                     <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
@@ -866,7 +866,7 @@ export function UploadPage() {
             )}
           </div>
 
-          <p className="expires-text">
+          <p className={styles['expires-text']}>
             Link expires {new Date(info.expiresAt!).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
           </p>
         </div>
@@ -874,9 +874,9 @@ export function UploadPage() {
 
       {/* Confirmation Modal */}
       {showConfirmModal && (
-        <div className="modal-overlay" onClick={() => setShowConfirmModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-icon">
+        <div className={styles['modal-overlay']} onClick={() => setShowConfirmModal(false)}>
+          <div className={styles['modal-content']} onClick={(e) => e.stopPropagation()}>
+            <div className={styles['modal-icon']}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <polyline points="6 9 6 2 18 2 18 9"/>
                 <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
@@ -884,10 +884,10 @@ export function UploadPage() {
               </svg>
             </div>
             <h2>Ready to Print?</h2>
-            <p className="modal-message">
+            <p className={styles['modal-message']}>
               You're about to submit <strong>{actualUploaded} photos</strong> for printing.
             </p>
-            <div className="modal-warning">
+            <div className={styles['modal-warning']}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
                 <line x1="12" y1="9" x2="12" y2="13"/>
@@ -898,11 +898,11 @@ export function UploadPage() {
                 <span>Once submitted, you won't be able to add, remove, or modify any photos.</span>
               </div>
             </div>
-            <div className="modal-actions">
-              <button className="modal-btn cancel" onClick={() => setShowConfirmModal(false)}>
+            <div className={styles['modal-actions']}>
+              <button className={`${styles['modal-btn']} ${styles.cancel}`} onClick={() => setShowConfirmModal(false)}>
                 Cancel
               </button>
-              <button className="modal-btn confirm" onClick={confirmSubmitForPrinting}>
+              <button className={`${styles['modal-btn']} ${styles.confirm}`} onClick={confirmSubmitForPrinting}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <polyline points="20 6 9 17 4 12"/>
                 </svg>

@@ -1,5 +1,5 @@
 import express, { Response } from 'express';
-import { DiscardedOrder } from '../models';
+import { DiscardedOrder, RTOOrder } from '../models';
 import { requireAdmin } from './adminAuth';
 import { AuthenticatedRequest } from '../types';
 
@@ -98,6 +98,103 @@ router.delete('/discard-orders', requireAdmin, async (req: AuthenticatedRequest,
   } catch (error) {
     console.error('Error restoring orders:', error);
     res.status(500).json({ success: false, error: 'Failed to restore orders' });
+  }
+});
+
+/**
+ * GET /api/admin/sales/rto-orders
+ * Get all RTO order IDs
+ */
+router.get('/rto-orders', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const rtoOrders = await RTOOrder.find({}, { shopifyOrderId: 1, _id: 0 });
+    const orderIds = rtoOrders.map(order => order.shopifyOrderId);
+    
+    res.json({
+      success: true,
+      rtoOrderIds: orderIds,
+    });
+  } catch (error) {
+    console.error('Error fetching RTO orders:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch RTO orders' });
+  }
+});
+
+/**
+ * POST /api/admin/sales/mark-rto
+ * Bulk mark orders as RTO
+ */
+router.post('/mark-rto', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { orderIds, orderNames, notes } = req.body;
+    
+    if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
+      res.status(400).json({ success: false, error: 'Order IDs are required' });
+      return;
+    }
+    
+    const userId = req.user!.userId;
+    
+    // Create a map of orderIds to orderNames
+    const orderNameMap = new Map<number, string>();
+    if (orderNames && Array.isArray(orderNames) && orderNames.length === orderIds.length) {
+      orderIds.forEach((id, idx) => {
+        orderNameMap.set(id, orderNames[idx]);
+      });
+    }
+    
+    // Bulk insert (ignore duplicates)
+    const rtoOrders = orderIds.map(orderId => ({
+      shopifyOrderId: orderId,
+      orderName: orderNameMap.get(orderId) || `Order ${orderId}`,
+      markedRTOBy: userId,
+      markedRTOAt: new Date(),
+      notes: notes || undefined,
+    }));
+    
+    await RTOOrder.insertMany(rtoOrders, { ordered: false });
+    
+    res.json({
+      success: true,
+      message: `${orderIds.length} order(s) marked as RTO`,
+    });
+  } catch (error: any) {
+    // Handle duplicate key errors gracefully
+    if (error.code === 11000) {
+      res.json({
+        success: true,
+        message: 'Orders marked as RTO (some were already marked)',
+      });
+      return;
+    }
+    
+    console.error('Error marking orders as RTO:', error);
+    res.status(500).json({ success: false, error: 'Failed to mark orders as RTO' });
+  }
+});
+
+/**
+ * DELETE /api/admin/sales/mark-rto
+ * Remove RTO marking from orders
+ */
+router.delete('/mark-rto', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { orderIds } = req.body;
+    
+    if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
+      res.status(400).json({ success: false, error: 'Order IDs are required' });
+      return;
+    }
+    
+    await RTOOrder.deleteMany({ shopifyOrderId: { $in: orderIds } });
+    
+    res.json({
+      success: true,
+      message: `${orderIds.length} order(s) unmarked from RTO`,
+    });
+  } catch (error) {
+    console.error('Error unmarking RTO orders:', error);
+    res.status(500).json({ success: false, error: 'Failed to unmark RTO orders' });
   }
 });
 

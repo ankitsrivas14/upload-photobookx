@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../services/api';
-import './MetaAdsPage.css';
+import styles from './MetaAdsPage.module.css';
 
 interface ExpenseSource {
   id: string;
@@ -281,30 +281,28 @@ export function MetaAdsPage() {
 
   if (isLoading) {
     return (
-      <div className="loading-section">
-        <div className="spinner"></div>
+      <div className={styles['loading-section']}>
+        <div className={styles.spinner}></div>
         <p>Loading...</p>
       </div>
     );
   }
 
   return (
-    <div className="meta-ads-page-wrapper">
-      <div className="meta-ads-page">
-      <div className="content-section">
-        <div className="section-header">
-          <div className="header-content">
+    <div className={styles['meta-ads-page-wrapper']}>
+      <div className={styles['meta-ads-page']}>
+      <div className={styles['content-section']}>
+        <div className={styles['section-header']}>
+          <div className={styles['header-content']}>
             <div>
-              <h2>Meta Ads Expenses</h2>
-              <p>Track and manage your Meta (Facebook/Instagram) advertising expenses</p>
             </div>
-            <div className="month-filter">
+            <div className={styles['month-filter']}>
               <label htmlFor="month-select">Period:</label>
               <select 
                 id="month-select"
                 value={selectedMonthFilter} 
                 onChange={(e) => setSelectedMonthFilter(e.target.value)}
-                className="filter-select"
+                className={styles['filter-select']}
               >
                 <option value="current">This Month</option>
                 <option value="all">All Time</option>
@@ -320,36 +318,36 @@ export function MetaAdsPage() {
         </div>
 
         {/* Stats */}
-        <div className="expense-stats">
-          <div className="stat-card">
-            <div className="stat-icon" style={{ backgroundColor: '#e0f2fe', color: '#0284c7' }}>
+        <div className={styles['expense-stats']}>
+          <div className={styles['stat-card']}>
+            <div className={styles['stat-icon']} style={{ backgroundColor: '#e0f2fe', color: '#0284c7' }}>
               ₹
             </div>
-            <div className="stat-content">
-              <div className="stat-value">₹{totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-              <div className="stat-label">Total Amount Paid</div>
+            <div className={styles['stat-content']}>
+              <div className={styles['stat-value']}>₹{totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+              <div className={styles['stat-label']}>Total Amount Paid</div>
             </div>
           </div>
-          <div className="stat-card">
-            <div className="stat-icon" style={{ backgroundColor: '#f3f0ff', color: '#7c3aed' }}>
+          <div className={styles['stat-card']}>
+            <div className={styles['stat-icon']} style={{ backgroundColor: '#f3f0ff', color: '#7c3aed' }}>
               📊
             </div>
-            <div className="stat-content">
-              <div className="stat-value">{expenses.length}</div>
-              <div className="stat-label">Total Entries</div>
+            <div className={styles['stat-content']}>
+              <div className={styles['stat-value']}>{expenses.length}</div>
+              <div className={styles['stat-label']}>Total Entries</div>
             </div>
           </div>
         </div>
 
         {/* Add Expense Form */}
-        <div className="add-expense-form">
+        <div className={styles['add-expense-form']}>
           <h3>Add New Expense</h3>
           <form onSubmit={handleSubmit}>
-            <div className="form-row">
-              <div className="form-group">
+            <div className={styles['form-row']}>
+              <div className={styles['form-group']}>
                 <label>Amount (₹)</label>
-                <div className="input-with-prefix">
-                  <span className="input-prefix">₹</span>
+                <div className={styles['input-with-prefix']}>
+                  <span className={styles['input-prefix']}>₹</span>
                   <input
                     type="number"
                     placeholder="0.00"
@@ -362,7 +360,7 @@ export function MetaAdsPage() {
                 </div>
               </div>
 
-              <div className="form-group">
+              <div className={styles['form-group']}>
                 <label>Date</label>
                 <input
                   type="date"
@@ -372,9 +370,9 @@ export function MetaAdsPage() {
                 />
               </div>
 
-              <div className="form-group">
+              <div className={styles['form-group']}>
                 <label>Source</label>
-                <div className="source-select-wrapper">
+                <div className={styles['source-select-wrapper']}>
                   <select
                     value={selectedSourceId}
                     onChange={(e) => setSelectedSourceId(e.target.value)}
@@ -389,7 +387,7 @@ export function MetaAdsPage() {
                   </select>
                   <button
                     type="button"
-                    className="add-source-btn"
+                    className={styles['add-source-btn']}
                     onClick={() => setShowAddSourceModal(true)}
                   >
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -402,7 +400,7 @@ export function MetaAdsPage() {
               </div>
             </div>
 
-            <div className="form-group">
+            <div className={styles['form-group']}>
               <label>Notes (Optional)</label>
               <input
                 type="text"
@@ -412,17 +410,17 @@ export function MetaAdsPage() {
               />
             </div>
 
-            <div className="form-actions">
-              <div className="checkbox-group">
-                <label className="checkbox-label">
+            <div className={styles['form-actions']}>
+              <div className={styles['checkbox-group']}>
+                <label className={styles['checkbox-label']}>
                   <input
                     type="checkbox"
                     checked={isTaxExempt}
                     onChange={(e) => setIsTaxExempt(e.target.checked)}
-                    className="checkbox-input"
+                    className={styles['checkbox-input']}
                   />
-                  <span className="checkbox-text">
-                    <svg className="checkbox-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                  <span className={styles['checkbox-text']}>
+                    <svg className={styles['checkbox-icon']} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
                       <polyline points="20 6 9 17 4 12"/>
                     </svg>
                     Tax Exempt
@@ -430,10 +428,10 @@ export function MetaAdsPage() {
                 </label>
               </div>
 
-              <button type="submit" className="submit-btn" disabled={isSubmitting}>
+              <button type="submit" className={styles['submit-btn']} disabled={isSubmitting}>
               {isSubmitting ? (
                 <>
-                  <div className="btn-loader"></div>
+                  <div className={styles['btn-loader']}></div>
                   Adding...
                 </>
               ) : (
@@ -451,20 +449,20 @@ export function MetaAdsPage() {
         </div>
 
         {/* Expenses List */}
-        <div className="expenses-list">
-          <div className="list-header">
+        <div className={styles['expenses-list']}>
+          <div className={styles['list-header']}>
             <h3>Expense History ({getCurrentFilterLabel()})</h3>
-            <span className="entry-count">{filteredExpenses.length} entries</span>
+            <span className={styles['entry-count']}>{filteredExpenses.length} entries</span>
           </div>
 
           {filteredExpenses.length === 0 ? (
-            <div className="empty-state">
-              <div className="empty-icon">📝</div>
-              <div className="empty-text">No expenses logged yet</div>
+            <div className={styles['empty-state']}>
+              <div className={styles['empty-icon']}>📝</div>
+              <div className={styles['empty-text']}>No expenses logged yet</div>
             </div>
           ) : (
-            <div className="table-card">
-              <table className="data-table">
+            <div className={styles['table-card']}>
+              <table className={styles['data-table']}>
                 <thead>
                   <tr>
                     <th>Date</th>
@@ -479,30 +477,30 @@ export function MetaAdsPage() {
                 <tbody>
                   {filteredExpenses.map((expense) => (
                     <tr key={expense.id}>
-                      <td className="date-cell">
+                      <td className={styles['date-cell']}>
                         {new Date(expense.date).toLocaleDateString('en-IN', {
                           year: 'numeric',
                           month: 'short',
                           day: 'numeric',
                         })}
                       </td>
-                      <td className="amount-cell">
+                      <td className={styles['amount-cell']}>
                         ₹{expense.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
                       <td>
-                        <span className="source-badge">{expense.sourceName}</span>
+                        <span className={styles['source-badge']}>{expense.sourceName}</span>
                       </td>
-                      <td className="notes-cell">
-                        {expense.notes || <span className="no-notes">—</span>}
+                      <td className={styles['notes-cell']}>
+                        {expense.notes || <span className={styles['no-notes']}>—</span>}
                       </td>
                       <td>
                         {expense.isTaxExempt ? (
-                          <span className="tax-badge exempt">Exempt</span>
+                          <span className={`${styles['tax-badge']} ${styles.exempt}`}>Exempt</span>
                         ) : (
-                          <span className="tax-badge taxable">Taxable</span>
+                          <span className={`${styles['tax-badge']} ${styles.taxable}`}>Taxable</span>
                         )}
                       </td>
-                      <td className="date-cell">
+                      <td className={styles['date-cell']}>
                         {new Date(expense.createdAt).toLocaleDateString('en-IN', {
                           month: 'short',
                           day: 'numeric',
@@ -510,7 +508,7 @@ export function MetaAdsPage() {
                       </td>
                       <td>
                         <button
-                          className="delete-btn"
+                          className={styles['delete-btn']}
                           onClick={() => handleDeleteExpense(expense.id)}
                           title="Delete expense"
                         >
@@ -531,11 +529,11 @@ export function MetaAdsPage() {
 
       {/* Add Source Modal */}
       {showAddSourceModal && (
-        <div className="modal-overlay" onClick={() => setShowAddSourceModal(false)}>
-          <div className="modal-content source-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
+        <div className={styles['modal-overlay']} onClick={() => setShowAddSourceModal(false)}>
+          <div className={`${styles['modal-content']} ${styles['source-modal']}`} onClick={(e) => e.stopPropagation()}>
+            <div className={styles['modal-header']}>
               <h2>Add New Source</h2>
-              <button className="modal-close" onClick={() => setShowAddSourceModal(false)}>
+              <button className={styles['modal-close']} onClick={() => setShowAddSourceModal(false)}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <line x1="18" y1="6" x2="6" y2="18"/>
                   <line x1="6" y1="6" x2="18" y2="18"/>
@@ -543,8 +541,8 @@ export function MetaAdsPage() {
               </button>
             </div>
 
-            <div className="modal-body">
-              <div className="form-group">
+            <div className={styles['modal-body']}>
+              <div className={styles['form-group']}>
                 <label>Source Name</label>
                 <input
                   type="text"
@@ -562,9 +560,9 @@ export function MetaAdsPage() {
               </div>
             </div>
 
-            <div className="modal-footer">
+            <div className={styles['modal-footer']}>
               <button
-                className="modal-btn cancel"
+                className={`${styles['modal-btn']} ${styles.cancel}`}
                 onClick={() => {
                   setShowAddSourceModal(false);
                   setNewSourceName('');
@@ -573,13 +571,13 @@ export function MetaAdsPage() {
                 Cancel
               </button>
               <button
-                className="modal-btn confirm"
+                className={`${styles['modal-btn']} ${styles.confirm}`}
                 onClick={handleAddSource}
                 disabled={isAddingSource || !newSourceName.trim()}
               >
                 {isAddingSource ? (
                   <>
-                    <div className="btn-loader"></div>
+                    <div className={styles['btn-loader']}></div>
                     Adding...
                   </>
                 ) : (
@@ -593,9 +591,9 @@ export function MetaAdsPage() {
       </div>
 
       {/* Right Sidebar */}
-      <aside className="stats-sidebar">
-        <div className="sidebar-section">
-          <h3 className="sidebar-section-title">
+      <aside className={styles['stats-sidebar']}>
+        <div className={styles['sidebar-section']}>
+          <h3 className={styles['sidebar-section-title']}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M12 2v20"/>
               <path d="M17 12H3"/>
@@ -605,37 +603,37 @@ export function MetaAdsPage() {
             Average Daily Spend
           </h3>
           {dailySpendData.daysCount > 0 ? (
-            <div className="avg-daily-spend">
-              <div className="avg-spend-card">
-                <div className="avg-spend-label">Average per Day</div>
-                <div className="avg-spend-value">
+            <div className={styles['avg-daily-spend']}>
+              <div className={styles['avg-spend-card']}>
+                <div className={styles['avg-spend-label']}>Average per Day</div>
+                <div className={styles['avg-spend-value']}>
                   ₹{dailySpendData.averageDailySpend.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </div>
               </div>
-              <div className="avg-spend-details">
-                <div className="detail-row">
-                  <span className="detail-label">Total this month:</span>
-                  <span className="detail-value">₹{dailySpendData.totalSpend.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+              <div className={styles['avg-spend-details']}>
+                <div className={styles['detail-row']}>
+                  <span className={styles['detail-label']}>Total this month:</span>
+                  <span className={styles['detail-value']}>₹{dailySpendData.totalSpend.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                 </div>
-                <div className="detail-row">
-                  <span className="detail-label">Days counted:</span>
-                  <span className="detail-value">{dailySpendData.daysCount}</span>
+                <div className={styles['detail-row']}>
+                  <span className={styles['detail-label']}>Days counted:</span>
+                  <span className={styles['detail-value']}>{dailySpendData.daysCount}</span>
                 </div>
-                <div className="detail-row">
-                  <span className="detail-label">Period:</span>
-                  <span className="detail-value">
+                <div className={styles['detail-row']}>
+                  <span className={styles['detail-label']}>Period:</span>
+                  <span className={styles['detail-value']}>
                     {dailySpendData.startDate?.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} - {dailySpendData.endDate?.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
                   </span>
                 </div>
               </div>
             </div>
           ) : (
-            <div className="no-data">No expenses this month</div>
+            <div className={styles['no-data']}>No expenses this month</div>
           )}
         </div>
 
-        <div className="sidebar-section">
-          <h3 className="sidebar-section-title">
+        <div className={styles['sidebar-section']}>
+          <h3 className={styles['sidebar-section-title']}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <rect x="3" y="3" width="18" height="18" rx="2"/>
               <path d="M3 9h18"/>
@@ -643,31 +641,31 @@ export function MetaAdsPage() {
             </svg>
             By Source
           </h3>
-          <div className="month-total">
-            <span className="month-label">Total ({getCurrentFilterLabel()})</span>
-            <span className="month-amount">₹{periodTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+          <div className={styles['month-total']}>
+            <span className={styles['month-label']}>Total ({getCurrentFilterLabel()})</span>
+            <span className={styles['month-amount']}>₹{periodTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
           </div>
-          <div className="source-spend-list">
+          <div className={styles['source-spend-list']}>
             {monthlySpendBySource.length === 0 ? (
-              <div className="no-data">No expenses for this period</div>
+              <div className={styles['no-data']}>No expenses for this period</div>
             ) : (
               monthlySpendBySource.map((source) => (
-                <div key={source.name} className="source-spend-item">
-                  <div className="source-info">
-                    <div className="source-name">{source.name}</div>
-                    <div className="source-amount">
+                <div key={source.name} className={styles['source-spend-item']}>
+                  <div className={styles['source-info']}>
+                    <div className={styles['source-name']}>{source.name}</div>
+                    <div className={styles['source-amount']}>
                       ₹{source.amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                     </div>
                   </div>
-                  <div className="source-bar">
+                  <div className={styles['source-bar']}>
                     <div 
-                      className="source-bar-fill" 
+                      className={styles['source-bar-fill']} 
                       style={{ 
                         width: `${periodTotal > 0 ? (source.amount / periodTotal) * 100 : 0}%` 
                       }}
                     ></div>
                   </div>
-                  <div className="source-percentage">
+                  <div className={styles['source-percentage']}>
                     {periodTotal > 0 ? ((source.amount / periodTotal) * 100).toFixed(1) : 0}%
                   </div>
                 </div>

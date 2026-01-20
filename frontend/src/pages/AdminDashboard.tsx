@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { api } from '../services/api';
 import type { AdminUser, MagicLinkInfo, ShopifyOrder } from '../services/api';
-import './AdminDashboard.css';
+import styles from './AdminDashboard.module.css';
 
 interface OrderWithLink extends ShopifyOrder {
   magicLink?: MagicLinkInfo;
@@ -277,8 +277,8 @@ export function AdminDashboard() {
 
   if (isLoading) {
     return (
-      <div className="admin-dashboard loading">
-        <div className="spinner"></div>
+      <div className={`${styles['admin-dashboard']} ${styles.loading}`}>
+        <div className={styles.spinner}></div>
       </div>
     );
   }
@@ -311,22 +311,22 @@ export function AdminDashboard() {
   ];
 
   return (
-    <div className="admin-dashboard">
+    <div className={styles['admin-dashboard']}>
       {/* Sidebar */}
-      <aside className={`sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
-        <div className="sidebar-header">
+      <aside className={`${styles.sidebar} ${sidebarCollapsed ? styles.collapsed : ''}`}>
+        <div className={styles['sidebar-header']}>
           <img 
             src="https://photobookx.com/cdn/shop/files/Screenshot_2025-05-18_at_9.30.14_PM-removebg-preview.png?v=1747584052" 
             alt="PhotoBookX" 
-            className="sidebar-logo"
+            className={styles['sidebar-logo']}
           />
-          {!sidebarCollapsed && <span className="sidebar-title">Admin</span>}
+          {!sidebarCollapsed && <span className={styles['sidebar-title']}>Admin</span>}
         </div>
 
-        <nav className="sidebar-nav">
+        <nav className={styles['sidebar-nav']}>
           <Link 
             to="/admin/orders"
-            className={`nav-item ${currentView === 'orders' ? 'active' : ''}`}
+            className={`${styles['nav-item']} ${currentView === 'orders' ? styles.active : ''}`}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M20 7h-9"/>
@@ -339,7 +339,7 @@ export function AdminDashboard() {
 
           <Link 
             to="/admin/magic-links"
-            className={`nav-item ${currentView === 'magic-links' ? 'active' : ''}`}
+            className={`${styles['nav-item']} ${currentView === 'magic-links' ? styles.active : ''}`}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
@@ -350,7 +350,7 @@ export function AdminDashboard() {
 
           <Link 
             to="/admin/products"
-            className={`nav-item ${currentView === 'products' ? 'active' : ''}`}
+            className={`${styles['nav-item']} ${currentView === 'products' ? styles.active : ''}`}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <rect x="3" y="3" width="18" height="18" rx="2"/>
@@ -362,7 +362,7 @@ export function AdminDashboard() {
 
           <Link 
             to="/admin/expenses"
-            className="nav-item"
+            className={styles['nav-item']}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <line x1="12" y1="1" x2="12" y2="23"/>
@@ -373,7 +373,7 @@ export function AdminDashboard() {
 
           <Link 
             to="/admin/settings"
-            className={`nav-item ${currentView === 'settings' ? 'active' : ''}`}
+            className={`${styles['nav-item']} ${currentView === 'settings' ? styles.active : ''}`}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="12" cy="12" r="3"/>
@@ -384,7 +384,7 @@ export function AdminDashboard() {
         </nav>
 
         <button 
-          className="sidebar-toggle"
+          className={styles['sidebar-toggle']}
           onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -394,22 +394,22 @@ export function AdminDashboard() {
       </aside>
 
       {/* Main Content */}
-      <div className="main-wrapper">
-        <header className="dashboard-header">
-          <div className="header-breadcrumb">
-            <span className="breadcrumb-item active">
+      <div className={styles['main-wrapper']}>
+        <header className={styles['dashboard-header']}>
+          <div className={styles['header-breadcrumb']}>
+            <span className={`${styles['breadcrumb-item']} ${styles.active}`}>
               {currentView === 'orders' && 'Orders & Links'}
               {currentView === 'magic-links' && 'Magic Links'}
               {currentView === 'products' && 'Products'}
               {currentView === 'settings' && 'Settings'}
             </span>
           </div>
-          <div className="header-right">
-            <div className="user-menu">
-              <div className="user-avatar">{user?.name?.charAt(0) || 'A'}</div>
-              <span className="user-name">{user?.name}</span>
+          <div className={styles['header-right']}>
+            <div className={styles['user-menu']}>
+              <div className={styles['user-avatar']}>{user?.name?.charAt(0) || 'A'}</div>
+              <span className={styles['user-name']}>{user?.name}</span>
             </div>
-            <button onClick={handleLogout} className="logout-btn">
+            <button onClick={handleLogout} className={styles['logout-btn']}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
                 <polyline points="16 17 21 12 16 7"/>
@@ -420,32 +420,32 @@ export function AdminDashboard() {
           </div>
         </header>
 
-        <main className="dashboard-main">
+        <main className={styles['dashboard-main']}>
           {/* Stats Cards */}
           {currentView === 'orders' && (
             <>
-              <div className="stats-grid">
+              <div className={styles['stats-grid']}>
                 {stats.map((stat, idx) => (
-                  <div key={idx} className="stat-card">
-                    <div className="stat-icon" style={{ backgroundColor: `${stat.color}15`, color: stat.color }}>
+                  <div key={idx} className={styles['stat-card']}>
+                    <div className={styles['stat-icon']} style={{ backgroundColor: `${stat.color}15`, color: stat.color }}>
                       {stat.icon}
                     </div>
-                    <div className="stat-content">
-                      <div className="stat-value">{stat.value}</div>
-                      <div className="stat-label">{stat.label}</div>
+                    <div className={styles['stat-content']}>
+                      <div className={styles['stat-value']}>{stat.value}</div>
+                      <div className={styles['stat-label']}>{stat.label}</div>
                     </div>
                   </div>
                 ))}
               </div>
 
-              <div className="content-section">
-                <div className="section-header">
+              <div className={styles['content-section']}>
+                <div className={styles['section-header']}>
                   <h2>Recent Orders</h2>
                   <p>Orders that require photo uploads from customers</p>
                 </div>
 
-                <div className="table-card">
-                  <table className="data-table">
+                <div className={styles['table-card']}>
+                  <table className={styles['data-table']}>
                     <thead>
                       <tr>
                         <th>Order</th>
@@ -459,39 +459,39 @@ export function AdminDashboard() {
                     <tbody>
                       {orders.length === 0 ? (
                         <tr>
-                          <td colSpan={6} className="empty-state">
-                            <div className="empty-icon">📦</div>
-                            <div className="empty-text">No orders found</div>
+                          <td colSpan={6} className={styles['empty-state']}>
+                            <div className={styles['empty-icon']}>📦</div>
+                            <div className={styles['empty-text']}>No orders found</div>
                           </td>
                         </tr>
                       ) : (
                         orders.map((order) => (
                           <tr key={order.id}>
-                            <td className="order-cell">
-                              <span className="order-number">{order.name}</span>
+                            <td className={styles['order-cell']}>
+                              <span className={styles['order-number']}>{order.name}</span>
                             </td>
                             <td>
-                              <div className="items-list">
+                              <div className={styles['items-list']}>
                                 {order.lineItems?.slice(0, 1).map((item, i) => (
-                                  <span key={i} className="item-tag">
+                                  <span key={i} className={styles['item-tag']}>
                                     {item.title} × {item.quantity}
                                   </span>
                                 ))}
                                 {(order.lineItems?.length || 0) > 1 && (
-                                  <span className="more-items">+{(order.lineItems?.length || 0) - 1}</span>
+                                  <span className={styles['more-items']}>+{(order.lineItems?.length || 0) - 1}</span>
                                 )}
                               </div>
                             </td>
                             <td>
-                              <span className="photo-badge">{order.maxUploads}</span>
+                              <span className={styles['photo-badge']}>{order.maxUploads}</span>
                             </td>
-                            <td className="date-cell">{new Date(order.createdAt).toLocaleDateString()}</td>
+                            <td className={styles['date-cell']}>{new Date(order.createdAt).toLocaleDateString()}</td>
                             <td>
                               {order.magicLink ? (
-                                <div className="link-cell">
-                                  <span className="link-url">{order.magicLink.uploadUrl}</span>
+                                <div className={styles['link-cell']}>
+                                  <span className={styles['link-url']}>{order.magicLink.uploadUrl}</span>
                                   <button 
-                                    className={`icon-btn copy ${copiedToken === order.magicLink.token ? 'copied' : ''}`}
+                                    className={`${styles['icon-btn']} ${styles.copy} ${copiedToken === order.magicLink.token ? styles.copied : ''}`}
                                     onClick={() => copyToClipboard(order.magicLink!.uploadUrl, order.magicLink!.token)}
                                     title="Copy link"
                                   >
@@ -508,19 +508,19 @@ export function AdminDashboard() {
                                   </button>
                                 </div>
                               ) : (
-                                <span className="no-link">—</span>
+                                <span className={styles['no-link']}>—</span>
                               )}
                             </td>
-                            <td className="status-cell">
+                            <td className={styles['status-cell']}>
                               {order.magicLink ? (
-                                <div className="status-badge">
-                                  <div className="progress-ring">
+                                <div className={styles['status-badge']}>
+                                  <div className={styles['progress-ring']}>
                                     <span>{order.magicLink.currentUploads}/{order.magicLink.maxUploads}</span>
                                   </div>
                                 </div>
                               ) : (
                                 <button 
-                                  className="action-btn primary"
+                                  className={`${styles['action-btn']} ${styles.primary}`}
                                   onClick={() => handleCreateLink(order)}
                                   disabled={creatingFor === order.name}
                                 >
@@ -539,14 +539,14 @@ export function AdminDashboard() {
           )}
 
           {currentView === 'magic-links' && (
-            <div className="content-section">
-              <div className="section-header">
+            <div className={styles['content-section']}>
+              <div className={styles['section-header']}>
                 <h2>All Magic Links</h2>
                 <p>Manage all generated upload links</p>
               </div>
 
-              <div className="table-card">
-                <table className="data-table">
+              <div className={styles['table-card']}>
+                <table className={styles['data-table']}>
                   <thead>
                     <tr>
                       <th>Order</th>
@@ -561,30 +561,30 @@ export function AdminDashboard() {
                   <tbody>
                     {links.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="empty-state">
-                          <div className="empty-icon">🔗</div>
-                          <div className="empty-text">No magic links created yet</div>
+                        <td colSpan={7} className={styles['empty-state']}>
+                          <div className={styles['empty-icon']}>🔗</div>
+                          <div className={styles['empty-text']}>No magic links created yet</div>
                         </td>
                       </tr>
                     ) : (
                       links.map((link) => (
                         <tr key={link.id}>
-                          <td className="order-cell">
-                            <span className="order-number">{link.orderNumber}</span>
+                          <td className={styles['order-cell']}>
+                            <span className={styles['order-number']}>{link.orderNumber}</span>
                           </td>
                           <td>{link.customerName}</td>
                           <td>
-                            <div className="progress-inline">
-                              <span className="progress-text">{link.currentUploads}/{link.maxUploads}</span>
+                            <div className={styles['progress-inline']}>
+                              <span className={styles['progress-text']}>{link.currentUploads}/{link.maxUploads}</span>
                             </div>
                           </td>
-                          <td className="date-cell">{new Date(link.createdAt).toLocaleDateString()}</td>
-                          <td className="date-cell">{new Date(link.expiresAt).toLocaleDateString()}</td>
+                          <td className={styles['date-cell']}>{new Date(link.createdAt).toLocaleDateString()}</td>
+                          <td className={styles['date-cell']}>{new Date(link.expiresAt).toLocaleDateString()}</td>
                           <td>
-                            <div className="link-cell">
-                              <span className="link-url">{link.uploadUrl}</span>
+                            <div className={styles['link-cell']}>
+                              <span className={styles['link-url']}>{link.uploadUrl}</span>
                               <button 
-                                className={`icon-btn copy ${copiedToken === link.token ? 'copied' : ''}`}
+                                className={`${styles['icon-btn']} ${styles.copy} ${copiedToken === link.token ? styles.copied : ''}`}
                                 onClick={() => copyToClipboard(link.uploadUrl, link.token)}
                               >
                                 {copiedToken === link.token ? (
@@ -601,7 +601,7 @@ export function AdminDashboard() {
                             </div>
                           </td>
                           <td>
-                            <span className={`status-dot ${link.isActive ? 'active' : 'inactive'}`}>
+                            <span className={`${styles['status-dot']} ${link.isActive ? styles.active : styles.inactive}`}>
                               {link.isActive ? 'Active' : 'Inactive'}
                             </span>
                           </td>
@@ -615,21 +615,21 @@ export function AdminDashboard() {
           )}
 
           {currentView === 'products' && (
-            <div className="content-section">
-              <div className="section-header">
+            <div className={styles['content-section']}>
+              <div className={styles['section-header']}>
                 <h2>Products Management</h2>
                 <p>Manage your photobook products and variants</p>
               </div>
 
               {isLoadingProducts ? (
-                <div className="loading-section">
-                  <div className="spinner"></div>
+                <div className={styles['loading-section']}>
+                  <div className={styles.spinner}></div>
                   <p>Loading products...</p>
                 </div>
               ) : (
                 <>
-                  <div className="filters-bar">
-                    <div className="filter-search">
+                  <div className={styles['filters-bar']}>
+                    <div className={styles['filter-search']}>
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <circle cx="11" cy="11" r="8"/>
                         <path d="m21 21-4.35-4.35"/>
@@ -642,7 +642,7 @@ export function AdminDashboard() {
                       />
                     </div>
 
-                    <div className="filter-group">
+                    <div className={styles['filter-group']}>
                       <label>Status:</label>
                       <select 
                         value={productStatusFilter} 
@@ -655,10 +655,10 @@ export function AdminDashboard() {
                     </div>
 
                     {selectedProducts.size > 0 && (
-                      <div className="selection-info">
+                      <div className={styles['selection-info']}>
                         <span>{selectedProducts.size} selected</span>
                         <button 
-                          className="bulk-action-btn"
+                          className={styles['bulk-action-btn']}
                           onClick={handleBulkPriceUpdate}
                         >
                           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -668,7 +668,7 @@ export function AdminDashboard() {
                           Update Prices
                         </button>
                         <button 
-                          className="clear-selection-btn"
+                          className={styles['clear-selection-btn']}
                           onClick={() => setSelectedProducts(new Set())}
                         >
                           Clear
@@ -676,19 +676,19 @@ export function AdminDashboard() {
                       </div>
                     )}
 
-                    <div className="filter-results">
+                    <div className={styles['filter-results']}>
                       <span>{filteredProducts.length} product{filteredProducts.length !== 1 ? 's' : ''}</span>
                     </div>
                   </div>
 
-                  <div className="table-card">
-                    <table className="data-table products-table compact">
+                  <div className={styles['table-card']}>
+                    <table className={`${styles['data-table']} ${styles['products-table']} ${styles.compact}`}>
                       <thead>
                         <tr>
                           <th style={{ width: '40px' }}>
                             <input
                               type="checkbox"
-                              className="table-checkbox"
+                              className={styles['table-checkbox']}
                               checked={allSelected}
                               onChange={toggleSelectAll}
                             />
@@ -701,9 +701,9 @@ export function AdminDashboard() {
                       <tbody>
                         {filteredProducts.length === 0 ? (
                           <tr>
-                            <td colSpan={4} className="empty-state">
-                              <div className="empty-icon">📦</div>
-                              <div className="empty-text">
+                            <td colSpan={4} className={styles['empty-state']}>
+                              <div className={styles['empty-icon']}>📦</div>
+                              <div className={styles['empty-text']}>
                                 {productSearch || productStatusFilter !== 'all' 
                                   ? 'No products match your filters' 
                                   : 'No products found'}
@@ -714,39 +714,39 @@ export function AdminDashboard() {
                           filteredProducts.map((product) => {
                             const isSelected = selectedProducts.has(product.id);
                             return (
-                              <tr key={product.id} className={`product-row ${isSelected ? 'selected' : ''}`}>
+                              <tr key={product.id} className={`${styles['product-row']} ${isSelected ? styles.selected : ''}`}>
                                 <td>
                                   <input
                                     type="checkbox"
-                                    className="table-checkbox"
+                                    className={styles['table-checkbox']}
                                     checked={isSelected}
                                     onChange={() => toggleProductSelection(product.id)}
                                   />
                                 </td>
                                 <td>
-                                  <div className="product-cell">
-                                    <span className={`status-indicator ${product.status === 'active' ? 'active' : 'inactive'}`}></span>
+                                  <div className={styles['product-cell']}>
+                                    <span className={`${styles['status-indicator']} ${product.status === 'active' ? styles.active : styles.inactive}`}></span>
                                     {product.image && (
-                                      <img src={product.image} alt={product.title} className="product-image" />
+                                      <img src={product.image} alt={product.title} className={styles['product-image']} />
                                     )}
-                                    <div className="product-info">
-                                      <span className="product-title">{product.title}</span>
-                                      <span className="product-meta">ID: {product.id}</span>
+                                    <div className={styles['product-info']}>
+                                      <span className={styles['product-title']}>{product.title}</span>
+                                      <span className={styles['product-meta']}>ID: {product.id}</span>
                                     </div>
                                   </div>
                                 </td>
-                                <td className="variant-column">
+                                <td className={styles['variant-column']}>
                                   {product.variants[0] ? (
-                                    <span className="variant-price">₹{product.variants[0].price}</span>
+                                    <span className={styles['variant-price']}>₹{product.variants[0].price}</span>
                                   ) : (
-                                    <span className="no-variant">—</span>
+                                    <span className={styles['no-variant']}>—</span>
                                   )}
                                 </td>
-                                <td className="variant-column">
+                                <td className={styles['variant-column']}>
                                   {product.variants[1] ? (
-                                    <span className="variant-price">₹{product.variants[1].price}</span>
+                                    <span className={styles['variant-price']}>₹{product.variants[1].price}</span>
                                   ) : (
-                                    <span className="no-variant">—</span>
+                                    <span className={styles['no-variant']}>—</span>
                                   )}
                                 </td>
                               </tr>
@@ -762,15 +762,15 @@ export function AdminDashboard() {
           )}
 
           {currentView === 'settings' && (
-            <div className="content-section">
-              <div className="section-header">
+            <div className={styles['content-section']}>
+              <div className={styles['section-header']}>
                 <h2>Settings</h2>
                 <p>Configure your admin portal preferences</p>
               </div>
 
-              <div className="settings-grid">
-                <div className="settings-card">
-                  <div className="settings-card-header">
+              <div className={styles['settings-grid']}>
+                <div className={styles['settings-card']}>
+                  <div className={styles['settings-card-header']}>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
                       <circle cx="8.5" cy="7" r="4"/>
@@ -778,32 +778,32 @@ export function AdminDashboard() {
                     </svg>
                     <h3>Account</h3>
                   </div>
-                  <div className="settings-card-body">
-                    <div className="setting-item">
+                  <div className={styles['settings-card-body']}>
+                    <div className={styles['setting-item']}>
                       <label>Name</label>
                       <input type="text" value={user?.name || ''} disabled />
                     </div>
-                    <div className="setting-item">
+                    <div className={styles['setting-item']}>
                       <label>Email</label>
                       <input type="email" value={user?.email || ''} disabled />
                     </div>
                   </div>
                 </div>
 
-                <div className="settings-card">
-                  <div className="settings-card-header">
+                <div className={styles['settings-card']}>
+                  <div className={styles['settings-card-header']}>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
                       <circle cx="12" cy="10" r="3"/>
                     </svg>
                     <h3>Link Settings</h3>
                   </div>
-                  <div className="settings-card-body">
-                    <div className="setting-item">
+                  <div className={styles['settings-card-body']}>
+                    <div className={styles['setting-item']}>
                       <label>Default Expiry (days)</label>
                       <input type="number" value="7" disabled />
                     </div>
-                    <div className="setting-item">
+                    <div className={styles['setting-item']}>
                       <label>Max File Size (MB)</label>
                       <input type="number" value="30" disabled />
                     </div>
@@ -817,11 +817,11 @@ export function AdminDashboard() {
 
       {/* Bulk Price Update Modal */}
       {showPriceUpdateModal && (
-        <div className="modal-overlay" onClick={() => setShowPriceUpdateModal(false)}>
-          <div className="modal-content price-update-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
+        <div className={styles['modal-overlay']} onClick={() => setShowPriceUpdateModal(false)}>
+          <div className={`${styles['modal-content']} ${styles['price-update-modal']}`} onClick={(e) => e.stopPropagation()}>
+            <div className={styles['modal-header']}>
               <h2>Update Prices</h2>
-              <button className="modal-close" onClick={() => setShowPriceUpdateModal(false)}>
+              <button className={styles['modal-close']} onClick={() => setShowPriceUpdateModal(false)}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <line x1="18" y1="6" x2="6" y2="18"/>
                   <line x1="6" y1="6" x2="18" y2="18"/>
@@ -829,22 +829,22 @@ export function AdminDashboard() {
               </button>
             </div>
 
-            <div className="modal-body">
-              <div className="price-update-tabs">
+            <div className={styles['modal-body']}>
+              <div className={styles['price-update-tabs']}>
                 <button 
-                  className={`tab-btn ${priceUpdateType === 'set' ? 'active' : ''}`}
+                  className={`${styles['tab-btn']} ${priceUpdateType === 'set' ? styles.active : ''}`}
                   onClick={() => setPriceUpdateType('set')}
                 >
                   Set Price
                 </button>
                 <button 
-                  className={`tab-btn ${priceUpdateType === 'increase' ? 'active' : ''}`}
+                  className={`${styles['tab-btn']} ${priceUpdateType === 'increase' ? styles.active : ''}`}
                   onClick={() => setPriceUpdateType('increase')}
                 >
                   + Increase
                 </button>
                 <button 
-                  className={`tab-btn ${priceUpdateType === 'decrease' ? 'active' : ''}`}
+                  className={`${styles['tab-btn']} ${priceUpdateType === 'decrease' ? styles.active : ''}`}
                   onClick={() => setPriceUpdateType('decrease')}
                 >
                   − Decrease
@@ -852,14 +852,14 @@ export function AdminDashboard() {
               </div>
 
               {priceUpdateType === 'set' && (
-                <div className="price-inputs">
-                  <div className="variant-price-section">
-                    <label className="variant-section-label">{products[0]?.variants[0]?.title || 'Variant 1'}</label>
-                    <div className="variant-inputs-row">
-                      <div className="input-group compact">
+                <div className={styles['price-inputs']}>
+                  <div className={styles['variant-price-section']}>
+                    <label className={styles['variant-section-label']}>{products[0]?.variants[0]?.title || 'Variant 1'}</label>
+                    <div className={styles['variant-inputs-row']}>
+                      <div className={`${styles['input-group']} ${styles.compact}`}>
                         <label>Price</label>
-                        <div className="input-with-prefix">
-                          <span className="input-prefix">₹</span>
+                        <div className={styles['input-with-prefix']}>
+                          <span className={styles['input-prefix']}>₹</span>
                           <input
                             type="number"
                             placeholder="New price"
@@ -870,10 +870,10 @@ export function AdminDashboard() {
                           />
                         </div>
                       </div>
-                      <div className="input-group compact">
+                      <div className={`${styles['input-group']} ${styles.compact}`}>
                         <label>Compare at</label>
-                        <div className="input-with-prefix">
-                          <span className="input-prefix">₹</span>
+                        <div className={styles['input-with-prefix']}>
+                          <span className={styles['input-prefix']}>₹</span>
                           <input
                             type="number"
                             placeholder="Compare at"
@@ -887,13 +887,13 @@ export function AdminDashboard() {
                     </div>
                   </div>
 
-                  <div className="variant-price-section">
-                    <label className="variant-section-label">{products[0]?.variants[1]?.title || 'Variant 2'}</label>
-                    <div className="variant-inputs-row">
-                      <div className="input-group compact">
+                  <div className={styles['variant-price-section']}>
+                    <label className={styles['variant-section-label']}>{products[0]?.variants[1]?.title || 'Variant 2'}</label>
+                    <div className={styles['variant-inputs-row']}>
+                      <div className={`${styles['input-group']} ${styles.compact}`}>
                         <label>Price</label>
-                        <div className="input-with-prefix">
-                          <span className="input-prefix">₹</span>
+                        <div className={styles['input-with-prefix']}>
+                          <span className={styles['input-prefix']}>₹</span>
                           <input
                             type="number"
                             placeholder="New price"
@@ -904,10 +904,10 @@ export function AdminDashboard() {
                           />
                         </div>
                       </div>
-                      <div className="input-group compact">
+                      <div className={`${styles['input-group']} ${styles.compact}`}>
                         <label>Compare at</label>
-                        <div className="input-with-prefix">
-                          <span className="input-prefix">₹</span>
+                        <div className={styles['input-with-prefix']}>
+                          <span className={styles['input-prefix']}>₹</span>
                           <input
                             type="number"
                             placeholder="Compare at"
@@ -921,15 +921,15 @@ export function AdminDashboard() {
                     </div>
                   </div>
 
-                  <p className="input-hint">Leave blank to skip • Applies to {selectedProducts.size} product{selectedProducts.size !== 1 ? 's' : ''}</p>
+                  <p className={styles['input-hint']}>Leave blank to skip • Applies to {selectedProducts.size} product{selectedProducts.size !== 1 ? 's' : ''}</p>
                 </div>
               )}
 
               {(priceUpdateType === 'increase' || priceUpdateType === 'decrease') && (
-                <div className="price-inputs">
-                  <div className="input-group">
+                <div className={styles['price-inputs']}>
+                  <div className={styles['input-group']}>
                     <label>Percentage</label>
-                    <div className="input-with-suffix">
+                    <div className={styles['input-with-suffix']}>
                       <input
                         type="number"
                         placeholder="10"
@@ -942,16 +942,16 @@ export function AdminDashboard() {
                         min="0"
                         max="100"
                       />
-                      <span className="input-suffix">%</span>
+                      <span className={styles['input-suffix']}>%</span>
                     </div>
                   </div>
 
-                  <div className="divider">OR</div>
+                  <div className={styles.divider}>OR</div>
 
-                  <div className="input-group">
+                  <div className={styles['input-group']}>
                     <label>Fixed Amount</label>
-                    <div className="input-with-prefix">
-                      <span className="input-prefix">₹</span>
+                    <div className={styles['input-with-prefix']}>
+                      <span className={styles['input-prefix']}>₹</span>
                       <input
                         type="number"
                         placeholder="100"
@@ -966,20 +966,20 @@ export function AdminDashboard() {
                     </div>
                   </div>
 
-                  <p className="input-hint">Applies to both price & compare at price • {selectedProducts.size} product{selectedProducts.size !== 1 ? 's' : ''} selected</p>
+                  <p className={styles['input-hint']}>Applies to both price & compare at price • {selectedProducts.size} product{selectedProducts.size !== 1 ? 's' : ''} selected</p>
                 </div>
               )}
             </div>
 
-            <div className="modal-footer">
+            <div className={styles['modal-footer']}>
               <button 
-                className="modal-btn cancel"
+                className={`${styles['modal-btn']} ${styles.cancel}`}
                 onClick={() => setShowPriceUpdateModal(false)}
               >
                 Cancel
               </button>
               <button 
-                className="modal-btn confirm"
+                className={`${styles['modal-btn']} ${styles.confirm}`}
                 onClick={applyPriceUpdate}
                 disabled={
                   isUpdatingPrices ||
@@ -990,7 +990,7 @@ export function AdminDashboard() {
               >
                 {isUpdatingPrices ? (
                   <>
-                    <div className="btn-loader"></div>
+                    <div className={styles['btn-loader']}></div>
                     Updating...
                   </>
                 ) : (

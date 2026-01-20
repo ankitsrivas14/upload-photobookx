@@ -6,7 +6,7 @@ import { MetaAdsPage } from './MetaAdsPage';
 import { ExpensesOverview } from './ExpensesOverview';
 import { SalesPage } from './SalesPage';
 import { COGSPage } from './COGSPage';
-import './ExpensesPage.css';
+import styles from './ExpensesPage.module.css';
 
 export function ExpensesPage() {
   const navigate = useNavigate();
@@ -56,27 +56,27 @@ export function ExpensesPage() {
 
   if (isLoading) {
     return (
-      <div className="expenses-page loading">
-        <div className="spinner"></div>
+      <div className={`${styles['expenses-page']} ${styles.loading}`}>
+        <div className={styles.spinner}></div>
       </div>
     );
   }
 
   return (
-    <div className="expenses-page">
+    <div className={styles['expenses-page']}>
       {/* Sidebar */}
-      <aside className={`sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
-        <div className="sidebar-header">
+      <aside className={`${styles.sidebar} ${sidebarCollapsed ? styles.collapsed : ''}`}>
+        <div className={styles['sidebar-header']}>
           <img 
             src="https://photobookx.com/cdn/shop/files/Screenshot_2025-05-18_at_9.30.14_PM-removebg-preview.png?v=1747584052" 
             alt="PhotoBookX" 
-            className="sidebar-logo"
+            className={styles['sidebar-logo']}
           />
-          {!sidebarCollapsed && <span className="sidebar-title">Admin</span>}
+          {!sidebarCollapsed && <span className={styles['sidebar-title']}>Admin</span>}
         </div>
 
-        <nav className="sidebar-nav">
-          <Link to="/admin/orders" className="nav-item">
+        <nav className={styles['sidebar-nav']}>
+          <Link to="/admin/orders" className={styles['nav-item']}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M20 7h-9"/>
               <path d="M14 17H5"/>
@@ -86,7 +86,7 @@ export function ExpensesPage() {
             {!sidebarCollapsed && <span>Orders & Links</span>}
           </Link>
 
-          <Link to="/admin/magic-links" className="nav-item">
+          <Link to="/admin/magic-links" className={styles['nav-item']}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
               <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
@@ -94,7 +94,7 @@ export function ExpensesPage() {
             {!sidebarCollapsed && <span>Magic Links</span>}
           </Link>
 
-          <Link to="/admin/products" className="nav-item">
+          <Link to="/admin/products" className={styles['nav-item']}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <rect x="3" y="3" width="18" height="18" rx="2"/>
               <path d="M3 9h18"/>
@@ -103,7 +103,7 @@ export function ExpensesPage() {
             {!sidebarCollapsed && <span>Products</span>}
           </Link>
 
-          <Link to="/admin/expenses/overview" className={`nav-item ${isMetaAds || isOverview ? 'active' : ''}`}>
+          <Link to="/admin/expenses/overview" className={`${styles['nav-item']} ${isMetaAds || isOverview ? styles.active : ''}`}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <line x1="12" y1="1" x2="12" y2="23"/>
               <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
@@ -111,7 +111,7 @@ export function ExpensesPage() {
             {!sidebarCollapsed && <span>Expenses</span>}
           </Link>
 
-          <Link to="/admin/settings" className="nav-item">
+          <Link to="/admin/settings" className={styles['nav-item']}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="12" cy="12" r="3"/>
               <path d="M12 1v6m0 6v6m8.66-15l-5.2 3m-2.92 5.2l-5.2 3M23 12h-6m-6 0H1m20.66 7l-5.2-3m-2.92-5.2l-5.2-3"/>
@@ -121,7 +121,7 @@ export function ExpensesPage() {
         </nav>
 
         <button 
-          className="sidebar-toggle"
+          className={styles['sidebar-toggle']}
           onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -131,23 +131,23 @@ export function ExpensesPage() {
       </aside>
 
       {/* Main Content */}
-      <div className="main-wrapper">
-        <header className="dashboard-header">
-          <div className="header-breadcrumb">
-            <Link to="/admin/expenses/overview" className="breadcrumb-item">Expenses</Link>
+      <div className={styles['main-wrapper']}>
+        <header className={styles['dashboard-header']}>
+          <div className={styles['header-breadcrumb']}>
+            <Link to="/admin/expenses/overview" className={styles['breadcrumb-item']}>Expenses</Link>
             {isMetaAds && (
               <>
-                <span className="breadcrumb-separator">/</span>
-                <span className="breadcrumb-item active">Meta Ads</span>
+                <span className={styles['breadcrumb-separator']}>/</span>
+                <span className={`${styles['breadcrumb-item']} ${styles.active}`}>Meta Ads</span>
               </>
             )}
           </div>
-          <div className="header-right">
-            <div className="user-menu">
-              <div className="user-avatar">{user?.name?.charAt(0) || 'A'}</div>
-              <span className="user-name">{user?.name}</span>
+          <div className={styles['header-right']}>
+            <div className={styles['user-menu']}>
+              <div className={styles['user-avatar']}>{user?.name?.charAt(0) || 'A'}</div>
+              <span className={styles['user-name']}>{user?.name}</span>
             </div>
-            <button onClick={handleLogout} className="logout-btn">
+            <button onClick={handleLogout} className={styles['logout-btn']}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
                 <polyline points="16 17 21 12 16 7"/>
@@ -158,29 +158,29 @@ export function ExpensesPage() {
           </div>
         </header>
 
-        <main className="dashboard-main">
-          <div className="expenses-nav">
+        <main className={styles['dashboard-main']}>
+          <div className={styles['expenses-nav']}>
             <Link 
               to="/admin/expenses/overview"
-              className={`expenses-nav-item ${isOverview ? 'active' : ''}`}
+              className={`${styles['expenses-nav-item']} ${isOverview ? styles.active : ''}`}
             >
               Overview
             </Link>
             <Link 
               to="/admin/expenses/meta-ads"
-              className={`expenses-nav-item ${isMetaAds ? 'active' : ''}`}
+              className={`${styles['expenses-nav-item']} ${isMetaAds ? styles.active : ''}`}
             >
               Meta Ads
             </Link>
             <Link 
               to="/admin/expenses/sales"
-              className={`expenses-nav-item ${isSales ? 'active' : ''}`}
+              className={`${styles['expenses-nav-item']} ${isSales ? styles.active : ''}`}
             >
               Sales
             </Link>
             <Link 
               to="/admin/expenses/cogs"
-              className={`expenses-nav-item ${isCOGS ? 'active' : ''}`}
+              className={`${styles['expenses-nav-item']} ${isCOGS ? styles.active : ''}`}
             >
               COGS
             </Link>
