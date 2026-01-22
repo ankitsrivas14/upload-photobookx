@@ -87,7 +87,7 @@ export function UploadPage() {
   const getImageClass = (imageId: string): string => {
     const orientation = imageOrientations[imageId] || 'loading';
     const size = photoSize; // Use current selected size
-    return `uploaded-card ${size}-${orientation}`;
+    return `${styles['uploaded-card']} ${styles[`${size}-${orientation}`] || ''}`;
   };
 
   useEffect(() => {
@@ -376,6 +376,41 @@ export function UploadPage() {
     );
   }
 
+  // If images have been deleted after printing, show completion message
+  if (info.imagesDeleted) {
+    return (
+      <div className={`${styles['upload-page']} ${styles['completed-page']}`}>
+        <header className={styles.header}>
+          <img 
+            src="https://photobookx.com/cdn/shop/files/Screenshot_2025-05-18_at_9.30.14_PM-removebg-preview.png?v=1747584052" 
+            alt="PhotoBookX" 
+            className={styles.logo}
+          />
+        </header>
+
+        <main className={styles['main-content']}>
+          <div className={styles['completion-container']}>
+            <div className={styles['completion-icon']}>✓</div>
+            <h1>Order Complete</h1>
+            <p className={styles['order-number']}>Order {info.orderNumber}</p>
+            <div className={styles['completion-message']}>
+              <p><strong>Your order has been printed and completed!</strong></p>
+              <p>All images have been removed from our server as per our privacy policy.</p>
+              <p className={styles['thank-you']}>Thank you for choosing PhotoBookX! 📸</p>
+            </div>
+            <a href="https://photobookx.com" className={styles['primary-btn']}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+                <polyline points="9 22 9 12 15 12 15 22"/>
+              </svg>
+              Back to PhotoBookX
+            </a>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
   // If already submitted, show success state
   if (isSubmitted) {
     const submittedCount = uploadedImages.length > 0 
@@ -438,7 +473,7 @@ export function UploadPage() {
                   </div>
                   <div className={styles['uploaded-grid']}>
                     {uploadedImages.map((img) => (
-                      <div key={img.id} className={`${getImageClass(img.id)} readonly`}>
+                      <div key={img.id} className={`${getImageClass(img.id)} ${styles.readonly}`}>
                         <img 
                           src={img.s3Url} 
                           alt={img.originalName}
@@ -520,7 +555,7 @@ export function UploadPage() {
                   </label>
                   <div className={styles['toggle-group']}>
                     <button 
-                      className={`toggle-btn ${photoSize === 'small' ? 'active' : ''}`}
+                      className={`${styles['toggle-btn']} ${photoSize === 'small' ? styles.active : ''}`}
                       onClick={() => setPhotoSize('small')}
                     >
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -530,7 +565,7 @@ export function UploadPage() {
                       <span className={styles['toggle-desc']}>3" × 4"</span>
                     </button>
                     <button 
-                      className={`toggle-btn ${photoSize === 'large' ? 'active' : ''}`}
+                      className={`${styles['toggle-btn']} ${photoSize === 'large' ? styles.active : ''}`}
                       onClick={() => setPhotoSize('large')}
                     >
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -565,7 +600,7 @@ export function UploadPage() {
                   </label>
                   <div className={styles['toggle-group']}>
                     <button 
-                      className={`toggle-btn ${photoType === 'normal' ? 'active' : ''}`}
+                      className={`${styles['toggle-btn']} ${photoType === 'normal' ? styles.active : ''}`}
                       onClick={() => setPhotoType('normal')}
                     >
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -575,7 +610,7 @@ export function UploadPage() {
                       <span className={styles['toggle-desc']}>Edge to edge</span>
                     </button>
                     <button 
-                      className={`toggle-btn ${photoType === 'polaroid' ? 'active' : ''}`}
+                      className={`${styles['toggle-btn']} ${photoType === 'polaroid' ? styles.active : ''}`}
                       onClick={() => setPhotoType('polaroid')}
                     >
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -632,7 +667,7 @@ export function UploadPage() {
                 {/* Upload Zone */}
                 {actualRemaining > 0 && (
                   <div 
-                    className={`upload-zone ${isDragging ? 'dragging' : ''}`}
+                    className={`${styles['upload-zone']} ${isDragging ? styles.dragging : ''}`}
                     onClick={() => fileInputRef.current?.click()}
                     onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
                     onDragLeave={() => setIsDragging(false)}
@@ -685,7 +720,7 @@ export function UploadPage() {
                       {selectedFiles.map((file, index) => (
                         <div 
                           key={index} 
-                          className={`preview-card ${file.uploaded ? 'uploaded' : ''} ${file.uploading ? 'uploading' : ''} ${file.error ? 'error' : ''}`}
+                          className={`${styles['preview-card']} ${file.uploaded ? styles.uploaded : ''} ${file.uploading ? styles.uploading : ''} ${file.error ? styles.error : ''}`}
                         >
                           {!file.previewError ? (
                             <img 
@@ -762,7 +797,7 @@ export function UploadPage() {
               </div>
               <div className={styles['uploaded-grid']}>
                 {uploadedImages.map((img) => (
-                  <div key={img.id} className={`${getImageClass(img.id)} ${deletingImageId === img.id ? 'deleting' : ''}`}>
+                  <div key={img.id} className={`${getImageClass(img.id)} ${deletingImageId === img.id ? styles.deleting : ''}`}>
                     {imageLoadFailures[img.id] ? (
                       <div className={styles['image-fallback']}>
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

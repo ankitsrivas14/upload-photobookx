@@ -46,6 +46,8 @@ interface MagicLinkInfo {
   currentUploads: number;
   expiresAt: string;
   isActive: boolean;
+  imagesDeleted: boolean;
+  imagesDeletedAt?: string;
   createdAt: string;
   uploadUrl: string;
 }
@@ -103,6 +105,8 @@ interface UploadInfo {
   expiresAt?: string;
   submittedForPrinting?: boolean;
   submittedAt?: string;
+  imagesDeleted?: boolean;
+  imagesDeletedAt?: string;
   photoSize?: 'large' | 'small';
   photoType?: 'normal' | 'polaroid';
   error?: string;
@@ -247,6 +251,12 @@ class ApiService {
     a.click();
     window.URL.revokeObjectURL(url);
     document.body.removeChild(a);
+  }
+
+  async deleteOrderImages(token: string): Promise<{ success: boolean; message?: string; error?: string }> {
+    return this.request(`/api/admin/magic-links/${token}/delete-images`, {
+      method: 'DELETE',
+    });
   }
 
   // Shopify Orders

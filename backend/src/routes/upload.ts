@@ -63,6 +63,8 @@ router.get('/:token', async (req: Request, res: Response) => {
       expiresAt: magicLink.expiresAt,
       submittedForPrinting: magicLink.submittedForPrinting || false,
       submittedAt: magicLink.submittedAt,
+      imagesDeleted: magicLink.imagesDeleted || false,
+      imagesDeletedAt: magicLink.imagesDeletedAt,
       photoSize: magicLink.photoSize,
       photoType: magicLink.photoType,
     });

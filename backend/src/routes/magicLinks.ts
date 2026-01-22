@@ -5,7 +5,7 @@ import shopifyService from '../services/shopifyService';
 import type { AuthenticatedRequest } from '../types';
 import config from '../config';
 import { UploadedImage } from '../models';
-import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { fromInstanceMetadata } from '@aws-sdk/credential-provider-imds';
 import archiver from 'archiver';
 
@@ -37,6 +37,8 @@ router.get('/', requireAdmin, async (req: AuthenticatedRequest, res: Response) =
         currentUploads: link.currentUploads,
         expiresAt: link.expiresAt,
         isActive: link.isActive,
+        imagesDeleted: link.imagesDeleted,
+        imagesDeletedAt: link.imagesDeletedAt,
         createdAt: link.createdAt,
         uploadUrl: `${config.frontendUrl}/upload/${link.token}`,
       })),
@@ -100,6 +102,9 @@ router.post('/', requireAdmin, async (req: AuthenticatedRequest, res: Response) 
         orderNumber: magicLink.orderNumber,
         customerName: magicLink.customerName,
         maxUploads: magicLink.maxUploads,
+        currentUploads: magicLink.currentUploads,
+        isActive: magicLink.isActive,
+        imagesDeleted: magicLink.imagesDeleted,
         expiresAt: magicLink.expiresAt,
         uploadUrl: `${config.frontendUrl}/upload/${magicLink.token}`,
       },
@@ -524,6 +529,101 @@ router.get('/:token/download-images', requireAdmin, async (req: AuthenticatedReq
     if (!res.headersSent) {
       res.status(500).json({ success: false, error: 'Failed to download images' });
     }
+  }
+});
+
+/**
+ * DELETE /api/admin/magic-links/:token/delete-images
+ * Delete all images for a magic link from S3 and database
+ */
+router.delete('/:token/delete-images', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const token = req.params.token as string;
+    
+    // Validate the magic link
+    const magicLink = await magicLinkService.findByToken(token);
+    
+    if (!magicLink) {
+      res.status(404).json({ success: false, error: 'Magic link not found' });
+      return;
+    }
+
+    // Check if images are already deleted
+    if (magicLink.imagesDeleted) {
+      res.status(400).json({ success: false, error: 'Images have already been deleted' });
+      return;
+    }
+
+    // Get all images for this magic link
+    const images = await UploadedImage.find({ magicLinkId: magicLink._id });
+
+    console.log(`Deleting ${images.length} images for order ${magicLink.orderNumber}`);
+
+    // Configure S3 client
+    const s3Client = new S3Client({
+      region: config.aws.region,
+      credentials: config.aws.accessKeyId && config.aws.secretAccessKey ? {
+        accessKeyId: config.aws.accessKeyId,
+        secretAccessKey: config.aws.secretAccessKey,
+      } : fromInstanceMetadata(),
+      forcePathStyle: false,
+    });
+
+    let deletedCount = 0;
+    let failedCount = 0;
+    const failedKeys: string[] = [];
+
+    // Delete each image from S3
+    for (const image of images) {
+      try {
+        const deleteCommand = new DeleteObjectCommand({
+          Bucket: config.aws.s3Bucket,
+          Key: image.s3Key,
+        });
+        
+        await s3Client.send(deleteCommand);
+        
+        console.log(`✓ Deleted from S3: ${image.s3Key}`);
+        deletedCount++;
+      } catch (s3Error) {
+        console.error(`✗ Failed to delete ${image.s3Key} from S3:`, s3Error);
+        failedCount++;
+        failedKeys.push(image.s3Key);
+      }
+    }
+
+    console.log(`S3 Deletion Summary: ${deletedCount} successful, ${failedCount} failed`);
+
+    // Only proceed if ALL images were successfully deleted from S3
+    if (failedCount > 0) {
+      res.status(500).json({
+        success: false,
+        error: `Failed to delete ${failedCount} image(s) from S3. Cannot proceed.`,
+        deletedCount,
+        failedCount,
+        failedKeys,
+      });
+      return;
+    }
+
+    // All S3 deletions successful - now delete from database
+    await UploadedImage.deleteMany({ magicLinkId: magicLink._id });
+
+    // Update magic link to mark images as deleted
+    magicLink.imagesDeleted = true;
+    magicLink.imagesDeletedAt = new Date();
+    await magicLink.save();
+
+    console.log(`✓ Deletion complete: All ${deletedCount} images removed from S3 and database`);
+
+    res.json({
+      success: true,
+      message: `Successfully deleted all ${deletedCount} images`,
+      deletedCount,
+    });
+  } catch (error) {
+    console.error('Error deleting images:', error);
+    res.status(500).json({ success: false, error: 'Failed to delete images' });
   }
 });
 

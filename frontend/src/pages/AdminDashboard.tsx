@@ -43,6 +43,11 @@ export function AdminDashboard() {
   const [creatingFor, setCreatingFor] = useState<string | null>(null);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
   const [downloadingFor, setDownloadingFor] = useState<string | null>(null);
+  const [deletingFor, setDeletingFor] = useState<string | null>(null);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteModalToken, setDeleteModalToken] = useState<string | null>(null);
+  const [deleteModalOrderNumber, setDeleteModalOrderNumber] = useState<string | null>(null);
+  const [deleteModalImages, setDeleteModalImages] = useState<Array<{ id: string; s3Url: string; originalName: string }>>([]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   
   // Product filters
@@ -288,6 +293,80 @@ export function AdminDashboard() {
     }
   };
 
+  const handleCloseDeleteModal = () => {
+    setShowDeleteModal(false);
+    // Reset state after modal animation
+    setTimeout(() => {
+      setDeleteModalToken(null);
+      setDeleteModalOrderNumber(null);
+      setDeleteModalImages([]);
+    }, 200);
+  };
+
+  const handleDeleteImagesClick = async (token: string, orderNumber: string) => {
+    setDeleteModalToken(token);
+    setDeleteModalOrderNumber(orderNumber);
+    setShowDeleteModal(true);
+    
+    // Fetch images for preview
+    try {
+      const response = await api.getUploadedImages(token);
+      if (response.success && response.images) {
+        // Get first 5 images
+        setDeleteModalImages(response.images.slice(0, 5));
+      }
+    } catch (err) {
+      console.error('Failed to load images for preview:', err);
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteModalToken) return;
+    
+    setDeletingFor(deleteModalToken);
+    try {
+      const response = await api.deleteOrderImages(deleteModalToken);
+      if (response.success) {
+        // Update the orders list to reflect deletion
+        setOrders(orders.map(o => {
+          if (o.magicLink?.token === deleteModalToken) {
+            return {
+              ...o,
+              magicLink: {
+                ...o.magicLink,
+                imagesDeleted: true,
+                imagesDeletedAt: new Date().toISOString(),
+              }
+            };
+          }
+          return o;
+        }));
+        
+        // Update links list
+        setLinks(links.map(l => {
+          if (l.token === deleteModalToken) {
+            return {
+              ...l,
+              imagesDeleted: true,
+              imagesDeletedAt: new Date().toISOString(),
+            };
+          }
+          return l;
+        }));
+        
+        alert('Images deleted successfully');
+      } else {
+        alert(response.error || 'Failed to delete images');
+      }
+    } catch (err) {
+      console.error('Failed to delete images:', err);
+      alert('Failed to delete images. Please try again.');
+    } finally {
+      setDeletingFor(null);
+      handleCloseDeleteModal();
+    }
+  };
+
   if (isLoading) {
     return (
       <div className={`${styles['admin-dashboard']} ${styles.loading}`}>
@@ -530,26 +609,48 @@ export function AdminDashboard() {
                               )}
                             </td>
                             <td>
-                              {order.magicLink && order.magicLink.currentUploads === order.magicLink.maxUploads ? (
-                                <button 
-                                  className={`${styles['icon-btn']} ${styles.download}`}
-                                  onClick={() => handleDownloadImages(order.magicLink!.token)}
-                                  disabled={downloadingFor === order.magicLink!.token}
-                                  title="Download all images"
-                                >
-                                  {downloadingFor === order.magicLink!.token ? (
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={styles.spinner}>
-                                      <circle cx="12" cy="12" r="10" opacity="0.25"/>
-                                      <path d="M4 12a8 8 0 018-8" opacity="0.75"/>
-                                    </svg>
-                                  ) : (
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                                      <polyline points="7 10 12 15 17 10"/>
-                                      <line x1="12" y1="15" x2="12" y2="3"/>
-                                    </svg>
-                                  )}
-                                </button>
+                              {order.magicLink && order.magicLink.currentUploads === order.magicLink.maxUploads && !order.magicLink.imagesDeleted ? (
+                                <div style={{ display: 'flex', gap: '8px' }}>
+                                  <button 
+                                    className={`${styles['icon-btn']} ${styles.download}`}
+                                    onClick={() => handleDownloadImages(order.magicLink!.token)}
+                                    disabled={downloadingFor === order.magicLink!.token || deletingFor === order.magicLink!.token}
+                                    title="Download all images"
+                                  >
+                                    {downloadingFor === order.magicLink!.token ? (
+                                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={styles.spinner}>
+                                        <circle cx="12" cy="12" r="10" opacity="0.25"/>
+                                        <path d="M4 12a8 8 0 018-8" opacity="0.75"/>
+                                      </svg>
+                                    ) : (
+                                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                        <polyline points="7 10 12 15 17 10"/>
+                                        <line x1="12" y1="15" x2="12" y2="3"/>
+                                      </svg>
+                                    )}
+                                  </button>
+                                  <button 
+                                    className={`${styles['icon-btn']} ${styles.delete}`}
+                                    onClick={() => handleDeleteImagesClick(order.magicLink!.token, order.name)}
+                                    disabled={deletingFor === order.magicLink!.token || downloadingFor === order.magicLink!.token}
+                                    title="Delete images after printing"
+                                  >
+                                    {deletingFor === order.magicLink!.token ? (
+                                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={styles.spinner}>
+                                        <circle cx="12" cy="12" r="10" opacity="0.25"/>
+                                        <path d="M4 12a8 8 0 018-8" opacity="0.75"/>
+                                      </svg>
+                                    ) : (
+                                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <line x1="18" y1="6" x2="6" y2="18"/>
+                                        <line x1="6" y1="6" x2="18" y2="18"/>
+                                      </svg>
+                                    )}
+                                  </button>
+                                </div>
+                              ) : order.magicLink?.imagesDeleted ? (
+                                <span className={styles['deleted-badge']}>Images Deleted</span>
                               ) : (
                                 <span className={styles['no-action']}>—</span>
                               )}
@@ -945,6 +1046,109 @@ export function AdminDashboard() {
                   </>
                 ) : (
                   'Update Prices'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Images Confirmation Modal */}
+      {showDeleteModal && (
+        <div className={styles['modal-overlay']} onClick={handleCloseDeleteModal}>
+          <div className={`${styles['modal-content']} ${styles['delete-modal']}`} onClick={(e) => e.stopPropagation()}>
+            <div className={styles['modal-header']}>
+              <h2>Delete Images</h2>
+              <button className={styles['modal-close']} onClick={handleCloseDeleteModal}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18"/>
+                  <line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+              </button>
+            </div>
+
+            <div className={styles['modal-body']}>
+              {/* Warning Section */}
+              <div className={styles['warning-section']}>
+                <div className={styles['warning-icon']}>⚠️</div>
+                <div className={styles['warning-content']}>
+                  <p className={styles['warning-text']}>
+                    Permanently delete all images for this order?
+                  </p>
+                  <p className={styles['warning-subtext']}>
+                    This action cannot be undone. Images will be removed from our server forever.
+                  </p>
+                </div>
+              </div>
+
+              {/* Order Details Section */}
+              <div className={styles['order-details-section']}>
+                <div className={styles['order-details-header']}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                  </svg>
+                  <h3>Order Details</h3>
+                </div>
+                <div className={styles['order-info-badge']}>
+                  Order Number: <strong>{deleteModalOrderNumber}</strong>
+                </div>
+              </div>
+              
+              {/* Images Preview Section */}
+              {deleteModalImages.length > 0 && (
+                <div className={styles['images-preview-section']}>
+                  <div className={styles['images-preview-header']}>
+                    <div className={styles['images-preview-title']}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                        <circle cx="8.5" cy="8.5" r="1.5"/>
+                        <polyline points="21 15 16 10 5 21"/>
+                      </svg>
+                      <h3>Preview Images</h3>
+                    </div>
+                    <span className={styles['images-count']}>
+                      Showing {deleteModalImages.length} of many
+                    </span>
+                  </div>
+                  <div className={styles['preview-images']}>
+                    {deleteModalImages.map((img) => (
+                      <div key={img.id} className={styles['preview-thumbnail']}>
+                        <img src={img.s3Url} alt={img.originalName} />
+                      </div>
+                    ))}
+                  </div>
+                  {deleteModalImages.length >= 5 && (
+                    <div className={styles['more-images-badge']}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: '16px', height: '16px' }}>
+                        <path d="M12 5v14M5 12h14"/>
+                      </svg>
+                      More images will also be deleted
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className={styles['modal-footer']}>
+              <button 
+                className={`${styles['modal-btn']} ${styles.cancel}`}
+                onClick={handleCloseDeleteModal}
+                disabled={deletingFor !== null}
+              >
+                Cancel
+              </button>
+              <button 
+                className={`${styles['modal-btn']} ${styles.danger}`}
+                onClick={handleConfirmDelete}
+                disabled={deletingFor !== null}
+              >
+                {deletingFor !== null ? (
+                  <>
+                    <div className={styles['btn-loader']}></div>
+                    Deleting...
+                  </>
+                ) : (
+                  'Delete Images'
                 )}
               </button>
             </div>
