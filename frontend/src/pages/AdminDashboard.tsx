@@ -29,7 +29,7 @@ interface Product {
   image: string | null;
 }
 
-type ViewType = 'orders' | 'magic-links' | 'products' | 'settings';
+type ViewType = 'magic-links' | 'products' | 'settings';
 
 export function AdminDashboard() {
   const navigate = useNavigate();
@@ -60,8 +60,8 @@ export function AdminDashboard() {
   const [priceChangePercent, setPriceChangePercent] = useState('');
   const [priceChangeAmount, setPriceChangeAmount] = useState('');
 
-  // Determine current view from URL or default to 'orders'
-  const currentView: ViewType = (view as ViewType) || 'orders';
+  // Determine current view from URL or default to 'magic-links'
+  const currentView: ViewType = (view as ViewType) || 'magic-links';
 
   useEffect(() => {
     loadData();
@@ -73,10 +73,10 @@ export function AdminDashboard() {
     }
   }, [currentView]);
 
-  // Redirect to orders if no view is specified
+  // Redirect to magic-links if no view is specified
   useEffect(() => {
     if (!view) {
-      navigate('/admin/orders', { replace: true });
+      navigate('/admin/magic-links', { replace: true });
     }
   }, [view, navigate]);
 
@@ -325,19 +325,6 @@ export function AdminDashboard() {
 
         <nav className={styles['sidebar-nav']}>
           <Link 
-            to="/admin/orders"
-            className={`${styles['nav-item']} ${currentView === 'orders' ? styles.active : ''}`}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M20 7h-9"/>
-              <path d="M14 17H5"/>
-              <circle cx="17" cy="17" r="3"/>
-              <circle cx="7" cy="7" r="3"/>
-            </svg>
-            {!sidebarCollapsed && <span>Orders & Links</span>}
-          </Link>
-
-          <Link 
             to="/admin/magic-links"
             className={`${styles['nav-item']} ${currentView === 'magic-links' ? styles.active : ''}`}
           >
@@ -398,7 +385,6 @@ export function AdminDashboard() {
         <header className={styles['dashboard-header']}>
           <div className={styles['header-breadcrumb']}>
             <span className={`${styles['breadcrumb-item']} ${styles.active}`}>
-              {currentView === 'orders' && 'Orders & Links'}
               {currentView === 'magic-links' && 'Magic Links'}
               {currentView === 'products' && 'Products'}
               {currentView === 'settings' && 'Settings'}
@@ -421,9 +407,9 @@ export function AdminDashboard() {
         </header>
 
         <main className={styles['dashboard-main']}>
-          {/* Stats Cards */}
-          {currentView === 'orders' && (
+          {currentView === 'magic-links' && (
             <>
+              {/* Stats Cards */}
               <div className={styles['stats-grid']}>
                 {stats.map((stat, idx) => (
                   <div key={idx} className={styles['stat-card']}>
@@ -438,6 +424,7 @@ export function AdminDashboard() {
                 ))}
               </div>
 
+              {/* Recent Orders Section */}
               <div className={styles['content-section']}>
                 <div className={styles['section-header']}>
                   <h2>Recent Orders</h2>
@@ -536,82 +523,6 @@ export function AdminDashboard() {
                 </div>
               </div>
             </>
-          )}
-
-          {currentView === 'magic-links' && (
-            <div className={styles['content-section']}>
-              <div className={styles['section-header']}>
-                <h2>All Magic Links</h2>
-                <p>Manage all generated upload links</p>
-              </div>
-
-              <div className={styles['table-card']}>
-                <table className={styles['data-table']}>
-                  <thead>
-                    <tr>
-                      <th>Order</th>
-                      <th>Customer</th>
-                      <th>Uploads</th>
-                      <th>Created</th>
-                      <th>Expires</th>
-                      <th>Link</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {links.length === 0 ? (
-                      <tr>
-                        <td colSpan={7} className={styles['empty-state']}>
-                          <div className={styles['empty-icon']}>🔗</div>
-                          <div className={styles['empty-text']}>No magic links created yet</div>
-                        </td>
-                      </tr>
-                    ) : (
-                      links.map((link) => (
-                        <tr key={link.id}>
-                          <td className={styles['order-cell']}>
-                            <span className={styles['order-number']}>{link.orderNumber}</span>
-                          </td>
-                          <td>{link.customerName}</td>
-                          <td>
-                            <div className={styles['progress-inline']}>
-                              <span className={styles['progress-text']}>{link.currentUploads}/{link.maxUploads}</span>
-                            </div>
-                          </td>
-                          <td className={styles['date-cell']}>{new Date(link.createdAt).toLocaleDateString()}</td>
-                          <td className={styles['date-cell']}>{new Date(link.expiresAt).toLocaleDateString()}</td>
-                          <td>
-                            <div className={styles['link-cell']}>
-                              <span className={styles['link-url']}>{link.uploadUrl}</span>
-                              <button 
-                                className={`${styles['icon-btn']} ${styles.copy} ${copiedToken === link.token ? styles.copied : ''}`}
-                                onClick={() => copyToClipboard(link.uploadUrl, link.token)}
-                              >
-                                {copiedToken === link.token ? (
-                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                    <polyline points="20 6 9 17 4 12"/>
-                                  </svg>
-                                ) : (
-                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-                                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-                                  </svg>
-                                )}
-                              </button>
-                            </div>
-                          </td>
-                          <td>
-                            <span className={`${styles['status-dot']} ${link.isActive ? styles.active : styles.inactive}`}>
-                              {link.isActive ? 'Active' : 'Inactive'}
-                            </span>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
           )}
 
           {currentView === 'products' && (
