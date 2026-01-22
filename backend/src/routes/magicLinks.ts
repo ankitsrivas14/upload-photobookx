@@ -311,7 +311,9 @@ router.get('/shopify/products', requireAdmin, async (_req: AuthenticatedRequest,
  */
 router.get('/shopify/products/:productId', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const productId = req.params.productId;
+    const productId = Array.isArray(req.params.productId) 
+      ? req.params.productId[0] 
+      : req.params.productId;
     const product = await shopifyService.getProduct(productId);
 
     if (!product) {
