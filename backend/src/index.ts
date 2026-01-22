@@ -32,6 +32,7 @@ app.use(cors({
     return callback(new Error('Not allowed by CORS'));
   },
   credentials: true,
+  exposedHeaders: ['Content-Disposition'], // Allow frontend to read Content-Disposition header
 }));
 app.use(express.json());
 

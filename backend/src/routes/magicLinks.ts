@@ -4,6 +4,10 @@ import magicLinkService from '../services/magicLinkService';
 import shopifyService from '../services/shopifyService';
 import type { AuthenticatedRequest } from '../types';
 import config from '../config';
+import { UploadedImage } from '../models';
+import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import { fromInstanceMetadata } from '@aws-sdk/credential-provider-imds';
+import archiver from 'archiver';
 
 const router = Router();
 
@@ -411,6 +415,115 @@ router.put('/shopify/products/bulk-update-prices', requireAdmin, async (req: Aut
     console.error('Error bulk updating prices:', error);
     const errorMessage = error instanceof Error ? error.message : 'Failed to update prices';
     res.status(500).json({ success: false, error: errorMessage });
+  }
+});
+
+/**
+ * GET /api/admin/magic-links/:token/download-images
+ * Download all images for a magic link as a zip file
+ */
+router.get('/:token/download-images', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const token = req.params.token as string;
+    
+    // Validate the magic link
+    const magicLink = await magicLinkService.findByToken(token);
+    
+    if (!magicLink) {
+      res.status(404).json({ success: false, error: 'Magic link not found' });
+      return;
+    }
+
+    // Get all images for this magic link
+    const images = await UploadedImage.find({ magicLinkId: magicLink._id }).sort({ uploadedAt: 1 });
+
+    console.log(`Found ${images.length} images for order ${magicLink.orderNumber}`);
+
+    if (images.length === 0) {
+      res.status(404).json({ success: false, error: 'No images found for this order' });
+      return;
+    }
+
+    // Configure S3 client - use environment credentials for local dev, instance metadata for production
+    const s3Client = new S3Client({
+      region: config.aws.region,
+      credentials: config.aws.accessKeyId && config.aws.secretAccessKey ? {
+        accessKeyId: config.aws.accessKeyId,
+        secretAccessKey: config.aws.secretAccessKey,
+      } : fromInstanceMetadata(),
+      forcePathStyle: false,
+    });
+
+    // Set response headers for zip download
+    const zipFileName = `${magicLink.orderNumber.replace(/[^a-zA-Z0-9]/g, '_')}.zip`;
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${zipFileName}"`);
+
+    // Create archive
+    const archive = archiver('zip', {
+      zlib: { level: 9 } // Maximum compression
+    });
+
+    // Handle errors
+    archive.on('error', (err) => {
+      console.error('Archive error:', err);
+    });
+
+    // Pipe archive to response
+    archive.pipe(res);
+
+    let successCount = 0;
+    let failCount = 0;
+
+    // Add each image to the archive
+    for (const image of images) {
+      try {
+        console.log(`Fetching image: ${image.originalName} from S3 key: ${image.s3Key}`);
+        
+        // Fetch image from S3
+        const s3Response = await s3Client.send(new GetObjectCommand({
+          Bucket: config.aws.s3Bucket,
+          Key: image.s3Key,
+        }));
+
+        if (s3Response.Body) {
+          // Convert stream to buffer
+          const stream = s3Response.Body as NodeJS.ReadableStream;
+          const chunks: Buffer[] = [];
+          
+          for await (const chunk of stream) {
+            chunks.push(Buffer.from(chunk));
+          }
+          
+          const buffer = Buffer.concat(chunks);
+          
+          console.log(`Adding ${image.originalName} to archive (${buffer.length} bytes)`);
+          
+          // Add buffer to archive with original name
+          archive.append(buffer, { name: image.originalName });
+          successCount++;
+        } else {
+          console.error(`No body in S3 response for ${image.fileName}`);
+          failCount++;
+        }
+      } catch (imageError) {
+        console.error(`Error fetching image ${image.fileName}:`, imageError);
+        failCount++;
+        // Continue with other images even if one fails
+      }
+    }
+
+    console.log(`Archive stats: ${successCount} successful, ${failCount} failed`);
+
+    // Finalize the archive
+    await archive.finalize();
+    
+    console.log('Archive finalized');
+  } catch (error) {
+    console.error('Error downloading images:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, error: 'Failed to download images' });
+    }
   }
 });
 

@@ -42,6 +42,7 @@ export function AdminDashboard() {
   const [isLoadingProducts, setIsLoadingProducts] = useState(false);
   const [creatingFor, setCreatingFor] = useState<string | null>(null);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
+  const [downloadingFor, setDownloadingFor] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   
   // Product filters
@@ -275,6 +276,18 @@ export function AdminDashboard() {
     setTimeout(() => setCopiedToken(null), 2000);
   };
 
+  const handleDownloadImages = async (token: string) => {
+    setDownloadingFor(token);
+    try {
+      await api.downloadOrderImages(token);
+    } catch (err) {
+      console.error('Failed to download images:', err);
+      alert('Failed to download images. Please try again.');
+    } finally {
+      setDownloadingFor(null);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className={`${styles['admin-dashboard']} ${styles.loading}`}>
@@ -441,12 +454,13 @@ export function AdminDashboard() {
                         <th>Date</th>
                         <th>Magic Link</th>
                         <th>Status</th>
+                        <th>Actions</th>
                       </tr>
                     </thead>
                     <tbody>
                       {orders.length === 0 ? (
                         <tr>
-                          <td colSpan={6} className={styles['empty-state']}>
+                          <td colSpan={7} className={styles['empty-state']}>
                             <div className={styles['empty-icon']}>📦</div>
                             <div className={styles['empty-text']}>No orders found</div>
                           </td>
@@ -513,6 +527,31 @@ export function AdminDashboard() {
                                 >
                                   {creatingFor === order.name ? 'Creating...' : 'Create Link'}
                                 </button>
+                              )}
+                            </td>
+                            <td>
+                              {order.magicLink && order.magicLink.currentUploads === order.magicLink.maxUploads ? (
+                                <button 
+                                  className={`${styles['icon-btn']} ${styles.download}`}
+                                  onClick={() => handleDownloadImages(order.magicLink!.token)}
+                                  disabled={downloadingFor === order.magicLink!.token}
+                                  title="Download all images"
+                                >
+                                  {downloadingFor === order.magicLink!.token ? (
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={styles.spinner}>
+                                      <circle cx="12" cy="12" r="10" opacity="0.25"/>
+                                      <path d="M4 12a8 8 0 018-8" opacity="0.75"/>
+                                    </svg>
+                                  ) : (
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                      <polyline points="7 10 12 15 17 10"/>
+                                      <line x1="12" y1="15" x2="12" y2="3"/>
+                                    </svg>
+                                  )}
+                                </button>
+                              ) : (
+                                <span className={styles['no-action']}>—</span>
                               )}
                             </td>
                           </tr>

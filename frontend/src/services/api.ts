@@ -210,6 +210,45 @@ class ApiService {
     });
   }
 
+  async downloadOrderImages(token: string): Promise<void> {
+    const authToken = this.getToken();
+    const response = await fetch(`${this.baseUrl}/api/admin/magic-links/${token}/download-images`, {
+      headers: {
+        'Authorization': `Bearer ${authToken}`,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to download images');
+    }
+
+    // Get filename from Content-Disposition header
+    const contentDisposition = response.headers.get('Content-Disposition');
+    let filename = 'order_images.zip'; // fallback
+    
+    if (contentDisposition) {
+      // Try to extract filename from Content-Disposition header
+      // Handles: filename="file.zip" or filename=file.zip
+      const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+      if (filenameMatch && filenameMatch[1]) {
+        filename = filenameMatch[1].replace(/['"]/g, '');
+      }
+    }
+
+    // Get the blob
+    const blob = await response.blob();
+    
+    // Create download link
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+  }
+
   // Shopify Orders
   async getOrders(limit = 50, allOrders = false): Promise<OrdersResponse> {
     const allParam = allOrders ? '&all=true' : '';
