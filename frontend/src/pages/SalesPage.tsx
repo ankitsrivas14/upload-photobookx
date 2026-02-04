@@ -67,6 +67,7 @@ export function SalesPage() {
   const [selectedMonthFilter, setSelectedMonthFilter] = useState<string>('all'); // 'all', 'current', or 'YYYY-MM'
   const [showBulkMenu, setShowBulkMenu] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   
   // COGS Calculator Modal State
   const [showCogsModal, setShowCogsModal] = useState(false);
@@ -111,6 +112,21 @@ export function SalesPage() {
       console.error('Failed to load data:', err);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      // Clear the cache first
+      await api.clearOrdersCache();
+      // Then reload the data
+      await loadData();
+    } catch (err) {
+      console.error('Failed to refresh data:', err);
+      alert('Failed to refresh data. Please try again.');
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
@@ -512,6 +528,23 @@ export function SalesPage() {
             <div>
             </div>
             <div className={styles['header-actions']}>
+              <button
+                onClick={handleRefresh}
+                disabled={isRefreshing}
+                className={styles['refresh-btn']}
+                title="Refresh orders from Shopify"
+              >
+                <svg 
+                  viewBox="0 0 24 24" 
+                  fill="none" 
+                  stroke="currentColor" 
+                  strokeWidth="2"
+                  className={isRefreshing ? styles.spinning : ''}
+                >
+                  <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+                </svg>
+                {isRefreshing ? 'Refreshing...' : 'Refresh'}
+              </button>
               <div className={styles['month-filter']}>
                 <label htmlFor="month-select">Period:</label>
                 <select 

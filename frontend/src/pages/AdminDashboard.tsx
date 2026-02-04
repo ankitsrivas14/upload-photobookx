@@ -440,6 +440,19 @@ export function AdminDashboard() {
           </Link>
 
           <Link 
+            to="/admin/sales-management"
+            className={styles['nav-item']}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M3 3v18h18"/>
+              <path d="M18 17V9"/>
+              <path d="M13 17V5"/>
+              <path d="M8 17v-3"/>
+            </svg>
+            {!sidebarCollapsed && <span>Sales Management</span>}
+          </Link>
+
+          <Link 
             to="/admin/expenses"
             className={styles['nav-item']}
           >

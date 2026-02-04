@@ -1,35 +1,19 @@
-import { Link, useNavigate, useLocation, Routes, Route } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { api } from '../services/api';
 import type { AdminUser } from '../services/api';
-import { MetaAdsPage } from './MetaAdsPage';
-import { ExpensesOverview } from './ExpensesOverview';
 import { SalesPage } from './SalesPage';
-import { COGSPage } from './COGSPage';
 import styles from './ExpensesPage.module.css';
 
-export function ExpensesPage() {
+export function SalesManagementPage() {
   const navigate = useNavigate();
-  const location = useLocation();
   const [user, setUser] = useState<AdminUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
-  const currentPath = location.pathname;
-  const isOverview = currentPath === '/admin/expenses' || currentPath === '/admin/expenses/' || currentPath === '/admin/expenses/overview';
-  const isMetaAds = currentPath === '/admin/expenses/meta-ads';
-  const isSales = currentPath === '/admin/expenses/sales';
-  const isCOGS = currentPath === '/admin/expenses/cogs';
-
   useEffect(() => {
     loadUser();
   }, []);
-
-  useEffect(() => {
-    if (isOverview) {
-      navigate('/admin/expenses/overview', { replace: true });
-    }
-  }, [isOverview, navigate]);
 
   const loadUser = async () => {
     try {
@@ -103,7 +87,7 @@ export function ExpensesPage() {
             {!sidebarCollapsed && <span>Products</span>}
           </Link>
 
-          <Link to="/admin/sales-management" className={styles['nav-item']}>
+          <Link to="/admin/sales-management" className={`${styles['nav-item']} ${styles.active}`}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M3 3v18h18"/>
               <path d="M18 17V9"/>
@@ -113,7 +97,7 @@ export function ExpensesPage() {
             {!sidebarCollapsed && <span>Sales Management</span>}
           </Link>
 
-          <Link to="/admin/expenses/overview" className={`${styles['nav-item']} ${isMetaAds || isOverview ? styles.active : ''}`}>
+          <Link to="/admin/expenses/overview" className={styles['nav-item']}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <line x1="12" y1="1" x2="12" y2="23"/>
               <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
@@ -144,13 +128,7 @@ export function ExpensesPage() {
       <div className={styles['main-wrapper']}>
         <header className={styles['dashboard-header']}>
           <div className={styles['header-breadcrumb']}>
-            <Link to="/admin/expenses/overview" className={styles['breadcrumb-item']}>Expenses</Link>
-            {isMetaAds && (
-              <>
-                <span className={styles['breadcrumb-separator']}>/</span>
-                <span className={`${styles['breadcrumb-item']} ${styles.active}`}>Meta Ads</span>
-              </>
-            )}
+            <span className={`${styles['breadcrumb-item']} ${styles.active}`}>Sales Management</span>
           </div>
           <div className={styles['header-right']}>
             <div className={styles['user-menu']}>
@@ -169,39 +147,7 @@ export function ExpensesPage() {
         </header>
 
         <main className={styles['dashboard-main']}>
-          <div className={styles['expenses-nav']}>
-            <Link 
-              to="/admin/expenses/overview"
-              className={`${styles['expenses-nav-item']} ${isOverview ? styles.active : ''}`}
-            >
-              Overview
-            </Link>
-            <Link 
-              to="/admin/expenses/meta-ads"
-              className={`${styles['expenses-nav-item']} ${isMetaAds ? styles.active : ''}`}
-            >
-              Meta Ads
-            </Link>
-            <Link 
-              to="/admin/expenses/sales"
-              className={`${styles['expenses-nav-item']} ${isSales ? styles.active : ''}`}
-            >
-              Sales
-            </Link>
-            <Link 
-              to="/admin/expenses/cogs"
-              className={`${styles['expenses-nav-item']} ${isCOGS ? styles.active : ''}`}
-            >
-              COGS
-            </Link>
-          </div>
-
-          <Routes>
-            <Route path="overview" element={<ExpensesOverview />} />
-            <Route path="meta-ads" element={<MetaAdsPage />} />
-            <Route path="sales" element={<SalesPage />} />
-            <Route path="cogs" element={<COGSPage />} />
-          </Routes>
+          <SalesPage />
         </main>
       </div>
     </div>

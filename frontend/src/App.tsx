@@ -3,6 +3,7 @@ import { AdminLogin } from './pages/AdminLogin';
 import { AdminDashboard } from './pages/AdminDashboard';
 import { ExpensesPage } from './pages/ExpensesPage';
 import { UploadPage } from './pages/UploadPage';
+import { SalesManagementPage } from './pages/SalesManagementPage';
 import { api } from './services/api';
 
 // Protected Route component
@@ -33,6 +34,14 @@ function App() {
           element={
             <ProtectedRoute>
               <AdminDashboard />
+            </ProtectedRoute>
+          } 
+        />
+        <Route 
+          path="/admin/sales-management" 
+          element={
+            <ProtectedRoute>
+              <SalesManagementPage />
             </ProtectedRoute>
           } 
         />

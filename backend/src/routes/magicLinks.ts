@@ -168,8 +168,25 @@ router.delete('/:token', requireAdmin, async (req: AuthenticatedRequest, res: Re
 });
 
 /**
+ * POST /api/admin/shopify/orders/clear-cache
+ * Clear the orders cache to force fresh data from Shopify
+ */
+router.post('/shopify/orders/clear-cache', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    await shopifyService.clearOrdersCache();
+    res.json({
+      success: true,
+      message: 'Orders cache cleared successfully',
+    });
+  } catch (error) {
+    console.error('Error clearing cache:', error);
+    res.status(500).json({ success: false, error: 'Failed to clear cache' });
+  }
+});
+
+/**
  * GET /api/admin/shopify/orders
- * Get recent orders from Shopify
+ * Get recent orders from Shopify (with caching)
  */
 router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {

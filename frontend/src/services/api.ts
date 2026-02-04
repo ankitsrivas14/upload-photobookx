@@ -269,6 +269,15 @@ class ApiService {
     return this.request(`/api/admin/magic-links/shopify/orders/${encodeURIComponent(orderNumber)}`);
   }
 
+  async clearOrdersCache(): Promise<{ success: boolean; message?: string; error?: string }> {
+    return this.request<{ success: boolean; message?: string; error?: string }>(
+      '/api/admin/magic-links/shopify/orders/clear-cache',
+      {
+        method: 'POST',
+      }
+    );
+  }
+
   // Sales - Discarded Orders
   async getDiscardedOrderIds(): Promise<{ success: boolean; discardedOrderIds: number[] }> {
     return this.request<{ success: boolean; discardedOrderIds: number[] }>(

@@ -1,5 +1,6 @@
 import config from '../config';
 import type { ShopifyOrder, ShopifyOrdersResponse } from '../types';
+import ShopifyOrderCache from '../models/ShopifyOrderCache';
 
 /**
  * Simplified Shopify Admin API Service
@@ -10,6 +11,7 @@ class ShopifyService {
   private accessToken: string;
   private apiVersion: string;
   private printedPhotosProductId: number;
+  private cacheTTL: number = 5 * 60 * 1000; // 5 minutes in milliseconds
 
   constructor() {
     this.storeDomain = config.shopify.storeDomain;
@@ -116,11 +118,98 @@ class ShopifyService {
   }
 
   /**
+   * Check if cached data exists and is still fresh
+   */
+  private async getCachedOrders(cacheKey: string): Promise<ShopifyOrder[] | null> {
+    try {
+      const cached = await ShopifyOrderCache.findOne({ 
+        cacheKey,
+        expiresAt: { $gt: new Date() }
+      });
+      
+      if (cached) {
+        console.log(`Cache hit for ${cacheKey}, cached at ${cached.cachedAt}`);
+        return cached.orders;
+      }
+      
+      console.log(`Cache miss for ${cacheKey}`);
+      return null;
+    } catch (error) {
+      console.error('Error fetching from cache:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Update cache with fresh data
+   */
+  private async updateCache(cacheKey: string, orders: ShopifyOrder[]): Promise<void> {
+    try {
+      const now = new Date();
+      const expiresAt = new Date(now.getTime() + this.cacheTTL);
+      
+      await ShopifyOrderCache.findOneAndUpdate(
+        { cacheKey },
+        {
+          orders,
+          cachedAt: now,
+          expiresAt,
+        },
+        { upsert: true, new: true }
+      );
+      
+      console.log(`Cache updated for ${cacheKey}, expires at ${expiresAt}`);
+    } catch (error) {
+      console.error('Error updating cache:', error);
+      // Don't throw - caching is not critical
+    }
+  }
+
+  /**
+   * Clear all cached orders
+   * Useful for forcing a refresh of Shopify data
+   */
+  async clearOrdersCache(): Promise<void> {
+    try {
+      await ShopifyOrderCache.deleteMany({});
+      console.log('All order caches cleared');
+    } catch (error) {
+      console.error('Error clearing cache:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Clear specific cache entry
+   */
+  async clearSpecificCache(cacheKey: string): Promise<void> {
+    try {
+      await ShopifyOrderCache.deleteOne({ cacheKey });
+      console.log(`Cache cleared for ${cacheKey}`);
+    } catch (error) {
+      console.error('Error clearing specific cache:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Get orders that contain the printed photos product
    * Fetches more orders and filters to only those with the product
+   * Uses caching with 5-minute TTL
    */
   async getOrdersWithPrintedPhotos(limit: number = 50): Promise<ShopifyOrder[]> {
     try {
+      const cacheKey = `printed_photos_${limit}`;
+      
+      // Try to get from cache first
+      const cachedOrders = await this.getCachedOrders(cacheKey);
+      if (cachedOrders) {
+        return cachedOrders;
+      }
+      
+      // Cache miss - fetch from Shopify
+      console.log('Fetching orders from Shopify API...');
+      
       // Fetch more orders than needed since we'll filter them
       const fetchLimit = Math.min(limit * 3, 250); // Shopify max is 250
       
@@ -134,7 +223,12 @@ class ShopifyService {
       const filteredOrders = allOrders.filter(order => this.orderContainsPrintedPhotos(order));
       
       // Return up to the requested limit
-      return filteredOrders.slice(0, limit);
+      const result = filteredOrders.slice(0, limit);
+      
+      // Update cache
+      await this.updateCache(cacheKey, result);
+      
+      return result;
     } catch (error) {
       console.error('Error fetching orders:', error);
       throw error;
@@ -151,9 +245,21 @@ class ShopifyService {
   /**
    * Get ALL recent orders (not filtered by product)
    * For sales tracking and general order management
+   * Uses caching with 5-minute TTL
    */
   async getAllOrders(limit: number = 50): Promise<ShopifyOrder[]> {
     try {
+      const cacheKey = `all_orders_${limit}`;
+      
+      // Try to get from cache first
+      const cachedOrders = await this.getCachedOrders(cacheKey);
+      if (cachedOrders) {
+        return cachedOrders;
+      }
+      
+      // Cache miss - fetch from Shopify
+      console.log('Fetching all orders from Shopify API...');
+      
       // Shopify max is 250 per request
       const fetchLimit = Math.min(limit, 250);
       
@@ -161,7 +267,12 @@ class ShopifyService {
         `/orders.json?status=any&limit=${fetchLimit}`
       );
       
-      return data.orders || [];
+      const orders = data.orders || [];
+      
+      // Update cache
+      await this.updateCache(cacheKey, orders);
+      
+      return orders;
     } catch (error) {
       console.error('Error fetching all orders:', error);
       throw error;
