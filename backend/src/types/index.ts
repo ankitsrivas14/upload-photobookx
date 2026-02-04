@@ -92,6 +92,8 @@ export interface ShopifyOrder {
   tags?: string;
   total_price?: string;
   current_total_price?: string;
+  cancelled_at?: string | null;
+  financial_status?: string;
 }
 
 export interface ShopifyOrdersResponse {

@@ -64,10 +64,22 @@ export function SalesPage() {
   const [rtoOrderIds, setRTOOrderIds] = useState<Set<number>>(new Set());
   const [selectedOrders, setSelectedOrders] = useState<Set<number>>(new Set());
   const [selectAll, setSelectAll] = useState(false);
-  const [selectedMonthFilter, setSelectedMonthFilter] = useState<string>('all'); // 'all', 'current', or 'YYYY-MM'
+  const [selectedMonthFilter, setSelectedMonthFilter] = useState<string>('current'); // 'all', 'current', or 'YYYY-MM' - Default to current month
   const [showBulkMenu, setShowBulkMenu] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  
+  // Status filters (AND filters)
+  const [showUnfulfilled, setShowUnfulfilled] = useState(false);
+  const [showDelivered, setShowDelivered] = useState(false);
+  const [showFailed, setShowFailed] = useState(false);
+  
+  // Pending drawer
+  const [showPendingDrawer, setShowPendingDrawer] = useState(false);
+  const [pendingFilterCOD, setPendingFilterCOD] = useState(false);
+  const [pendingFilterPaid, setPendingFilterPaid] = useState(false);
+  const [pendingFilterDelayDays, setPendingFilterDelayDays] = useState<Set<number>>(new Set());
+  const [showDelayDropdown, setShowDelayDropdown] = useState(false);
   
   // COGS Calculator Modal State
   const [showCogsModal, setShowCogsModal] = useState(false);
@@ -83,17 +95,77 @@ export function SalesPage() {
     loadData();
   }, []);
 
+  // Close delay dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (showDelayDropdown && !target.closest(`.${styles['dropdown-container']}`)) {
+        setShowDelayDropdown(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showDelayDropdown]);
+
   const loadData = async () => {
     setIsLoading(true);
     try {
       const [ordersResponse, discardedResponse, rtoResponse, cogsConfigResponse] = await Promise.all([
-        api.getOrders(250, true), // Fetch all orders (not filtered)
+        api.getOrders(250, true), // Fetch all orders (not filtered) - Shopify max per request is 250
         api.getDiscardedOrderIds(),
         api.getRTOOrderIds(),
         api.getCOGSConfiguration(),
       ]);
       
       if (ordersResponse.success && ordersResponse.orders) {
+        console.log(`Loaded ${ordersResponse.orders.length} orders from API`);
+        
+        // Debug: Log delivery statuses to understand what we're getting
+        const deliveryStatusCounts: Record<string, number> = {};
+        const fulfillmentStatusCounts: Record<string, number> = {};
+        let unfulfilledCount = 0;
+        let deliveredCount = 0;
+        let failedCount = 0;
+        
+        let cancelledCount = 0;
+        
+        ordersResponse.orders.forEach(order => {
+          // Skip cancelled orders in categorization
+          if (order.cancelledAt) {
+            cancelledCount++;
+            return;
+          }
+          
+          const deliveryStatus = order.deliveryStatus || 'no_delivery_status';
+          const fulfillmentStatus = order.fulfillmentStatus || 'no_fulfillment_status';
+          
+          deliveryStatusCounts[deliveryStatus] = (deliveryStatusCounts[deliveryStatus] || 0) + 1;
+          fulfillmentStatusCounts[fulfillmentStatus] = (fulfillmentStatusCounts[fulfillmentStatus] || 0) + 1;
+          
+          // Categorize
+          const deliveryStatusLower = order.deliveryStatus?.toLowerCase() || '';
+          const fulfillmentStatusLower = order.fulfillmentStatus?.toLowerCase() || '';
+          
+          if (deliveryStatusLower === 'delivered') {
+            deliveredCount++;
+          } else if (deliveryStatusLower === 'failure' || deliveryStatusLower === 'attempted_delivery') {
+            failedCount++;
+          } else if (!fulfillmentStatusLower || fulfillmentStatusLower === '' || fulfillmentStatusLower === 'unfulfilled') {
+            unfulfilledCount++;
+          }
+        });
+        
+        console.log('Delivery status breakdown:', deliveryStatusCounts);
+        console.log('Fulfillment status breakdown:', fulfillmentStatusCounts);
+        console.log('Filter categories:', {
+          unfulfilled: unfulfilledCount,
+          delivered: deliveredCount,
+          failed: failedCount,
+          cancelled: cancelledCount,
+          other: ordersResponse.orders.length - unfulfilledCount - deliveredCount - failedCount - cancelledCount
+        });
+        
         setOrders(ordersResponse.orders);
       }
       
@@ -163,49 +235,173 @@ export function SalesPage() {
 
   const availableMonths = getAvailableMonths();
 
-  // Filter orders based on selected month and exclude discarded orders
+  // Helper function to check order status
+  const getOrderStatus = (order: ShopifyOrder) => {
+    const deliveryStatus = order.deliveryStatus?.toLowerCase() || '';
+    const fulfillmentStatus = order.fulfillmentStatus?.toLowerCase() || '';
+    
+    // Failed statuses: failure, attempted_delivery
+    const isFailed = deliveryStatus === 'failure' || 
+                     deliveryStatus === 'attempted_delivery' ||
+                     deliveryStatus.includes('failed') || 
+                     deliveryStatus.includes('attempted') || 
+                     deliveryStatus.includes('delayed');
+    
+    // Delivered statuses: delivered only
+    const isDelivered = deliveryStatus === 'delivered';
+    
+    // Unfulfilled: Check fulfillmentStatus first (null, '', or 'unfulfilled' means not fulfilled)
+    // If fulfillmentStatus is null/empty/unfulfilled, the order is truly unfulfilled
+    const isUnfulfilled = !fulfillmentStatus || 
+                          fulfillmentStatus === '' || 
+                          fulfillmentStatus === 'unfulfilled';
+    
+    return { isFailed, isDelivered, isUnfulfilled };
+  };
+
+  // Filter orders based on selected month, status filters, and exclude discarded/cancelled orders
   const getFilteredOrders = () => {
-    const filtered = orders.filter(order => !discardedOrderIds.has(order.id));
+    // Exclude discarded orders and cancelled orders
+    let filtered = orders.filter(order => 
+      !discardedOrderIds.has(order.id) && !order.cancelledAt
+    );
     
-    if (selectedMonthFilter === 'all') {
-      return filtered;
+    // Apply month filter
+    if (selectedMonthFilter !== 'all') {
+      let targetMonth: number;
+      let targetYear: number;
+      
+      if (selectedMonthFilter === 'current') {
+        targetMonth = new Date().getMonth();
+        targetYear = new Date().getFullYear();
+      } else {
+        // Format: YYYY-MM
+        const [year, month] = selectedMonthFilter.split('-');
+        targetYear = parseInt(year);
+        targetMonth = parseInt(month) - 1;
+      }
+      
+      filtered = filtered.filter(order => {
+        const orderDate = new Date(order.createdAt);
+        return orderDate.getMonth() === targetMonth && orderDate.getFullYear() === targetYear;
+      });
     }
     
-    let targetMonth: number;
-    let targetYear: number;
-    
-    if (selectedMonthFilter === 'current') {
-      targetMonth = new Date().getMonth();
-      targetYear = new Date().getFullYear();
-    } else {
-      // Format: YYYY-MM
-      const [year, month] = selectedMonthFilter.split('-');
-      targetYear = parseInt(year);
-      targetMonth = parseInt(month) - 1;
+    // Apply status filters (works with month filter via AND, multiple status filters use OR)
+    if (showUnfulfilled || showDelivered || showFailed) {
+      filtered = filtered.filter(order => {
+        const { isFailed, isDelivered, isUnfulfilled } = getOrderStatus(order);
+        
+        // If multiple status filters are active, order must match at least one (OR logic)
+        const matchesUnfulfilled = showUnfulfilled && isUnfulfilled;
+        const matchesDelivered = showDelivered && isDelivered;
+        const matchesFailed = showFailed && isFailed;
+        
+        return matchesUnfulfilled || matchesDelivered || matchesFailed;
+      });
     }
     
-    return filtered.filter(order => {
-      const orderDate = new Date(order.createdAt);
-      return orderDate.getMonth() === targetMonth && orderDate.getFullYear() === targetYear;
-    });
+    return filtered;
   };
 
   const filteredOrders = getFilteredOrders();
 
-  // Calculate stats from filtered orders
+  // Clear selections when filters change
+  useEffect(() => {
+    setSelectedOrders(new Set());
+    setSelectAll(false);
+  }, [selectedMonthFilter, showUnfulfilled, showDelivered, showFailed]);
+
+  // Calculate pending products from unfulfilled orders
+  const getPendingProducts = () => {
+    // Products to ignore (accessories/add-ons)
+    const ignoredProducts = [
+      'printed photos - ready to paste',
+      'pocket to keep your souvenirs',
+      'gift wrap'
+    ];
+
+    // Get unfulfilled orders (not cancelled, not discarded, fulfillmentStatus is null/unfulfilled)
+    let unfulfilledOrders = orders.filter(order => 
+      !order.cancelledAt && 
+      !discardedOrderIds.has(order.id) &&
+      (!order.fulfillmentStatus || order.fulfillmentStatus.toLowerCase() === 'unfulfilled')
+    );
+
+    // Apply payment method filters
+    if (pendingFilterCOD || pendingFilterPaid) {
+      unfulfilledOrders = unfulfilledOrders.filter(order => {
+        if (pendingFilterCOD && order.paymentMethod === 'COD') return true;
+        if (pendingFilterPaid && order.paymentMethod === 'Prepaid') return true;
+        return false;
+      });
+    }
+
+    // Apply delay days filter
+    if (pendingFilterDelayDays.size > 0) {
+      unfulfilledOrders = unfulfilledOrders.filter(order => {
+        const delayDays = getDelayDaysIncludingZero(order);
+        return delayDays !== null && pendingFilterDelayDays.has(delayDays);
+      });
+    }
+
+    // Helper to extract numeric part from order name (e.g., "#PB1123S" -> "1123")
+    const extractOrderNumber = (orderName: string | undefined): string => {
+      if (!orderName) return 'N/A';
+      // Remove # prefix if present, then extract numbers
+      const cleanName = orderName.replace('#', '');
+      const match = cleanName.match(/\d+/);
+      return match ? match[0] : cleanName;
+    };
+
+    // Aggregate products by variant
+    const productCounts: Record<string, { 
+      title: string; 
+      variantTitle: string; 
+      count: number; 
+      orderNumbers: string[] 
+    }> = {};
+
+    unfulfilledOrders.forEach(order => {
+      order.lineItems?.forEach(item => {
+        // Skip ignored products
+        if (ignoredProducts.includes(item.title.toLowerCase())) {
+          return;
+        }
+
+        const key = `${item.title}${item.variantTitle ? ` - ${item.variantTitle}` : ''}`;
+        const orderNum = extractOrderNumber(order.name);
+        
+        if (productCounts[key]) {
+          productCounts[key].count += item.quantity;
+          if (!productCounts[key].orderNumbers.includes(orderNum)) {
+            productCounts[key].orderNumbers.push(orderNum);
+          }
+        } else {
+          productCounts[key] = {
+            title: item.title,
+            variantTitle: item.variantTitle || '',
+            count: item.quantity,
+            orderNumbers: [orderNum],
+          };
+        }
+      });
+    });
+
+    // Convert to array and sort by count (descending)
+    return Object.values(productCounts).sort((a, b) => b.count - a.count);
+  };
+
+  // Calculate stats from filtered orders (already excludes cancelled orders)
   const calculateStats = () => {
     const totalOrders = filteredOrders.length;
-    let netProfitLoss = 0;
-    let totalRevenue = 0;
     let ndrCount = 0;
     let deliveredCount = 0;
     let prepaidCount = 0;
     let codCount = 0;
+    let fulfilledCount = 0; // Orders that have been fulfilled (delivered or attempted)
 
     filteredOrders.forEach(order => {
-      const pl = orderProfitLoss.get(order.id) || 0;
-      netProfitLoss += pl;
-
       // Count prepaid vs COD
       if (order.paymentMethod === 'Prepaid') {
         prepaidCount++;
@@ -221,25 +417,33 @@ export function SalesPage() {
                       order.deliveryStatus.toLowerCase().includes('undelivered')
                     ));
 
+      // Check if order has been fulfilled (shipped)
+      // Use fulfillment_status - if it's 'fulfilled' or 'partial', the order has been fulfilled
+      const fulfillmentStatus = order.fulfillmentStatus?.toLowerCase() || '';
+      const isFulfilled = fulfillmentStatus === 'fulfilled' || fulfillmentStatus === 'partial';
+
+      if (isFulfilled) {
+        fulfilledCount++;
+      }
+
       if (isNDR) {
         ndrCount++;
       } else if (order.paymentMethod === 'Prepaid' || order.deliveryStatus?.toLowerCase() === 'delivered') {
         deliveredCount++;
-        totalRevenue += order.totalPrice || 0;
       }
     });
 
-    const ndrRate = totalOrders > 0 ? (ndrCount / totalOrders) * 100 : 0;
+    // Calculate NDR Rate based on fulfilled orders only
+    const ndrRate = fulfilledCount > 0 ? (ndrCount / fulfilledCount) * 100 : 0;
 
     return {
       totalOrders,
-      netProfitLoss,
-      totalRevenue,
       ndrCount,
       deliveredCount,
       ndrRate,
       prepaidCount,
       codCount,
+      fulfilledCount,
     };
   };
 
@@ -355,6 +559,64 @@ export function SalesPage() {
       default:
         return { text: status.replace(/_/g, ' '), className: 'default' };
     }
+  };
+
+  // Calculate delay days for unfulfilled orders
+  const getDelayDays = (order: ShopifyOrder): number | null => {
+    // Only calculate for unfulfilled orders
+    const fulfillmentStatus = order.fulfillmentStatus?.toLowerCase() || '';
+    const isUnfulfilled = !fulfillmentStatus || fulfillmentStatus === '' || fulfillmentStatus === 'unfulfilled';
+    
+    if (!isUnfulfilled) return null;
+
+    const orderDate = new Date(order.createdAt);
+    const today = new Date();
+    
+    // Reset time parts to compare dates only
+    orderDate.setHours(0, 0, 0, 0);
+    today.setHours(0, 0, 0, 0);
+    
+    const diffTime = today.getTime() - orderDate.getTime();
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    
+    // Return null for 0 days (same day orders - no delay)
+    return diffDays > 0 ? diffDays : null;
+  };
+
+  // Calculate delay days including 0 (for dropdown filter)
+  const getDelayDaysIncludingZero = (order: ShopifyOrder): number | null => {
+    const fulfillmentStatus = order.fulfillmentStatus?.toLowerCase() || '';
+    const isUnfulfilled = !fulfillmentStatus || fulfillmentStatus === '' || fulfillmentStatus === 'unfulfilled';
+    
+    if (!isUnfulfilled) return null;
+
+    const orderDate = new Date(order.createdAt);
+    const today = new Date();
+    
+    orderDate.setHours(0, 0, 0, 0);
+    today.setHours(0, 0, 0, 0);
+    
+    const diffTime = today.getTime() - orderDate.getTime();
+    return Math.floor(diffTime / (1000 * 60 * 60 * 24));
+  };
+
+  // Get available delay days from unfulfilled orders
+  const getAvailableDelayDays = (): number[] => {
+    const unfulfilledOrders = orders.filter(order => 
+      !order.cancelledAt && 
+      !discardedOrderIds.has(order.id) &&
+      (!order.fulfillmentStatus || order.fulfillmentStatus.toLowerCase() === 'unfulfilled')
+    );
+
+    const delayDaysSet = new Set<number>();
+    unfulfilledOrders.forEach(order => {
+      const days = getDelayDaysIncludingZero(order);
+      if (days !== null) {
+        delayDaysSet.add(days);
+      }
+    });
+
+    return Array.from(delayDaysSet).sort((a, b) => a - b);
   };
 
   // Auto-detect variant from order line items
@@ -529,6 +791,17 @@ export function SalesPage() {
             </div>
             <div className={styles['header-actions']}>
               <button
+                onClick={() => setShowPendingDrawer(true)}
+                className={styles['pending-btn']}
+                title="Show pending products to fulfill"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                  <path d="M9 12h6m-6 4h6"/>
+                </svg>
+                Show Pending
+              </button>
+              <button
                 onClick={handleRefresh}
                 disabled={isRefreshing}
                 className={styles['refresh-btn']}
@@ -635,23 +908,11 @@ export function SalesPage() {
           </div>
           
           <div className={styles['stat-card']}>
-            <div className={styles['stat-label']}>Net P/L</div>
-            <div className={`${styles['stat-value']} ${stats.netProfitLoss >= 0 ? styles.profit : styles.loss}`}>
-              {stats.netProfitLoss >= 0 ? '+' : ''}₹{formatIndianNumber(Math.abs(stats.netProfitLoss))}
-            </div>
-          </div>
-          
-          <div className={styles['stat-card']}>
-            <div className={styles['stat-label']}>Total Revenue</div>
-            <div className={styles['stat-value']}>₹{formatIndianNumber(stats.totalRevenue)}</div>
-          </div>
-          
-          <div className={styles['stat-card']}>
             <div className={styles['stat-label']}>NDR Rate</div>
             <div className={`${styles['stat-value']} ${stats.ndrRate > 15 ? styles['ndr-high'] : styles['ndr-normal']}`}>
               {formatIndianNumber(stats.ndrRate, 1)}%
             </div>
-            <div className={styles['stat-subtext']}>{formatIndianNumber(stats.ndrCount, 0)} / {formatIndianNumber(stats.totalOrders, 0)} orders</div>
+            <div className={styles['stat-subtext']}>{formatIndianNumber(stats.ndrCount, 0)} / {formatIndianNumber(stats.fulfilledCount, 0)} fulfilled</div>
           </div>
           
           <div className={styles['stat-card']}>
@@ -661,6 +922,54 @@ export function SalesPage() {
               {formatIndianNumber(stats.prepaidCount, 0)} prepaid · {formatIndianNumber(stats.codCount, 0)} COD
             </div>
           </div>
+        </div>
+
+        {/* Status Filters */}
+        <div className={styles['status-filters']}>
+          <span className={styles['filters-label']}>Filter by status:</span>
+          <button
+            onClick={() => setShowUnfulfilled(!showUnfulfilled)}
+            className={`${styles['filter-chip']} ${showUnfulfilled ? styles.active : ''}`}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M12 6v6l4 2"/>
+            </svg>
+            Unfulfilled
+          </button>
+          <button
+            onClick={() => setShowDelivered(!showDelivered)}
+            className={`${styles['filter-chip']} ${showDelivered ? styles.active : ''}`}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+              <polyline points="22 4 12 14.01 9 11.01"/>
+            </svg>
+            Delivered
+          </button>
+          <button
+            onClick={() => setShowFailed(!showFailed)}
+            className={`${styles['filter-chip']} ${showFailed ? styles.active : ''}`}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="15" y1="9" x2="9" y2="15"/>
+              <line x1="9" y1="9" x2="15" y2="15"/>
+            </svg>
+            Failed
+          </button>
+          {(showUnfulfilled || showDelivered || showFailed) && (
+            <button
+              onClick={() => {
+                setShowUnfulfilled(false);
+                setShowDelivered(false);
+                setShowFailed(false);
+              }}
+              className={styles['clear-filters-btn']}
+            >
+              Clear filters
+            </button>
+          )}
         </div>
 
         {/* Orders Table */}
@@ -680,14 +989,13 @@ export function SalesPage() {
                 <th>Items</th>
                 <th>Tags</th>
                 <th>Date</th>
-                <th className={styles['pl-header']}>P/L</th>
                 <th className={styles['actions-header']}>Details</th>
               </tr>
             </thead>
             <tbody>
               {filteredOrders.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className={styles['empty-state']}>
+                  <td colSpan={6} className={styles['empty-state']}>
                     <div className={styles['empty-icon']}>📦</div>
                     <div className={styles['empty-text']}>No orders found</div>
                   </td>
@@ -729,6 +1037,17 @@ export function SalesPage() {
                     <td className={styles['order-tags']}>
                       <div className={styles['tags-wrapper']}>
                         {(() => {
+                          const delayDays = getDelayDays(order);
+                          if (delayDays) {
+                            return (
+                              <span className={`${styles['tag-badge']} ${styles['delay-tag']}`}>
+                                {delayDays} day{delayDays > 1 ? 's' : ''} delay
+                              </span>
+                            );
+                          }
+                          return null;
+                        })()}
+                        {(() => {
                           const deliveryBadge = getDeliveryStatusBadge(order.deliveryStatus);
                           return deliveryBadge.text !== '—' && (
                             <span className={`${styles['tag-badge']} ${styles[`delivery-${deliveryBadge.className}`]}`}>
@@ -748,18 +1067,6 @@ export function SalesPage() {
                         day: 'numeric',
                       })}
                     </td>
-                    <td className={styles['pl-cell']}>
-                      {(() => {
-                        const pl = orderProfitLoss.get(order.id);
-                        if (pl === undefined) return '—';
-                        const isProfit = pl >= 0;
-                        return (
-                          <span className={`${styles['pl-value']} ${isProfit ? styles.profit : styles.loss}`}>
-                            {isProfit ? '+' : ''}₹{formatIndianNumber(Math.abs(pl))}
-                          </span>
-                        );
-                      })()}
-                    </td>
                     <td className={styles['actions-cell']}>
                       <button
                         onClick={() => handleOpenCogsModal(order)}
@@ -778,6 +1085,128 @@ export function SalesPage() {
           </table>
         </div>
       </div>
+
+      {/* Pending Products Drawer */}
+      {showPendingDrawer && (
+        <div className={styles['drawer-overlay']} onClick={() => setShowPendingDrawer(false)}>
+          <div className={styles['drawer']} onClick={(e) => e.stopPropagation()}>
+            <div className={styles['drawer-header']}>
+              <h3>Pending Products to Fulfill</h3>
+              <button 
+                className={styles['drawer-close']} 
+                onClick={() => setShowPendingDrawer(false)}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18"/>
+                  <line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+              </button>
+            </div>
+
+            <div className={styles['drawer-filters']}>
+              <div className={styles['drawer-filters-row']}>
+                <span className={styles['drawer-filters-label']}>Payment:</span>
+                <button
+                  onClick={() => setPendingFilterCOD(!pendingFilterCOD)}
+                  className={`${styles['drawer-filter-chip']} ${pendingFilterCOD ? styles.active : ''}`}
+                >
+                  COD
+                </button>
+                <button
+                  onClick={() => setPendingFilterPaid(!pendingFilterPaid)}
+                  className={`${styles['drawer-filter-chip']} ${pendingFilterPaid ? styles.active : ''}`}
+                >
+                  Paid
+                </button>
+              </div>
+
+              <div className={styles['drawer-filters-row']}>
+                <span className={styles['drawer-filters-label']}>Delayed:</span>
+                <div className={styles['dropdown-container']}>
+                  <button
+                    onClick={() => setShowDelayDropdown(!showDelayDropdown)}
+                    className={`${styles['dropdown-trigger']} ${pendingFilterDelayDays.size > 0 ? styles.active : ''}`}
+                  >
+                    {pendingFilterDelayDays.size > 0 
+                      ? `${pendingFilterDelayDays.size} selected` 
+                      : 'Select delay days'}
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="6 9 12 15 18 9"/>
+                    </svg>
+                  </button>
+                  
+                  {showDelayDropdown && (
+                    <div className={styles['dropdown-menu']}>
+                      {getAvailableDelayDays().map(days => (
+                        <label key={days} className={styles['dropdown-item']}>
+                          <input
+                            type="checkbox"
+                            checked={pendingFilterDelayDays.has(days)}
+                            onChange={(e) => {
+                              const newSet = new Set(pendingFilterDelayDays);
+                              if (e.target.checked) {
+                                newSet.add(days);
+                              } else {
+                                newSet.delete(days);
+                              }
+                              setPendingFilterDelayDays(newSet);
+                            }}
+                          />
+                          <span>{days === 0 ? 'No Delay' : `${days} day${days > 1 ? 's' : ''} delay`}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {(pendingFilterCOD || pendingFilterPaid || pendingFilterDelayDays.size > 0) && (
+                <button
+                  onClick={() => {
+                    setPendingFilterCOD(false);
+                    setPendingFilterPaid(false);
+                    setPendingFilterDelayDays(new Set());
+                  }}
+                  className={styles['drawer-clear-filters']}
+                >
+                  Clear All
+                </button>
+              )}
+            </div>
+
+            <div className={styles['drawer-body']}>
+              {getPendingProducts().length === 0 ? (
+                <div className={styles['drawer-empty']}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="20 6 9 17 4 12"/>
+                  </svg>
+                  <p>No pending products</p>
+                  <span>All orders are fulfilled!</span>
+                </div>
+              ) : (
+                <div className={styles['pending-products-list']}>
+                  {getPendingProducts().map((product, idx) => (
+                    <div key={idx} className={styles['pending-product-item']}>
+                      <div className={styles['product-info']}>
+                        <div className={styles['product-title']}>{product.title}</div>
+                        {product.variantTitle && (
+                          <div className={styles['product-variant']}>{product.variantTitle}</div>
+                        )}
+                        <div className={styles['product-orders']}>
+                          Orders: {product.orderNumbers.join(', ')}
+                        </div>
+                      </div>
+                      <div className={styles['product-count']}>
+                        <span className={styles['count-badge']}>{product.count}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* COGS Calculator Modal */}
       {showCogsModal && selectedOrderForCogs && (

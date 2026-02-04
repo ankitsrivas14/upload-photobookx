@@ -202,12 +202,19 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
     res.json({
       success: true,
       orders: orders.map(order => {
-        // Get delivery status from the latest fulfillment
+        // Get delivery status from multiple sources
         let deliveryStatus = null;
+        
+        // First, check fulfillments for shipment status
         if (order.fulfillments && order.fulfillments.length > 0) {
           // Get the most recent fulfillment's shipment status
           const latestFulfillment = order.fulfillments[order.fulfillments.length - 1];
           deliveryStatus = latestFulfillment.shipment_status;
+        }
+        
+        // If no delivery status from fulfillments, check order-level fulfillment_status
+        if (!deliveryStatus && order.fulfillment_status) {
+          deliveryStatus = order.fulfillment_status;
         }
         
         // Determine payment method (Prepaid or COD)
@@ -238,6 +245,7 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
           paymentMethod: paymentMethod,
           maxUploads: shopifyService.getMaxUploadsForOrder(order),
           totalPrice: order.current_total_price ? parseFloat(order.current_total_price) : undefined,
+          cancelledAt: order.cancelled_at,
           lineItems: order.line_items?.map(item => ({
             title: item.title,
             quantity: item.quantity,
