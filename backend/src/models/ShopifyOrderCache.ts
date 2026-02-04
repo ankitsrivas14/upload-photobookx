@@ -15,7 +15,7 @@ const ShopifyOrderCacheSchema = new Schema<IShopifyOrderCache>({
     index: true,
   },
   orders: {
-    type: [Schema.Types.Mixed],
+    type: Schema.Types.Mixed,
     required: true,
     default: [],
   },

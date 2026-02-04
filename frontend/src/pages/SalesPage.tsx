@@ -12,6 +12,7 @@ interface ShopifyOrder {
   paymentMethod?: string;
   maxUploads: number;
   totalPrice?: number;
+  cancelledAt?: string | null;
   lineItems?: Array<{
     title: string;
     quantity: number;
