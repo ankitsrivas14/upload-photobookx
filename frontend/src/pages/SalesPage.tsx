@@ -400,10 +400,12 @@ export function SalesPage() {
     let deliveredCount = 0;
     let prepaidCount = 0;
     let codCount = 0;
+    let deliveredPrepaidCount = 0;
+    let deliveredCODCount = 0;
     let fulfilledCount = 0; // Orders that have been fulfilled (delivered or attempted)
 
     filteredOrders.forEach(order => {
-      // Count prepaid vs COD
+      // Count prepaid vs COD (total)
       if (order.paymentMethod === 'Prepaid') {
         prepaidCount++;
       } else {
@@ -431,6 +433,12 @@ export function SalesPage() {
         ndrCount++;
       } else if (order.paymentMethod === 'Prepaid' || order.deliveryStatus?.toLowerCase() === 'delivered') {
         deliveredCount++;
+        // Count delivered orders by payment method
+        if (order.paymentMethod === 'Prepaid') {
+          deliveredPrepaidCount++;
+        } else {
+          deliveredCODCount++;
+        }
       }
     });
 
@@ -444,6 +452,8 @@ export function SalesPage() {
       ndrRate,
       prepaidCount,
       codCount,
+      deliveredPrepaidCount,
+      deliveredCODCount,
       fulfilledCount,
     };
   };
@@ -920,7 +930,7 @@ export function SalesPage() {
             <div className={styles['stat-label']}>Delivered</div>
             <div className={styles['stat-value']}>{formatIndianNumber(stats.deliveredCount, 0)}</div>
             <div className={styles['stat-subtext']}>
-              {formatIndianNumber(stats.prepaidCount, 0)} prepaid · {formatIndianNumber(stats.codCount, 0)} COD
+              {formatIndianNumber(stats.deliveredPrepaidCount, 0)} prepaid · {formatIndianNumber(stats.deliveredCODCount, 0)} COD
             </div>
           </div>
         </div>
