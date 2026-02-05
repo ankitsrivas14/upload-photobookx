@@ -243,11 +243,11 @@
 }
 
 .stat-value.profit {
-  color: #10b981;
+  color: #059669;
 }
 
 .stat-value.loss {
-  color: #ef4444;
+  color: #dc2626;
 }
 
 .stat-value.ndr-high {
@@ -590,6 +590,44 @@
 .tag-badge.delivery-default {
   color: #64748b;
   background: #f1f5f9;
+}
+
+/* Profit/Loss Cell */
+.profit-loss-cell {
+  text-align: right;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.profit-loss-value {
+  display: inline-block;
+  padding: 0.25rem 0.625rem;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
+}
+
+.profit-loss-value.profit {
+  color: #047857;
+  background: #ecfdf5;
+  border: 1px solid #d1fae5;
+}
+
+.profit-loss-value.loss {
+  color: #b91c1c;
+  background: #fef2f2;
+  border: 1px solid #fee2e2;
+}
+
+.profit-loss-value.neutral {
+  color: #64748b;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.profit-loss-pending {
+  color: #94a3b8;
+  font-size: 0.875rem;
 }
 
 .order-date {

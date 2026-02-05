@@ -23,8 +23,14 @@ interface ShopifyOrder {
 interface COGSField {
   id: string;
   name: string;
-  smallValue: number;
-  largeValue: number;
+  // Old structure (deprecated)
+  smallValue?: number;
+  largeValue?: number;
+  // New structure with payment method support
+  smallPrepaidValue: number;
+  smallCODValue: number;
+  largePrepaidValue: number;
+  largeCODValue: number;
   type: 'cogs' | 'ndr' | 'both';
   calculationType: 'fixed' | 'percentage';
 }
@@ -677,7 +683,7 @@ export function SalesPage() {
     return false;
   }, [rtoOrderIds]);
 
-  // Calculate profit/loss for an order based on delivery status
+  // Calculate profit/loss for an order based on delivery status and payment method
   const calculateOrderProfitLoss = useCallback((order: ShopifyOrder): number => {
     if (cogsConfig.length === 0) {
       return 0;
@@ -685,6 +691,7 @@ export function SalesPage() {
     
     const variant = detectVariant(order);
     const isDelivered = isOrderDelivered(order);
+    const paymentMethod = order.paymentMethod?.toLowerCase() === 'prepaid' ? 'prepaid' : 'cod';
     
     // Determine revenue and which fields to use
     let revenue = 0;
@@ -702,10 +709,17 @@ export function SalesPage() {
       fieldsToUse = cogsConfig.filter(f => f.type === 'ndr' || f.type === 'both');
     }
     
-    // Calculate total costs
+    // Calculate total costs using variant + payment method
     let totalCosts = 0;
     fieldsToUse.forEach(field => {
-      const value = variant === 'small' ? field.smallValue : field.largeValue;
+      // Get the correct value based on variant and payment method
+      const key = `${variant}${paymentMethod === 'prepaid' ? 'Prepaid' : 'COD'}Value` as keyof COGSField;
+      let value = field[key] as number;
+      
+      // Fallback to old structure if new structure not available
+      if (value === undefined || value === null) {
+        value = variant === 'small' ? (field.smallValue || 0) : (field.largeValue || 0);
+      }
       
       if (field.calculationType === 'fixed') {
         totalCosts += value;
@@ -733,16 +747,23 @@ export function SalesPage() {
   const handleOpenCogsModal = (order: ShopifyOrder) => {
     setSelectedOrderForCogs(order);
     const variant = detectVariant(order);
+    const paymentMethod = order.paymentMethod?.toLowerCase() === 'prepaid' ? 'prepaid' : 'cod';
     
     // Determine config type based on delivery status
     const configType = isOrderDelivered(order) ? 'cogs' : 'ndr';
     
     setSelectedVariant(variant);
-    calculateCogsBreakdown(cogsConfig, order.totalPrice || 0, variant, configType);
+    calculateCogsBreakdown(cogsConfig, order.totalPrice || 0, variant, paymentMethod, configType);
     setShowCogsModal(true);
   };
 
-  const calculateCogsBreakdown = (fields: COGSField[], salePrice: number, variant: 'small' | 'large', configType: 'cogs' | 'ndr' | 'both') => {
+  const calculateCogsBreakdown = (
+    fields: COGSField[], 
+    salePrice: number, 
+    variant: 'small' | 'large', 
+    paymentMethod: 'prepaid' | 'cod',
+    configType: 'cogs' | 'ndr' | 'both'
+  ) => {
     const breakdown: COGSBreakdown[] = [];
     
     // Filter fields based on config type
@@ -752,7 +773,15 @@ export function SalesPage() {
       fields; // 'both' uses all fields
     
     fieldsToUse.forEach(field => {
-      const value = variant === 'small' ? field.smallValue : field.largeValue;
+      // Get the correct value based on variant and payment method
+      const key = `${variant}${paymentMethod === 'prepaid' ? 'Prepaid' : 'COD'}Value` as keyof COGSField;
+      let value = field[key] as number;
+      
+      // Fallback to old structure if new structure not available
+      if (value === undefined || value === null) {
+        value = variant === 'small' ? (field.smallValue || 0) : (field.largeValue || 0);
+      }
+      
       let calculatedCost = 0;
       
       if (field.calculationType === 'fixed') {
@@ -933,6 +962,51 @@ export function SalesPage() {
               {formatIndianNumber(stats.deliveredPrepaidCount, 0)} prepaid · {formatIndianNumber(stats.deliveredCODCount, 0)} COD
             </div>
           </div>
+
+          {/* Total P/L Stat */}
+          <div className={styles['stat-card']}>
+            <div className={styles['stat-label']}>Total P/L</div>
+            <div className={`${styles['stat-value']} ${(() => {
+              // Only include delivered or failed orders
+              const finalStatusOrders = filteredOrders.filter(o => {
+                const deliveryStatus = o.deliveryStatus?.toLowerCase() || '';
+                const isDelivered = deliveryStatus === 'delivered';
+                const isFailed = rtoOrderIds.has(o.id) ||
+                                deliveryStatus === 'failure' ||
+                                deliveryStatus === 'attempted_delivery' ||
+                                deliveryStatus.includes('failed') ||
+                                deliveryStatus.includes('rto');
+                return isDelivered || isFailed;
+              });
+              
+              const totalPL = Array.from(orderProfitLoss.entries())
+                .filter(([orderId]) => finalStatusOrders.some(o => o.id === orderId))
+                .reduce((sum, [, pl]) => sum + pl, 0);
+              return totalPL > 0 ? styles.profit : totalPL < 0 ? styles.loss : '';
+            })()}`}>
+              {(() => {
+                // Only include delivered or failed orders
+                const finalStatusOrders = filteredOrders.filter(o => {
+                  const deliveryStatus = o.deliveryStatus?.toLowerCase() || '';
+                  const isDelivered = deliveryStatus === 'delivered';
+                  const isFailed = rtoOrderIds.has(o.id) ||
+                                  deliveryStatus === 'failure' ||
+                                  deliveryStatus === 'attempted_delivery' ||
+                                  deliveryStatus.includes('failed') ||
+                                  deliveryStatus.includes('rto');
+                  return isDelivered || isFailed;
+                });
+                
+                const totalPL = Array.from(orderProfitLoss.entries())
+                  .filter(([orderId]) => finalStatusOrders.some(o => o.id === orderId))
+                  .reduce((sum, [, pl]) => sum + pl, 0);
+                return `${totalPL > 0 ? '+' : ''}₹${formatIndianNumber(totalPL, 0)}`;
+              })()}
+            </div>
+            <div className={styles['stat-subtext']}>
+              {cogsConfig.length > 0 ? 'Delivered & failed orders only' : 'Configure COGS to calculate'}
+            </div>
+          </div>
         </div>
 
         {/* Status Filters */}
@@ -999,6 +1073,7 @@ export function SalesPage() {
                 <th>Order</th>
                 <th>Items</th>
                 <th>Tags</th>
+                <th>P/L</th>
                 <th>Date</th>
                 <th className={styles['actions-header']}>Details</th>
               </tr>
@@ -1006,7 +1081,7 @@ export function SalesPage() {
             <tbody>
               {filteredOrders.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className={styles['empty-state']}>
+                  <td colSpan={7} className={styles['empty-state']}>
                     <div className={styles['empty-icon']}>📦</div>
                     <div className={styles['empty-text']}>No orders found</div>
                   </td>
@@ -1070,6 +1145,37 @@ export function SalesPage() {
                           <span className={`${styles['tag-badge']} ${styles.rto}`}>RTO</span>
                         )}
                       </div>
+                    </td>
+                    <td className={styles['profit-loss-cell']}>
+                      {(() => {
+                        // Only show P/L for delivered or failed orders (final delivery status)
+                        const deliveryStatus = order.deliveryStatus?.toLowerCase() || '';
+                        
+                        // Check if delivered
+                        const isDelivered = deliveryStatus === 'delivered';
+                        
+                        // Check if failed/NDR
+                        const isFailed = rtoOrderIds.has(order.id) ||
+                                        deliveryStatus === 'failure' ||
+                                        deliveryStatus === 'attempted_delivery' ||
+                                        deliveryStatus.includes('failed') ||
+                                        deliveryStatus.includes('rto');
+                        
+                        // Show P/L only for delivered or failed orders
+                        if (!isDelivered && !isFailed) {
+                          return <span className={styles['profit-loss-pending']}>—</span>;
+                        }
+                        
+                        const profitLoss = orderProfitLoss.get(order.id) || 0;
+                        const isProfit = profitLoss > 0;
+                        const isLoss = profitLoss < 0;
+                        
+                        return (
+                          <span className={`${styles['profit-loss-value']} ${isProfit ? styles.profit : isLoss ? styles.loss : styles.neutral}`}>
+                            {isProfit ? '+' : ''}₹{profitLoss.toFixed(0)}
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td className={styles['order-date']}>
                       {new Date(order.createdAt).toLocaleDateString('en-IN', {

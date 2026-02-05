@@ -11,8 +11,14 @@ interface AdminUser {
 interface COGSField {
   id: string;
   name: string;
-  smallValue: number;
-  largeValue: number;
+  // Old structure (deprecated, kept for backwards compatibility)
+  smallValue?: number;
+  largeValue?: number;
+  // New structure with payment method support
+  smallPrepaidValue: number;
+  smallCODValue: number;
+  largePrepaidValue: number;
+  largeCODValue: number;
   type: 'cogs' | 'ndr' | 'both';
   calculationType: 'fixed' | 'percentage';
 }

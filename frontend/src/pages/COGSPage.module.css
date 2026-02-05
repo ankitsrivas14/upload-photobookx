@@ -1,6 +1,7 @@
 .cogs-page {
-  max-width: 1400px;
+  max-width: 1800px;
   margin: 0 auto;
+  padding: 0 1rem;
 }
 
 /* Page Header */
@@ -95,7 +96,14 @@
   cursor: not-allowed;
 }
 
-/* Split Container */
+/* Grid Container - 4 Columns */
+.grid-container {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1.5rem;
+}
+
+/* Split Container (deprecated, kept for backwards compatibility) */
 .split-container {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -289,7 +297,17 @@
 }
 
 /* Responsive */
+@media (max-width: 1400px) {
+  .grid-container {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
 @media (max-width: 1024px) {
+  .grid-container {
+    grid-template-columns: 1fr;
+  }
+  
   .split-container {
     grid-template-columns: 1fr;
   }

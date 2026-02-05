@@ -34,10 +34,24 @@ router.post('/configuration', requireAdmin, async (req, res) => {
       return res.status(400).json({ error: 'Fields must be an array' });
     }
 
-    // Validate fields structure
+    // Validate fields structure (support both old and new structure)
     for (const field of fields) {
-      if (!field.id || !field.name || typeof field.smallValue !== 'number' || typeof field.largeValue !== 'number') {
-        return res.status(400).json({ error: 'Invalid field structure' });
+      if (!field.id || !field.name) {
+        return res.status(400).json({ error: 'Invalid field structure: missing id or name' });
+      }
+      
+      // Check if either old structure or new structure is present
+      const hasOldStructure = typeof field.smallValue === 'number' && typeof field.largeValue === 'number';
+      const hasNewStructure = 
+        typeof field.smallPrepaidValue === 'number' && 
+        typeof field.smallCODValue === 'number' && 
+        typeof field.largePrepaidValue === 'number' && 
+        typeof field.largeCODValue === 'number';
+      
+      if (!hasOldStructure && !hasNewStructure) {
+        return res.status(400).json({ 
+          error: 'Invalid field structure: must have either old structure (smallValue/largeValue) or new structure (smallPrepaidValue/smallCODValue/largePrepaidValue/largeCODValue)' 
+        });
       }
     }
 
