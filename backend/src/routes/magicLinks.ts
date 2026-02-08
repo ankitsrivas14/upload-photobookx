@@ -5,6 +5,7 @@ import shopifyService from '../services/shopifyService';
 import type { AuthenticatedRequest } from '../types';
 import config from '../config';
 import { UploadedImage } from '../models';
+import OrderDeliveryDate from '../models/OrderDeliveryDate';
 import { S3Client, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { fromInstanceMetadata } from '@aws-sdk/credential-provider-imds';
 import archiver from 'archiver';
@@ -199,17 +200,34 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
       ? await shopifyService.getAllOrders(limit)
       : await shopifyService.getRecentOrders(limit);
     
+    // Fetch delivery dates from database for all orders
+    const orderNumbers = orders.map(o => o.name);
+    const deliveryDates = await OrderDeliveryDate.find({
+      orderNumber: { $in: orderNumbers }
+    });
+    
+    // Create a map for quick lookup
+    const deliveryDateMap = new Map(
+      deliveryDates.map(dd => [dd.orderNumber, dd.deliveredAt])
+    );
+    
     res.json({
       success: true,
       orders: orders.map(order => {
         // Get delivery status from multiple sources
         let deliveryStatus = null;
+        let deliveredAt = null; // Track when the order was delivered
         
         // First, check fulfillments for shipment status
         if (order.fulfillments && order.fulfillments.length > 0) {
           // Get the most recent fulfillment's shipment status
           const latestFulfillment = order.fulfillments[order.fulfillments.length - 1];
           deliveryStatus = latestFulfillment.shipment_status;
+          
+          // If this fulfillment shows delivered, use its updated_at as delivery date
+          if (latestFulfillment.shipment_status?.toLowerCase() === 'delivered') {
+            deliveredAt = (latestFulfillment as any).updated_at || null;
+          }
         }
         
         // If no delivery status from fulfillments, check order-level fulfillment_status
@@ -235,6 +253,14 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
           paymentMethod = 'COD';
         }
         
+        // If no deliveredAt from Shopify, check database for CSV-imported date
+        if (!deliveredAt) {
+          const csvDate = deliveryDateMap.get(order.name);
+          if (csvDate) {
+            deliveredAt = csvDate.toISOString();
+          }
+        }
+        
         return {
           id: order.id,
           name: order.name,
@@ -242,6 +268,7 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
           createdAt: order.created_at,
           fulfillmentStatus: order.fulfillment_status,
           deliveryStatus: deliveryStatus,
+          deliveredAt: deliveredAt, // Add delivery date
           paymentMethod: paymentMethod,
           maxUploads: shopifyService.getMaxUploadsForOrder(order),
           totalPrice: order.current_total_price ? parseFloat(order.current_total_price) : undefined,

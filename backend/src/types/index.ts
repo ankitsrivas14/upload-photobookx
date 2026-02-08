@@ -77,6 +77,7 @@ export interface ShopifyFulfillment {
   shipment_status?: string | null;
   tracking_number?: string;
   tracking_url?: string;
+  updated_at?: string;
 }
 
 export interface ShopifyOrder {
