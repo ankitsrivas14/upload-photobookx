@@ -13,6 +13,7 @@ const COGSFieldSchema = new mongoose.Schema({
   largeCODValue: { type: Number, default: 0 },
   type: { type: String, enum: ['cogs', 'ndr', 'both'], default: 'cogs' },
   calculationType: { type: String, enum: ['fixed', 'percentage'], default: 'fixed' },
+  percentageType: { type: String, enum: ['included', 'excluded'], default: 'excluded' },
 });
 
 const COGSConfigurationSchema = new mongoose.Schema({

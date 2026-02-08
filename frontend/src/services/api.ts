@@ -21,6 +21,7 @@ interface COGSField {
   largeCODValue: number;
   type: 'cogs' | 'ndr' | 'both';
   calculationType: 'fixed' | 'percentage';
+  percentageType: 'included' | 'excluded'; // For percentage: included (part of total) or excluded (added on top)
 }
 
 interface COGSConfiguration {

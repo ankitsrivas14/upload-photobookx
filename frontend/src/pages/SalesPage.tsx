@@ -33,6 +33,7 @@ interface COGSField {
   largeCODValue: number;
   type: 'cogs' | 'ndr' | 'both';
   calculationType: 'fixed' | 'percentage';
+  percentageType: 'included' | 'excluded';
 }
 
 interface COGSBreakdown {
@@ -404,10 +405,19 @@ export function SalesPage() {
     const totalOrders = filteredOrders.length;
     let ndrCount = 0;
     let deliveredCount = 0;
+    let failedCount = 0;
+    let inTransitCount = 0;
+    let unfulfilledCount = 0;
     let prepaidCount = 0;
     let codCount = 0;
     let deliveredPrepaidCount = 0;
     let deliveredCODCount = 0;
+    let failedPrepaidCount = 0;
+    let failedCODCount = 0;
+    let inTransitPrepaidCount = 0;
+    let inTransitCODCount = 0;
+    let unfulfilledPrepaidCount = 0;
+    let unfulfilledCODCount = 0;
     let fulfilledCount = 0; // Orders that have been fulfilled (delivered or attempted)
 
     filteredOrders.forEach(order => {
@@ -418,48 +428,88 @@ export function SalesPage() {
         codCount++;
       }
 
-      // Check if NDR (RTO, Failed, etc.)
-      const isNDR = rtoOrderIds.has(order.id) || 
-                    (order.deliveryStatus && (
-                      order.deliveryStatus.toLowerCase().includes('rto') ||
-                      order.deliveryStatus.toLowerCase().includes('failed') ||
-                      order.deliveryStatus.toLowerCase().includes('undelivered')
-                    ));
+      // Check delivery status
+      const deliveryStatus = order.deliveryStatus?.toLowerCase() || '';
+      
+      // Check if failed/NDR
+      const isFailed = rtoOrderIds.has(order.id) ||
+                      deliveryStatus === 'failure' ||
+                      deliveryStatus === 'attempted_delivery' ||
+                      deliveryStatus.includes('failed') ||
+                      deliveryStatus.includes('rto');
 
       // Check if order has been fulfilled (shipped)
       // Use fulfillment_status - if it's 'fulfilled' or 'partial', the order has been fulfilled
       const fulfillmentStatus = order.fulfillmentStatus?.toLowerCase() || '';
-      const isFulfilled = fulfillmentStatus === 'fulfilled' || fulfillmentStatus === 'partial';
+      const isFulfilledStatus = fulfillmentStatus === 'fulfilled' || fulfillmentStatus === 'partial';
 
-      if (isFulfilled) {
+      if (isFulfilledStatus) {
         fulfilledCount++;
       }
 
-      if (isNDR) {
+      // Determine delivery status category
+      const isDelivered = deliveryStatus === 'delivered';
+      
+      // Count orders by delivery status
+      if (isFailed) {
+        // Failed/NDR orders
         ndrCount++;
-      } else if (order.paymentMethod === 'Prepaid' || order.deliveryStatus?.toLowerCase() === 'delivered') {
+        failedCount++;
+        if (order.paymentMethod === 'Prepaid') {
+          failedPrepaidCount++;
+        } else {
+          failedCODCount++;
+        }
+      } else if (isDelivered) {
+        // Successfully delivered orders
         deliveredCount++;
-        // Count delivered orders by payment method
         if (order.paymentMethod === 'Prepaid') {
           deliveredPrepaidCount++;
         } else {
           deliveredCODCount++;
         }
+      } else if (isFulfilledStatus) {
+        // In transit (fulfilled but not delivered or failed)
+        inTransitCount++;
+        if (order.paymentMethod === 'Prepaid') {
+          inTransitPrepaidCount++;
+        } else {
+          inTransitCODCount++;
+        }
+      } else {
+        // Unfulfilled orders (not yet shipped)
+        unfulfilledCount++;
+        if (order.paymentMethod === 'Prepaid') {
+          unfulfilledPrepaidCount++;
+        } else {
+          unfulfilledCODCount++;
+        }
       }
     });
 
-    // Calculate NDR Rate based on fulfilled orders only
-    const ndrRate = fulfilledCount > 0 ? (ndrCount / fulfilledCount) * 100 : 0;
+    // Calculate NDR Rate based on delivered + failed orders (final status only)
+    const finalStatusCount = deliveredCount + failedCount;
+    const ndrRate = finalStatusCount > 0 ? (ndrCount / finalStatusCount) * 100 : 0;
 
     return {
       totalOrders,
       ndrCount,
       deliveredCount,
+      failedCount,
+      inTransitCount,
+      unfulfilledCount,
       ndrRate,
+      finalStatusCount, // Delivered + Failed
       prepaidCount,
       codCount,
       deliveredPrepaidCount,
       deliveredCODCount,
+      failedPrepaidCount,
+      failedCODCount,
+      inTransitPrepaidCount,
+      inTransitCODCount,
+      unfulfilledPrepaidCount,
+      unfulfilledCODCount,
       fulfilledCount,
     };
   };
@@ -724,8 +774,21 @@ export function SalesPage() {
       if (field.calculationType === 'fixed') {
         totalCosts += value;
       } else {
-        // Percentage of sale price (use original sale price even for NDR)
-        totalCosts += (value / 100) * (order.totalPrice || 0);
+        // Percentage calculation based on type
+        const salePrice = order.totalPrice || 0;
+        const percentageType = field.percentageType || 'excluded'; // Default to excluded for backwards compatibility
+        
+        if (percentageType === 'included') {
+          // Included: percentage is part of total amount
+          // Formula: amount × (percentage / (100 + percentage))
+          // Example: ₹100 with 12% included = ₹100 × (12/112) = ₹10.71
+          totalCosts += (value / (100 + value)) * salePrice;
+        } else {
+          // Excluded: percentage is added on top
+          // Formula: amount × (percentage / 100)
+          // Example: ₹100 with 12% excluded = ₹100 × 0.12 = ₹12
+          totalCosts += (value / 100) * salePrice;
+        }
       }
     });
     
@@ -787,8 +850,16 @@ export function SalesPage() {
       if (field.calculationType === 'fixed') {
         calculatedCost = value;
       } else {
-        // Percentage of sale price
-        calculatedCost = (value / 100) * salePrice;
+        // Percentage calculation based on type
+        const percentageType = field.percentageType || 'excluded';
+        
+        if (percentageType === 'included') {
+          // Included: percentage is part of total amount
+          calculatedCost = (value / (100 + value)) * salePrice;
+        } else {
+          // Excluded: percentage is added on top
+          calculatedCost = (value / 100) * salePrice;
+        }
       }
       
       breakdown.push({
@@ -952,14 +1023,42 @@ export function SalesPage() {
             <div className={`${styles['stat-value']} ${stats.ndrRate > 15 ? styles['ndr-high'] : styles['ndr-normal']}`}>
               {formatIndianNumber(stats.ndrRate, 1)}%
             </div>
-            <div className={styles['stat-subtext']}>{formatIndianNumber(stats.ndrCount, 0)} / {formatIndianNumber(stats.fulfilledCount, 0)} fulfilled</div>
+            <div className={styles['stat-subtext']}>{formatIndianNumber(stats.ndrCount, 0)} / {formatIndianNumber(stats.finalStatusCount, 0)} final status</div>
           </div>
           
-          <div className={styles['stat-card']}>
-            <div className={styles['stat-label']}>Delivered</div>
-            <div className={styles['stat-value']}>{formatIndianNumber(stats.deliveredCount, 0)}</div>
-            <div className={styles['stat-subtext']}>
-              {formatIndianNumber(stats.deliveredPrepaidCount, 0)} prepaid · {formatIndianNumber(stats.deliveredCODCount, 0)} COD
+          <div className={styles['stat-card-combined']}>
+            <div className={styles['stat-label']}>Order Status</div>
+            <div className={styles['status-breakdown']}>
+              <div className={styles['status-row']}>
+                <div className={styles['status-item']}>
+                  <span className={styles['status-label']}>Delivered</span>
+                  <span className={styles['status-value']}>{formatIndianNumber(stats.deliveredCount, 0)}</span>
+                  <span className={styles['status-detail']}>
+                    {formatIndianNumber(stats.deliveredPrepaidCount, 0)}p · {formatIndianNumber(stats.deliveredCODCount, 0)}c
+                  </span>
+                </div>
+                <div className={styles['status-item']}>
+                  <span className={styles['status-label']}>Failed</span>
+                  <span className={styles['status-value']}>{formatIndianNumber(stats.failedCount, 0)}</span>
+                  <span className={styles['status-detail']}>
+                    {formatIndianNumber(stats.failedPrepaidCount, 0)}p · {formatIndianNumber(stats.failedCODCount, 0)}c
+                  </span>
+                </div>
+                <div className={styles['status-item']}>
+                  <span className={styles['status-label']}>In Transit</span>
+                  <span className={styles['status-value']}>{formatIndianNumber(stats.inTransitCount, 0)}</span>
+                  <span className={styles['status-detail']}>
+                    {formatIndianNumber(stats.inTransitPrepaidCount, 0)}p · {formatIndianNumber(stats.inTransitCODCount, 0)}c
+                  </span>
+                </div>
+                <div className={styles['status-item']}>
+                  <span className={styles['status-label']}>Unfulfilled</span>
+                  <span className={styles['status-value']}>{formatIndianNumber(stats.unfulfilledCount, 0)}</span>
+                  <span className={styles['status-detail']}>
+                    {formatIndianNumber(stats.unfulfilledPrepaidCount, 0)}p · {formatIndianNumber(stats.unfulfilledCODCount, 0)}c
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
 
