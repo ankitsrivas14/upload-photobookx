@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { api } from '../services/api';
 import type { AdminUser, MagicLinkInfo, ShopifyOrder } from '../services/api';
@@ -69,24 +69,7 @@ export function AdminDashboard() {
   // Determine current view from URL or default to 'magic-links'
   const currentView: ViewType = (view as ViewType) || 'magic-links';
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  useEffect(() => {
-    if (currentView === 'products' && products.length === 0) {
-      loadProducts();
-    }
-  }, [currentView]);
-
-  // Redirect to magic-links if no view is specified
-  useEffect(() => {
-    if (!view) {
-      navigate('/admin/magic-links', { replace: true });
-    }
-  }, [view, navigate]);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       const [meRes, ordersRes, linksRes] = await Promise.all([
         api.getMe(),
@@ -103,15 +86,15 @@ export function AdminDashboard() {
       setUser(meRes.user || null);
       const allLinks = linksRes.links || [];
       setLinks(allLinks);
-      
+
       // Merge orders with their active magic links
       const ordersWithLinks = (ordersRes.orders || []).map(order => {
-        const activeLink = allLinks.find(l => 
+        const activeLink = allLinks.find(l =>
           l.orderNumber.replace(/^#/, '') === order.name.replace(/^#/, '') && l.isActive
         );
         return { ...order, magicLink: activeLink };
       });
-      
+
       setOrders(ordersWithLinks);
     } catch (err) {
       console.error('Failed to load data:', err);
@@ -120,9 +103,9 @@ export function AdminDashboard() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [navigate]);
 
-  const loadProducts = async () => {
+  const loadProducts = useCallback(async () => {
     setIsLoadingProducts(true);
     try {
       const response = await api.getProducts();
@@ -134,7 +117,24 @@ export function AdminDashboard() {
     } finally {
       setIsLoadingProducts(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  useEffect(() => {
+    if (currentView === 'products' && products.length === 0) {
+      loadProducts();
+    }
+  }, [currentView, products.length, loadProducts]);
+
+  // Redirect to magic-links if no view is specified
+  useEffect(() => {
+    if (!view) {
+      navigate('/admin/magic-links', { replace: true });
+    }
+  }, [view, navigate]);
 
   // Filter products
   const filteredProducts = products.filter(product => {
@@ -185,7 +185,16 @@ export function AdminDashboard() {
     try {
       const productIds = Array.from(selectedProducts);
 
-      const updateData: any = {
+      const updateData: {
+        productIds: number[];
+        updateType: 'set' | 'increase' | 'decrease';
+        variant1Price?: string;
+        variant1CompareAtPrice?: string | null;
+        variant2Price?: string;
+        variant2CompareAtPrice?: string | null;
+        priceChangePercent?: string;
+        priceChangeAmount?: string;
+      } = {
         productIds,
         updateType: priceUpdateType,
       };

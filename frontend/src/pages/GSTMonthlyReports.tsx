@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { api } from '../services/api';
 import type { ShopifyOrder } from '../services/api';
 import styles from './GSTMonthlyReports.module.css';
@@ -31,14 +31,7 @@ export function GSTMonthlyReports() {
     setSelectedYear(now.getFullYear().toString());
   }, []);
 
-  // Load data whenever month or year changes
-  useEffect(() => {
-    if (selectedMonth && selectedYear) {
-      loadReportData();
-    }
-  }, [selectedMonth, selectedYear]);
-
-  const loadReportData = async () => {
+  const loadReportData = useCallback(async () => {
     setIsLoading(true);
     try {
       // Fetch ALL orders (not just printed photos) with a higher limit for GST reporting
@@ -67,7 +60,14 @@ export function GSTMonthlyReports() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [selectedMonth, selectedYear]);
+
+  // Load data whenever month or year changes
+  useEffect(() => {
+    if (selectedMonth && selectedYear) {
+      loadReportData();
+    }
+  }, [selectedMonth, selectedYear, loadReportData]);
 
   const filterOrdersByMonth = (orders: ShopifyOrder[], month: string, year: string): ShopifyOrder[] => {
     // Filter orders that were delivered in the selected month
@@ -98,7 +98,7 @@ export function GSTMonthlyReports() {
     let totalTaxableValue = 0;
     let totalCGST = 0;
     let totalSGST = 0;
-    let totalIGST = 0;
+    const totalIGST = 0;
     let totalGST = 0;
     let totalInvoiceValue = 0;
 

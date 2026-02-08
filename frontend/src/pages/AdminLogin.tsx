@@ -38,7 +38,7 @@ export function AdminLogin() {
       } else {
         setError(response.error || 'Authentication failed');
       }
-    } catch (err) {
+    } catch {
       setError('Unable to connect to server');
     } finally {
       setIsLoading(false);

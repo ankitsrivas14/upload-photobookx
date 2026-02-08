@@ -120,7 +120,7 @@ export function UploadPage() {
       if (imagesRes.success && imagesRes.images) {
         setUploadedImages(imagesRes.images);
       }
-    } catch (err) {
+    } catch {
       setError('Unable to validate link');
     } finally {
       setIsLoading(false);
@@ -140,7 +140,7 @@ export function UploadPage() {
       } else {
         alert(result.error || 'Failed to save settings');
       }
-    } catch (err) {
+    } catch {
       alert('Failed to save settings');
     }
   };
@@ -251,7 +251,7 @@ export function UploadPage() {
             remainingUploads: (info.remainingUploads || 1) - 1,
           });
         }
-      } catch (err) {
+      } catch {
         setSelectedFiles(prev => {
           const newFiles = [...prev];
           newFiles[i] = { ...newFiles[i], uploading: false, error: 'Upload failed' };
@@ -286,7 +286,8 @@ export function UploadPage() {
       
       if (result.success) {
         setImageLoadFailures(prev => {
-          const { [imageId]: _, ...rest } = prev;
+          const { [imageId]: _removed, ...rest } = prev;
+          void _removed;
           return rest;
         });
         setUploadedImages(prev => prev.filter(img => img.id !== imageId));
@@ -300,7 +301,7 @@ export function UploadPage() {
       } else {
         alert(result.error || 'Failed to delete image');
       }
-    } catch (err) {
+    } catch {
       alert('Failed to delete image');
     } finally {
       setDeletingImageId(null);
@@ -334,7 +335,7 @@ export function UploadPage() {
       } else {
         alert(result.error || 'Failed to submit for printing');
       }
-    } catch (err) {
+    } catch {
       alert('Failed to submit for printing');
     } finally {
       setIsSubmitting(false);

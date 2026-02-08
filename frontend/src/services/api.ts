@@ -364,7 +364,7 @@ class ApiService {
     return this.request('/api/admin/magic-links/shopify/products');
   }
 
-  async getProduct(productId: string): Promise<{ success: boolean; product?: any; error?: string }> {
+  async getProduct(productId: string): Promise<{ success: boolean; product?: unknown; error?: string }> {
     return this.request(`/api/admin/magic-links/shopify/products/${productId}`);
   }
 
