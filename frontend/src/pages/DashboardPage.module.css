@@ -1,0 +1,336 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+.dashboard-page {
+  display: flex;
+  min-height: 100vh;
+  background: #f8fafc;
+  font-family: 'Inter', sans-serif;
+}
+
+.dashboard-page:not(.sidebar-collapsed) .main {
+  margin-left: 260px;
+}
+
+.dashboard-page.sidebar-collapsed .main {
+  margin-left: 80px;
+}
+
+.spinner {
+  width: 48px;
+  height: 48px;
+  border: 4px solid #e2e8f0;
+  border-top-color: #0ea5e9;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin: 3rem auto;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Sidebar - match ExpensesPage */
+.sidebar {
+  width: 260px;
+  background: white;
+  border-right: 1px solid #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  padding: 1.5rem 1rem;
+  transition: width 0.3s ease;
+  position: fixed;
+  left: 0;
+  top: 0;
+  height: 100vh;
+  z-index: 100;
+}
+
+.sidebar.collapsed {
+  width: 80px;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 2rem;
+  padding: 0 0.5rem;
+}
+
+.sidebar-logo {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+}
+
+.sidebar-title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: #0f172a;
+  white-space: nowrap;
+}
+
+.sidebar.collapsed .sidebar-title {
+  display: none;
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex: 1;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #64748b;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.nav-item:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.nav-item.active {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.nav-item svg {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.sidebar-toggle {
+  margin-top: auto;
+  padding: 0.75rem;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  color: #64748b;
+}
+
+.sidebar-toggle:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.sidebar-toggle svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* Main */
+.main {
+  flex: 1;
+  padding: 2rem;
+  transition: margin-left 0.3s ease;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2rem;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0;
+}
+
+.year-select {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.year-select label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #64748b;
+}
+
+.select {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: white;
+  color: #0f172a;
+  cursor: pointer;
+}
+
+.section {
+  background: white;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  padding: 1.5rem 2rem;
+  margin-bottom: 2rem;
+}
+
+.section-title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: #0f172a;
+  margin: 0 0 0.25rem 0;
+}
+
+.section-desc {
+  font-size: 0.875rem;
+  color: #64748b;
+  margin: 0 0 1rem 0;
+}
+
+/* P/L tile colors - light green/red like reference */
+.section {
+  --tile-empty: #cacaca;
+  --tile-zero: #bbf7d0;
+  --tile-profit: #86efac;
+  --tile-loss: #fca5a5;
+}
+
+.legend {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+  font-size: 0.75rem;
+  color: #64748b;
+}
+
+.legend-label {
+  font-weight: 500;
+}
+
+.legend-tile {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+}
+
+/* Calendar container with weekday labels */
+.calendarContainer {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.weekdayLabels {
+  display: grid;
+  grid-template-rows: repeat(7, 12px);
+  gap: 2px;
+  font-size: 0.55rem;
+  color: #94a3b8;
+  font-weight: 600;
+  padding-top: 0;
+  flex-shrink: 0;
+}
+
+.weekdayLabel {
+  width: 12px;
+  height: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Month-based grid - compact horizontal, rows aligned at top */
+.monthsGrid {
+  display: flex;
+  flex-wrap: wrap;
+  row-gap: 1.5rem;
+  column-gap: 1.25rem;
+  align-items: flex-start;
+}
+
+.monthBlock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.monthLabel {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: #64748b;
+  margin-top: 0.35rem;
+  letter-spacing: 0.02em;
+}
+
+.monthGrid {
+  display: grid;
+  gap: 2px;
+  grid-auto-flow: column;
+}
+
+.tile {
+  width: 12px;
+  height: 12px;
+  min-width: 12px;
+  min-height: 12px;
+  border-radius: 2px;
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+  box-sizing: border-box;
+}
+
+.tile:hover {
+  box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.15);
+  z-index: 1;
+}
+
+/* Custom tooltip */
+.tooltip {
+  position: fixed;
+  pointer-events: none;
+  z-index: 1000;
+  padding: 0.5rem 0.75rem;
+  background: #1e293b;
+  color: #f8fafc;
+  border-radius: 8px;
+  font-size: 0.8125rem;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2), 0 4px 6px -2px rgba(0, 0, 0, 0.1);
+  white-space: nowrap;
+}
+
+.tooltipDate {
+  font-weight: 500;
+  margin-bottom: 0.25rem;
+  color: #e2e8f0;
+}
+
+.tooltipPnl {
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.tooltipProfit {
+  color: #6ee7b7;
+}
+
+.tooltipLoss {
+  color: #fca5a5;
+}
+
+.tooltipNone {
+  color: #94a3b8;
+  font-weight: 500;
+}
