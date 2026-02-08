@@ -2,13 +2,10 @@ import { Link, useNavigate, useLocation, Routes, Route } from 'react-router-dom'
 import { useState, useEffect } from 'react';
 import { api } from '../services/api';
 import type { AdminUser } from '../services/api';
-import { MetaAdsPage } from './MetaAdsPage';
-import { ExpensesOverview } from './ExpensesOverview';
-import { SalesPage } from './SalesPage';
-import { COGSPage } from './COGSPage';
-import styles from './ExpensesPage.module.css';
+import { GSTMonthlyReports } from './GSTMonthlyReports';
+import styles from './GSTReportsPage.module.css';
 
-export function ExpensesPage() {
+export function GSTReportsPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const [user, setUser] = useState<AdminUser | null>(null);
@@ -16,20 +13,17 @@ export function ExpensesPage() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const currentPath = location.pathname;
-  const isOverview = currentPath === '/admin/expenses' || currentPath === '/admin/expenses/' || currentPath === '/admin/expenses/overview';
-  const isMetaAds = currentPath === '/admin/expenses/meta-ads';
-  const isSales = currentPath === '/admin/expenses/sales';
-  const isCOGS = currentPath === '/admin/expenses/cogs';
+  const isMonthly = currentPath === '/admin/gst-reports' || currentPath === '/admin/gst-reports/' || currentPath === '/admin/gst-reports/monthly';
 
   useEffect(() => {
     loadUser();
   }, []);
 
   useEffect(() => {
-    if (isOverview) {
-      navigate('/admin/expenses/overview', { replace: true });
+    if (currentPath === '/admin/gst-reports' || currentPath === '/admin/gst-reports/') {
+      navigate('/admin/gst-reports/monthly', { replace: true });
     }
-  }, [isOverview, navigate]);
+  }, [currentPath, navigate]);
 
   const loadUser = async () => {
     try {
@@ -56,14 +50,14 @@ export function ExpensesPage() {
 
   if (isLoading) {
     return (
-      <div className={`${styles['expenses-page']} ${styles.loading}`}>
+      <div className={`${styles['gst-reports-page']} ${styles.loading}`}>
         <div className={styles.spinner}></div>
       </div>
     );
   }
 
   return (
-    <div className={styles['expenses-page']}>
+    <div className={styles['gst-reports-page']}>
       {/* Sidebar */}
       <aside className={`${styles.sidebar} ${sidebarCollapsed ? styles.collapsed : ''}`}>
         <div className={styles['sidebar-header']}>
@@ -76,16 +70,6 @@ export function ExpensesPage() {
         </div>
 
         <nav className={styles['sidebar-nav']}>
-          <Link to="/admin/orders" className={styles['nav-item']}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M20 7h-9"/>
-              <path d="M14 17H5"/>
-              <circle cx="17" cy="17" r="3"/>
-              <circle cx="7" cy="7" r="3"/>
-            </svg>
-            {!sidebarCollapsed && <span>Orders & Links</span>}
-          </Link>
-
           <Link to="/admin/magic-links" className={styles['nav-item']}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
@@ -113,23 +97,12 @@ export function ExpensesPage() {
             {!sidebarCollapsed && <span>Sales Management</span>}
           </Link>
 
-          <Link to="/admin/expenses/overview" className={`${styles['nav-item']} ${isMetaAds || isOverview ? styles.active : ''}`}>
+          <Link to="/admin/expenses" className={styles['nav-item']}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <line x1="12" y1="1" x2="12" y2="23"/>
               <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
             </svg>
             {!sidebarCollapsed && <span>Expenses</span>}
-          </Link>
-
-          <Link to="/admin/gst-reports" className={styles['nav-item']}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-              <polyline points="14 2 14 8 20 8"/>
-              <line x1="16" y1="13" x2="8" y2="13"/>
-              <line x1="16" y1="17" x2="8" y2="17"/>
-              <polyline points="10 9 9 9 8 9"/>
-            </svg>
-            {!sidebarCollapsed && <span>GST Reports</span>}
           </Link>
 
           <Link to="/admin/settings" className={styles['nav-item']}>
@@ -155,13 +128,11 @@ export function ExpensesPage() {
       <div className={styles['main-wrapper']}>
         <header className={styles['dashboard-header']}>
           <div className={styles['header-breadcrumb']}>
-            <Link to="/admin/expenses/overview" className={styles['breadcrumb-item']}>Expenses</Link>
-            {isMetaAds && (
-              <>
-                <span className={styles['breadcrumb-separator']}>/</span>
-                <span className={`${styles['breadcrumb-item']} ${styles.active}`}>Meta Ads</span>
-              </>
-            )}
+            <span className={styles['breadcrumb-item']}>GST Reports</span>
+            <span className={styles['breadcrumb-separator']}>›</span>
+            <span className={`${styles['breadcrumb-item']} ${styles.active}`}>
+              {isMonthly && 'Monthly Reports'}
+            </span>
           </div>
           <div className={styles['header-right']}>
             <div className={styles['user-menu']}>
@@ -179,39 +150,26 @@ export function ExpensesPage() {
           </div>
         </header>
 
-        <main className={styles['dashboard-main']}>
-          <div className={styles['expenses-nav']}>
-            <Link 
-              to="/admin/expenses/overview"
-              className={`${styles['expenses-nav-item']} ${isOverview ? styles.active : ''}`}
-            >
-              Overview
-            </Link>
-            <Link 
-              to="/admin/expenses/meta-ads"
-              className={`${styles['expenses-nav-item']} ${isMetaAds ? styles.active : ''}`}
-            >
-              Meta Ads
-            </Link>
-            <Link 
-              to="/admin/expenses/sales"
-              className={`${styles['expenses-nav-item']} ${isSales ? styles.active : ''}`}
-            >
-              Sales
-            </Link>
-            <Link 
-              to="/admin/expenses/cogs"
-              className={`${styles['expenses-nav-item']} ${isCOGS ? styles.active : ''}`}
-            >
-              COGS
-            </Link>
-          </div>
+        {/* Sub-navigation tabs */}
+        <div className={styles['sub-nav']}>
+          <Link 
+            to="/admin/gst-reports/monthly" 
+            className={`${styles['sub-nav-item']} ${isMonthly ? styles.active : ''}`}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+              <line x1="16" y1="2" x2="16" y2="6"/>
+              <line x1="8" y1="2" x2="8" y2="6"/>
+              <line x1="3" y1="10" x2="21" y2="10"/>
+            </svg>
+            <span>Monthly Reports</span>
+          </Link>
+        </div>
 
+        <main className={styles['dashboard-main']}>
           <Routes>
-            <Route path="overview" element={<ExpensesOverview />} />
-            <Route path="meta-ads" element={<MetaAdsPage />} />
-            <Route path="sales" element={<SalesPage />} />
-            <Route path="cogs" element={<COGSPage />} />
+            <Route path="/monthly" element={<GSTMonthlyReports />} />
+            <Route path="/" element={<GSTMonthlyReports />} />
           </Routes>
         </main>
       </div>

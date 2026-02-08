@@ -4,6 +4,7 @@ import { AdminDashboard } from './pages/AdminDashboard';
 import { ExpensesPage } from './pages/ExpensesPage';
 import { UploadPage } from './pages/UploadPage';
 import { SalesManagementPage } from './pages/SalesManagementPage';
+import { GSTReportsPage } from './pages/GSTReportsPage';
 import { api } from './services/api';
 
 // Protected Route component
@@ -50,6 +51,14 @@ function App() {
           element={
             <ProtectedRoute>
               <ExpensesPage />
+            </ProtectedRoute>
+          } 
+        />
+        <Route 
+          path="/admin/gst-reports/*" 
+          element={
+            <ProtectedRoute>
+              <GSTReportsPage />
             </ProtectedRoute>
           } 
         />
