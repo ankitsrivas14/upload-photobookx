@@ -68,32 +68,39 @@ export function DashboardPage() {
       const cogsFields = cogsRes?.fields ?? [];
       const rtoOrderIds = new Set(rtoRes.success ? rtoRes.rtoOrderIds : []);
 
+      // Build ad cost per order by date - EXACT same logic as SalesPage
       const orderCountByDate: Record<string, number> = {};
-      const adSpendByDate: Record<string, number> = {};
-      adSpendEntries.forEach((e) => {
-        const d = new Date(e.date).toISOString().split('T')[0];
-        adSpendByDate[d] = (adSpendByDate[d] || 0) + e.amount;
-      });
       orders.forEach((o) => {
         if (o.cancelledAt) return;
         const d = getOrderDateKey(o.createdAt);
         orderCountByDate[d] = (orderCountByDate[d] || 0) + 1;
       });
+      
+      const adSpendByDate: Record<string, number> = {};
+      adSpendEntries.forEach((e) => {
+        // Use same timezone conversion as order dates (STORE_TIMEZONE)
+        const d = new Date(e.date).toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+        adSpendByDate[d] = (adSpendByDate[d] || 0) + e.amount;
+      });
+      
       const adCostPerOrderByDate: Record<string, number> = {};
       Object.keys(adSpendByDate).forEach((d) => {
         const count = orderCountByDate[d] || 0;
         if (count > 0) adCostPerOrderByDate[d] = adSpendByDate[d] / count;
       });
 
+      // EXACT same isOrderDelivered logic as SalesPage
       const isOrderDelivered = (order: ShopifyOrder) => {
         if (rtoOrderIds.has(order.id)) return false;
         const status = order.deliveryStatus?.toLowerCase() || '';
-        if (['failed', 'attempted', 'rto', 'return'].some((s) => status.includes(s))) return false;
+        const ndrStatuses = ['failed', 'attempted', 'rto', 'return'];
+        if (ndrStatuses.some(s => status.includes(s))) return false;
         if (status === 'delivered') return true;
         if (order.paymentMethod?.toLowerCase() === 'prepaid') return true;
         return false;
       };
 
+      // EXACT same isOrderFinalStatus logic as SalesPage  
       const isOrderFinalStatus = (order: ShopifyOrder) => {
         const status = order.deliveryStatus?.toLowerCase() || '';
         const isDelivered = status === 'delivered';
@@ -116,22 +123,31 @@ export function DashboardPage() {
         return hasLarge ? 'large' : 'small';
       };
 
+      // EXACT same calcOrderPnl logic as SalesPage's calculateOrderProfitLoss
       const calcOrderPnl = (order: ShopifyOrder): number => {
         if (cogsFields.length === 0) return 0;
         const variant = detectVariant(order);
         const isDelivered = isOrderDelivered(order);
         const paymentMethod = order.paymentMethod?.toLowerCase() === 'prepaid' ? 'prepaid' : 'cod';
-        let revenue = isDelivered ? (order.totalPrice || 0) : 0;
-        const fieldsToUse =
-          isDelivered
-            ? (cogsFields as COGSField[]).filter((f) => f.type === 'cogs' || f.type === 'both')
-            : (cogsFields as COGSField[]).filter((f) => f.type === 'ndr' || f.type === 'both');
-
+        
+        let revenue = 0;
+        let fieldsToUse: COGSField[] = [];
+        
+        if (isDelivered) {
+          revenue = order.totalPrice || 0;
+          fieldsToUse = (cogsFields as COGSField[]).filter(f => f.type === 'cogs' || f.type === 'both');
+        } else {
+          revenue = 0;
+          fieldsToUse = (cogsFields as COGSField[]).filter(f => f.type === 'ndr' || f.type === 'both');
+        }
+        
         let totalCosts = 0;
         const key = `${variant}${paymentMethod === 'prepaid' ? 'Prepaid' : 'COD'}Value` as keyof COGSField;
         fieldsToUse.forEach((field) => {
           let value = field[key] as number;
-          if (value == null) value = variant === 'small' ? 0 : 0;
+          if (value === undefined || value === null) {
+            value = variant === 'small' ? 0 : 0;
+          }
           if (field.calculationType === 'fixed') {
             totalCosts += value;
           } else {
@@ -151,21 +167,28 @@ export function DashboardPage() {
       const orderPnlByOrderId = new Map<number, number>();
       orders.forEach((o) => orderPnlByOrderId.set(o.id, calcOrderPnl(o)));
 
-      const datesWithOrders = new Set(orders.filter((o) => !o.cancelledAt).map((o) => getOrderDateKey(o.createdAt)));
+      const datesWithFinalOrders = new Set<string>();
       const dailyPnl: Record<string, number> = {};
 
+      // Only count orders with final status (delivered or failed) - EXACT same as SalesPage
       orders.forEach((o) => {
         if (o.cancelledAt) return;
         const d = getOrderDateKey(o.createdAt);
         if (!isOrderFinalStatus(o)) return;
+        datesWithFinalOrders.add(d);
         dailyPnl[d] = (dailyPnl[d] || 0) + (orderPnlByOrderId.get(o.id) ?? 0);
       });
 
+      // Add ad-spend-only days (days without any final-status orders)
       Object.entries(adSpendByDate).forEach(([dateKey, amount]) => {
-        if (!datesWithOrders.has(dateKey)) {
+        if (!datesWithFinalOrders.has(dateKey)) {
           dailyPnl[dateKey] = (dailyPnl[dateKey] ?? 0) - amount;
         }
       });
+
+      console.log('Daily P/L Map:', JSON.stringify(dailyPnl, null, 2));
+      console.log('Dates with final orders:', Array.from(datesWithFinalOrders));
+      console.log('Ad spend dates:', Object.keys(adSpendByDate));
 
       setDailyPnlMap(dailyPnl);
     } catch (err) {
@@ -178,7 +201,7 @@ export function DashboardPage() {
     if (user) loadDailyPnl();
   }, [user, loadDailyPnl]);
 
-  const weekLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+  const weekLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S']; // Monday to Sunday
   const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
   const getPnlForDateKey = (dateKey: string): number | null => {
@@ -366,7 +389,8 @@ export function DashboardPage() {
 
             <div className={styles.monthsGrid}>
               {monthNames.map((monthName, monthIndex) => {
-                const firstDayOfMonth = new Date(selectedYear, monthIndex, 1).getDay();
+                // getDay() returns 0-6 (Sun-Sat), convert to Monday=0, Sunday=6
+                const firstDayOfMonth = (new Date(selectedYear, monthIndex, 1).getDay() + 6) % 7;
                 const daysInMonth = new Date(selectedYear, monthIndex + 1, 0).getDate();
                 const numWeeks = Math.ceil((daysInMonth + firstDayOfMonth) / 7);
                 
@@ -394,7 +418,7 @@ export function DashboardPage() {
 
                     tiles.push(
                       <div
-                        key={`${monthIndex}-${col}-${row}`}
+                        key={dateKey}
                         className={styles.tile}
                         style={{
                           background: color,
