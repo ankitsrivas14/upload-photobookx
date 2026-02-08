@@ -290,3 +290,39 @@
   overflow: auto;
   padding: 2rem;
 }
+
+/* Expenses Navigation (sub-tabs) */
+.expenses-nav {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 2rem;
+  border-bottom: 2px solid #e2e8f0;
+  padding-bottom: 0;
+}
+
+.expenses-nav-item {
+  padding: 0.75rem 1.25rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #64748b;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.expenses-nav-item:hover {
+  color: #0f172a;
+  border-bottom-color: #cbd5e1;
+}
+
+.expenses-nav-item.active {
+  color: #00B8D4;
+  border-bottom-color: #00B8D4;
+  font-weight: 600;
+}
+
