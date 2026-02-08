@@ -86,6 +86,7 @@ interface ShopifyOrder {
   fulfillmentStatus?: string | null;
   deliveryStatus?: string | null;
   deliveredAt?: string | null;
+  trackingUrl?: string | null;
   paymentMethod?: string;
   maxUploads: number;
   totalPrice?: number;

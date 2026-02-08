@@ -218,11 +218,13 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
         let deliveryStatus = null;
         let deliveredAt = null; // Track when the order was delivered
         
+        let trackingUrl = null;
         // First, check fulfillments for shipment status
         if (order.fulfillments && order.fulfillments.length > 0) {
           // Get the most recent fulfillment's shipment status
           const latestFulfillment = order.fulfillments[order.fulfillments.length - 1];
           deliveryStatus = latestFulfillment.shipment_status;
+          trackingUrl = latestFulfillment.tracking_url || null;
           
           // If this fulfillment shows delivered, use its updated_at as delivery date
           if (latestFulfillment.shipment_status?.toLowerCase() === 'delivered') {
@@ -268,7 +270,8 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
           createdAt: order.created_at,
           fulfillmentStatus: order.fulfillment_status,
           deliveryStatus: deliveryStatus,
-          deliveredAt: deliveredAt, // Add delivery date
+          deliveredAt: deliveredAt,
+          trackingUrl: trackingUrl,
           paymentMethod: paymentMethod,
           maxUploads: shopifyService.getMaxUploadsForOrder(order),
           totalPrice: order.current_total_price ? parseFloat(order.current_total_price) : undefined,

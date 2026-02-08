@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../services/api';
 import styles from './SalesPage.module.css';
 
@@ -9,6 +9,8 @@ interface ShopifyOrder {
   createdAt: string;
   fulfillmentStatus?: string | null;
   deliveryStatus?: string | null;
+  deliveredAt?: string | null;
+  trackingUrl?: string | null;
   paymentMethod?: string;
   maxUploads: number;
   totalPrice?: number;
@@ -42,6 +44,14 @@ interface COGSBreakdown {
   calculationType: 'fixed' | 'percentage';
   value: number;
   calculatedCost: number;
+}
+
+// Store timezone for order date (match Shopify reports: India = Asia/Kolkata)
+const STORE_TIMEZONE = 'Asia/Kolkata';
+
+/** Order date as YYYY-MM-DD in store timezone so daily revenue matches Shopify (e.g. "Yesterday") */
+function getOrderDateKey(createdAt: string): string {
+  return new Date(createdAt).toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
 }
 
 // Helper function to format numbers with Indian comma notation
@@ -99,6 +109,11 @@ export function SalesPage() {
   // Per-order P/L cache (orderId -> profit/loss)
   const [orderProfitLoss, setOrderProfitLoss] = useState<Map<number, number>>(new Map());
 
+  // Ad cost per order by date (YYYY-MM-DD -> cost). Used to deduct Meta ad cost from P/L.
+  const [adCostPerOrderByDate, setAdCostPerOrderByDate] = useState<Record<string, number>>({});
+  // Ad spend by date (YYYY-MM-DD -> total amount). Used to show "Ad spend" in day header row.
+  const [adSpendByDate, setAdSpendByDate] = useState<Record<string, number>>({});
+
   useEffect(() => {
     loadData();
   }, []);
@@ -119,11 +134,12 @@ export function SalesPage() {
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [ordersResponse, discardedResponse, rtoResponse, cogsConfigResponse] = await Promise.all([
+      const [ordersResponse, discardedResponse, rtoResponse, cogsConfigResponse, adSpendResponse] = await Promise.all([
         api.getOrders(250, true), // Fetch all orders (not filtered) - Shopify max per request is 250
         api.getDiscardedOrderIds(),
         api.getRTOOrderIds(),
         api.getCOGSConfiguration(),
+        api.getDailyAdSpend(),
       ]);
       
       if (ordersResponse.success && ordersResponse.orders) {
@@ -188,6 +204,28 @@ export function SalesPage() {
       if (cogsConfigResponse && cogsConfigResponse.fields) {
         setCogsConfig(cogsConfigResponse.fields);
       }
+
+      // Build ad cost per order by date (for P/L deduction)
+      const ordersList = ordersResponse.success && ordersResponse.orders ? ordersResponse.orders : [];
+      const adSpendEntries = adSpendResponse.success && adSpendResponse.entries ? adSpendResponse.entries : [];
+      const orderCountByDate: Record<string, number> = {};
+      ordersList.forEach((o) => {
+        if (o.cancelledAt) return;
+        const d = getOrderDateKey(o.createdAt);
+        orderCountByDate[d] = (orderCountByDate[d] || 0) + 1;
+      });
+      const adSpendByDate: Record<string, number> = {};
+      adSpendEntries.forEach((e) => {
+        const d = new Date(e.date).toISOString().split('T')[0];
+        adSpendByDate[d] = (adSpendByDate[d] || 0) + e.amount;
+      });
+      const adCostPerOrder: Record<string, number> = {};
+      Object.keys(adSpendByDate).forEach((d) => {
+        const count = orderCountByDate[d] || 0;
+        if (count > 0) adCostPerOrder[d] = adSpendByDate[d] / count;
+      });
+      setAdCostPerOrderByDate(adCostPerOrder);
+      setAdSpendByDate(adSpendByDate);
     } catch (err) {
       console.error('Failed to load data:', err);
     } finally {
@@ -230,13 +268,12 @@ export function SalesPage() {
     setSelectAll(newSelected.size === filteredOrders.length);
   };
 
-  // Get available months from orders
+  // Get available months from orders (store timezone)
   const getAvailableMonths = () => {
     const monthsSet = new Set<string>();
     orders.forEach(order => {
-      const orderDate = new Date(order.createdAt);
-      const monthKey = `${orderDate.getFullYear()}-${String(orderDate.getMonth() + 1).padStart(2, '0')}`;
-      monthsSet.add(monthKey);
+      const dateKey = getOrderDateKey(order.createdAt);
+      monthsSet.add(dateKey.substring(0, 7)); // YYYY-MM
     });
     return Array.from(monthsSet).sort().reverse();
   };
@@ -290,8 +327,8 @@ export function SalesPage() {
       }
       
       filtered = filtered.filter(order => {
-        const orderDate = new Date(order.createdAt);
-        return orderDate.getMonth() === targetMonth && orderDate.getFullYear() === targetYear;
+        const [y, m] = getOrderDateKey(order.createdAt).split('-').map(Number);
+        return y === targetYear && m - 1 === targetMonth;
       });
     }
     
@@ -313,6 +350,45 @@ export function SalesPage() {
   };
 
   const filteredOrders = getFilteredOrders();
+
+  // Whether a date (YYYY-MM-DD) falls within the selected month filter
+  const isDateInSelectedMonth = (dateKey: string): boolean => {
+    if (selectedMonthFilter === 'all') return true;
+    let targetMonth: number;
+    let targetYear: number;
+    if (selectedMonthFilter === 'current') {
+      targetMonth = new Date().getMonth();
+      targetYear = new Date().getFullYear();
+    } else {
+      const [y, m] = selectedMonthFilter.split('-');
+      targetYear = parseInt(y);
+      targetMonth = parseInt(m) - 1;
+    }
+    const [y, m] = dateKey.split('-').map(Number);
+    return y === targetYear && m - 1 === targetMonth;
+  };
+
+  // Group filtered orders by date; include ad-spend-only dates only when they're in the selected month
+  const ordersGroupedByDate = (() => {
+    const byDate: Record<string, ShopifyOrder[]> = {};
+    filteredOrders.forEach((order) => {
+      const dateKey = getOrderDateKey(order.createdAt);
+      if (!byDate[dateKey]) byDate[dateKey] = [];
+      byDate[dateKey].push(order);
+    });
+    Object.keys(adSpendByDate).forEach((dateKey) => {
+      if (!isDateInSelectedMonth(dateKey)) return;
+      if (!byDate[dateKey]) byDate[dateKey] = [];
+    });
+    return Object.entries(byDate)
+      .sort(([a], [b]) => b.localeCompare(a))
+      .map(([dateKey, orders]) => ({
+        dateKey,
+        dateLabel: new Date(dateKey + 'T12:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }),
+        orders,
+        adSpend: adSpendByDate[dateKey] ?? 0,
+      }));
+  })();
 
   // Clear selections when filters change
   useEffect(() => {
@@ -791,9 +867,11 @@ export function SalesPage() {
         }
       }
     });
-    
-    return revenue - totalCosts;
-  }, [cogsConfig, isOrderDelivered]);
+
+    const orderDateStr = getOrderDateKey(order.createdAt);
+    const adCost = adCostPerOrderByDate[orderDateStr] ?? 0;
+    return revenue - totalCosts - adCost;
+  }, [cogsConfig, isOrderDelivered, adCostPerOrderByDate]);
 
   // Calculate P/L for all orders when config loads
   useEffect(() => {
@@ -811,57 +889,58 @@ export function SalesPage() {
     setSelectedOrderForCogs(order);
     const variant = detectVariant(order);
     const paymentMethod = order.paymentMethod?.toLowerCase() === 'prepaid' ? 'prepaid' : 'cod';
-    
+    const orderDateStr = getOrderDateKey(order.createdAt);
+    const adCost = adCostPerOrderByDate[orderDateStr] ?? 0;
+
     // Determine config type based on delivery status
     const configType = isOrderDelivered(order) ? 'cogs' : 'ndr';
-    
+
     setSelectedVariant(variant);
-    calculateCogsBreakdown(cogsConfig, order.totalPrice || 0, variant, paymentMethod, configType);
+    calculateCogsBreakdown(cogsConfig, order.totalPrice || 0, variant, paymentMethod, configType, adCost);
     setShowCogsModal(true);
   };
 
   const calculateCogsBreakdown = (
-    fields: COGSField[], 
-    salePrice: number, 
-    variant: 'small' | 'large', 
+    fields: COGSField[],
+    salePrice: number,
+    variant: 'small' | 'large',
     paymentMethod: 'prepaid' | 'cod',
-    configType: 'cogs' | 'ndr' | 'both'
+    configType: 'cogs' | 'ndr' | 'both',
+    adCost?: number
   ) => {
     const breakdown: COGSBreakdown[] = [];
-    
+
     // Filter fields based on config type
-    const fieldsToUse: COGSField[] = 
+    const fieldsToUse: COGSField[] =
       configType === 'cogs' ? fields.filter(f => f.type === 'cogs' || f.type === 'both') :
       configType === 'ndr' ? fields.filter(f => f.type === 'ndr' || f.type === 'both') :
       fields; // 'both' uses all fields
-    
+
     fieldsToUse.forEach(field => {
       // Get the correct value based on variant and payment method
       const key = `${variant}${paymentMethod === 'prepaid' ? 'Prepaid' : 'COD'}Value` as keyof COGSField;
       let value = field[key] as number;
-      
+
       // Fallback to old structure if new structure not available
       if (value === undefined || value === null) {
         value = variant === 'small' ? (field.smallValue || 0) : (field.largeValue || 0);
       }
-      
+
       let calculatedCost = 0;
-      
+
       if (field.calculationType === 'fixed') {
         calculatedCost = value;
       } else {
         // Percentage calculation based on type
         const percentageType = field.percentageType || 'excluded';
-        
+
         if (percentageType === 'included') {
-          // Included: percentage is part of total amount
           calculatedCost = (value / (100 + value)) * salePrice;
         } else {
-          // Excluded: percentage is added on top
           calculatedCost = (value / 100) * salePrice;
         }
       }
-      
+
       breakdown.push({
         fieldName: field.name,
         type: field.type,
@@ -870,7 +949,17 @@ export function SalesPage() {
         calculatedCost: calculatedCost,
       });
     });
-    
+
+    if (adCost !== undefined && adCost > 0) {
+      breakdown.push({
+        fieldName: 'Ad cost (Meta)',
+        type: 'cogs',
+        calculationType: 'fixed',
+        value: adCost,
+        calculatedCost: adCost,
+      });
+    }
+
     setCogsBreakdown(breakdown);
   };
 
@@ -1066,7 +1155,6 @@ export function SalesPage() {
           <div className={styles['stat-card']}>
             <div className={styles['stat-label']}>Total P/L</div>
             <div className={`${styles['stat-value']} ${(() => {
-              // Only include delivered or failed orders
               const finalStatusOrders = filteredOrders.filter(o => {
                 const deliveryStatus = o.deliveryStatus?.toLowerCase() || '';
                 const isDelivered = deliveryStatus === 'delivered';
@@ -1077,14 +1165,17 @@ export function SalesPage() {
                                 deliveryStatus.includes('rto');
                 return isDelivered || isFailed;
               });
-              
-              const totalPL = Array.from(orderProfitLoss.entries())
+              let totalPL = Array.from(orderProfitLoss.entries())
                 .filter(([orderId]) => finalStatusOrders.some(o => o.id === orderId))
                 .reduce((sum, [, pl]) => sum + pl, 0);
+              const datesWithOrders = new Set(filteredOrders.map(o => getOrderDateKey(o.createdAt)));
+              Object.entries(adSpendByDate).forEach(([dateKey, amount]) => {
+                if (!isDateInSelectedMonth(dateKey)) return;
+                if (!datesWithOrders.has(dateKey)) totalPL -= amount;
+              });
               return totalPL > 0 ? styles.profit : totalPL < 0 ? styles.loss : '';
             })()}`}>
               {(() => {
-                // Only include delivered or failed orders
                 const finalStatusOrders = filteredOrders.filter(o => {
                   const deliveryStatus = o.deliveryStatus?.toLowerCase() || '';
                   const isDelivered = deliveryStatus === 'delivered';
@@ -1095,15 +1186,19 @@ export function SalesPage() {
                                   deliveryStatus.includes('rto');
                   return isDelivered || isFailed;
                 });
-                
-                const totalPL = Array.from(orderProfitLoss.entries())
+                let totalPL = Array.from(orderProfitLoss.entries())
                   .filter(([orderId]) => finalStatusOrders.some(o => o.id === orderId))
                   .reduce((sum, [, pl]) => sum + pl, 0);
+                const datesWithOrders = new Set(filteredOrders.map(o => getOrderDateKey(o.createdAt)));
+                Object.entries(adSpendByDate).forEach(([dateKey, amount]) => {
+                  if (!isDateInSelectedMonth(dateKey)) return;
+                  if (!datesWithOrders.has(dateKey)) totalPL -= amount;
+                });
                 return `${totalPL > 0 ? '+' : ''}₹${formatIndianNumber(totalPL, 0)}`;
               })()}
             </div>
             <div className={styles['stat-subtext']}>
-              {cogsConfig.length > 0 ? 'Delivered & failed orders only' : 'Configure COGS to calculate'}
+              {cogsConfig.length > 0 ? 'Delivered & failed orders + ad-spend-only days' : 'Configure COGS to calculate'}
             </div>
           </div>
         </div>
@@ -1178,7 +1273,7 @@ export function SalesPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredOrders.length === 0 ? (
+              {ordersGroupedByDate.length === 0 ? (
                 <tr>
                   <td colSpan={7} className={styles['empty-state']}>
                     <div className={styles['empty-icon']}>📦</div>
@@ -1186,116 +1281,159 @@ export function SalesPage() {
                   </td>
                 </tr>
               ) : (
-                filteredOrders.map((order) => (
-                  <tr
-                    key={order.id}
-                    className={selectedOrders.has(order.id) ? styles.selected : ''}
-                  >
-                    <td className={styles['checkbox-cell']}>
-                      <input
-                        type="checkbox"
-                        checked={selectedOrders.has(order.id)}
-                        onChange={() => handleSelectOrder(order.id)}
-                        className={styles['table-checkbox']}
-                      />
-                    </td>
-                    <td className={styles['order-name']}>
-                      <div className={styles['order-name-wrapper']}>
-                        <span className={`${styles['payment-dot']} ${styles[order.paymentMethod?.toLowerCase() || 'prepaid']}`}></span>
-                        <span className={styles['order-number']}>{order.name}</span>
-                      </div>
-                    </td>
-                    <td className={styles['line-items']}>
-                      {order.lineItems && order.lineItems.length > 0 ? (
-                        <div className={styles['items-list']}>
-                          {order.lineItems.map((item, idx) => (
-                            <div key={idx} className={styles.item}>
-                              {item.quantity}x {item.title}
-                              {item.variantTitle && ` (${item.variantTitle})`}
+                ordersGroupedByDate.map(({ dateKey, dateLabel, orders, adSpend }) => {
+                  // Day revenue = total order value (all orders placed that day), not just delivered
+                  const dayRevenue = orders.reduce((s, o) => s + (o.totalPrice || 0), 0);
+                  const isOrderFinalStatus = (o: ShopifyOrder) => {
+                    const deliveryStatus = o.deliveryStatus?.toLowerCase() || '';
+                    const isDelivered = deliveryStatus === 'delivered';
+                    const isFailed = rtoOrderIds.has(o.id) ||
+                      deliveryStatus === 'failure' ||
+                      deliveryStatus === 'attempted_delivery' ||
+                      deliveryStatus.includes('failed') ||
+                      deliveryStatus.includes('rto');
+                    return isDelivered || isFailed;
+                  };
+                  const dayPnL = orders.length > 0
+                    ? orders.reduce((s, o) => s + (isOrderFinalStatus(o) ? (orderProfitLoss.get(o.id) ?? 0) : 0), 0)
+                    : -adSpend;
+                  return (
+                  <React.Fragment key={`day-${dateKey}`}>
+                    <tr className={styles['day-header-row']}>
+                      <td colSpan={7} className={styles['day-header-cell']}>
+                        <span className={styles['day-header-date']}>{dateLabel}</span>
+                        <span className={styles['day-header-ad-spend']}>
+                          Ad spend: {adSpend > 0 ? `₹${formatIndianNumber(adSpend)}` : '—'}
+                        </span>
+                        <span className={styles['day-header-revenue']}>
+                          Revenue: {orders.length > 0 ? `₹${formatIndianNumber(dayRevenue)}` : '—'}
+                        </span>
+                        <span className={`${styles['day-header-pnl']} ${dayPnL > 0 ? styles['pnl-profit'] : dayPnL < 0 ? styles['pnl-loss'] : ''}`}>
+                          P/L: {orders.length > 0 || adSpend > 0 ? `${dayPnL >= 0 ? '+' : ''}₹${formatIndianNumber(dayPnL)}` : '—'}
+                        </span>
+                      </td>
+                    </tr>
+                    {orders.map((order) => (
+                      <tr
+                        key={order.id}
+                        className={selectedOrders.has(order.id) ? styles.selected : ''}
+                      >
+                        <td className={styles['checkbox-cell']}>
+                          <input
+                            type="checkbox"
+                            checked={selectedOrders.has(order.id)}
+                            onChange={() => handleSelectOrder(order.id)}
+                            className={styles['table-checkbox']}
+                          />
+                        </td>
+                        <td className={styles['order-name']}>
+                          <div className={styles['order-name-wrapper']}>
+                            <span className={`${styles['payment-dot']} ${styles[order.paymentMethod?.toLowerCase() || 'prepaid']}`}></span>
+                            <span className={styles['order-number']}>{order.name}</span>
+                          </div>
+                        </td>
+                        <td className={styles['line-items']}>
+                          {order.lineItems && order.lineItems.length > 0 ? (
+                            <div className={styles['items-list']}>
+                              {order.lineItems.map((item, idx) => (
+                                <div key={idx} className={styles.item}>
+                                  {item.quantity}x {item.title}
+                                  {item.variantTitle && ` (${item.variantTitle})`}
+                                </div>
+                              ))}
                             </div>
-                          ))}
-                        </div>
-                      ) : (
-                        '—'
-                      )}
-                    </td>
-                    <td className={styles['order-tags']}>
-                      <div className={styles['tags-wrapper']}>
-                        {(() => {
-                          const delayDays = getDelayDays(order);
-                          if (delayDays) {
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                        <td className={styles['order-tags']}>
+                          <div className={styles['tags-wrapper']}>
+                            {(() => {
+                              const delayDays = getDelayDays(order);
+                              if (delayDays) {
+                                return (
+                                  <span className={`${styles['tag-badge']} ${styles['delay-tag']}`}>
+                                    {delayDays} day{delayDays > 1 ? 's' : ''} delay
+                                  </span>
+                                );
+                              }
+                              return null;
+                            })()}
+                            {(() => {
+                              const deliveryBadge = getDeliveryStatusBadge(order.deliveryStatus);
+                              return deliveryBadge.text !== '—' && (
+                                <span className={`${styles['tag-badge']} ${styles[`delivery-${deliveryBadge.className}`]}`}>
+                                  {deliveryBadge.text}
+                                </span>
+                              );
+                            })()}
+                            {rtoOrderIds.has(order.id) && (
+                              <span className={`${styles['tag-badge']} ${styles.rto}`}>RTO</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className={styles['profit-loss-cell']}>
+                          {(() => {
+                            const deliveryStatus = order.deliveryStatus?.toLowerCase() || '';
+                            const isDelivered = deliveryStatus === 'delivered';
+                            const isFailed = rtoOrderIds.has(order.id) ||
+                                            deliveryStatus === 'failure' ||
+                                            deliveryStatus === 'attempted_delivery' ||
+                                            deliveryStatus.includes('failed') ||
+                                            deliveryStatus.includes('rto');
+                            if (!isDelivered && !isFailed) {
+                              return <span className={styles['profit-loss-pending']}>—</span>;
+                            }
+                            const profitLoss = orderProfitLoss.get(order.id) || 0;
+                            const isProfit = profitLoss > 0;
+                            const isLoss = profitLoss < 0;
                             return (
-                              <span className={`${styles['tag-badge']} ${styles['delay-tag']}`}>
-                                {delayDays} day{delayDays > 1 ? 's' : ''} delay
+                              <span className={`${styles['profit-loss-value']} ${isProfit ? styles.profit : isLoss ? styles.loss : styles.neutral}`}>
+                                {isProfit ? '+' : ''}₹{profitLoss.toFixed(0)}
                               </span>
                             );
-                          }
-                          return null;
-                        })()}
-                        {(() => {
-                          const deliveryBadge = getDeliveryStatusBadge(order.deliveryStatus);
-                          return deliveryBadge.text !== '—' && (
-                            <span className={`${styles['tag-badge']} ${styles[`delivery-${deliveryBadge.className}`]}`}>
-                              {deliveryBadge.text}
-                            </span>
-                          );
-                        })()}
-                        {rtoOrderIds.has(order.id) && (
-                          <span className={`${styles['tag-badge']} ${styles.rto}`}>RTO</span>
-                        )}
-                      </div>
-                    </td>
-                    <td className={styles['profit-loss-cell']}>
-                      {(() => {
-                        // Only show P/L for delivered or failed orders (final delivery status)
-                        const deliveryStatus = order.deliveryStatus?.toLowerCase() || '';
-                        
-                        // Check if delivered
-                        const isDelivered = deliveryStatus === 'delivered';
-                        
-                        // Check if failed/NDR
-                        const isFailed = rtoOrderIds.has(order.id) ||
-                                        deliveryStatus === 'failure' ||
-                                        deliveryStatus === 'attempted_delivery' ||
-                                        deliveryStatus.includes('failed') ||
-                                        deliveryStatus.includes('rto');
-                        
-                        // Show P/L only for delivered or failed orders
-                        if (!isDelivered && !isFailed) {
-                          return <span className={styles['profit-loss-pending']}>—</span>;
-                        }
-                        
-                        const profitLoss = orderProfitLoss.get(order.id) || 0;
-                        const isProfit = profitLoss > 0;
-                        const isLoss = profitLoss < 0;
-                        
-                        return (
-                          <span className={`${styles['profit-loss-value']} ${isProfit ? styles.profit : isLoss ? styles.loss : styles.neutral}`}>
-                            {isProfit ? '+' : ''}₹{profitLoss.toFixed(0)}
-                          </span>
-                        );
-                      })()}
-                    </td>
-                    <td className={styles['order-date']}>
-                      {new Date(order.createdAt).toLocaleDateString('en-IN', {
-                        year: 'numeric',
-                        month: 'short',
-                        day: 'numeric',
-                      })}
-                    </td>
-                    <td className={styles['actions-cell']}>
-                      <button
-                        onClick={() => handleOpenCogsModal(order)}
-                        className={styles['action-btn']}
-                        title="View Breakdown"
-                      >
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-                        </svg>
-                      </button>
-                    </td>
-                  </tr>
-                ))
+                          })()}
+                        </td>
+                        <td className={styles['order-date']}>
+                          {new Date(order.createdAt).toLocaleDateString('en-IN', {
+                            year: 'numeric',
+                            month: 'short',
+                            day: 'numeric',
+                          })}
+                        </td>
+                        <td className={styles['actions-cell']}>
+                          <div className={styles['action-buttons']}>
+                            {order.trackingUrl && (
+                              <a
+                                href={order.trackingUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className={styles['action-btn']}
+                                title="Open tracking link"
+                              >
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                                  <polyline points="15 3 21 3 21 9"/>
+                                  <line x1="10" y1="14" x2="21" y2="3"/>
+                                </svg>
+                              </a>
+                            )}
+                            <button
+                              onClick={() => handleOpenCogsModal(order)}
+                              className={styles['action-btn']}
+                              title="View Breakdown"
+                            >
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                              </svg>
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </React.Fragment>
+                  );
+                })
               )}
             </tbody>
           </table>
