@@ -57,7 +57,7 @@ export function GSTReportsPage() {
   }
 
   return (
-    <div className={styles['gst-reports-page']}>
+    <div className={`${styles['gst-reports-page']} ${sidebarCollapsed ? styles['sidebar-collapsed'] : ''}`}>
       {/* Sidebar */}
       <aside className={`${styles.sidebar} ${sidebarCollapsed ? styles.collapsed : ''}`}>
         <div className={styles['sidebar-header']}>

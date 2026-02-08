@@ -403,7 +403,7 @@ export function AdminDashboard() {
   ];
 
   return (
-    <div className={styles['admin-dashboard']}>
+    <div className={`${styles['admin-dashboard']} ${sidebarCollapsed ? styles['sidebar-collapsed'] : ''}`}>
       {/* Sidebar */}
       <aside className={`${styles.sidebar} ${sidebarCollapsed ? styles.collapsed : ''}`}>
         <div className={styles['sidebar-header']}>

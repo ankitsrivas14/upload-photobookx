@@ -38,6 +38,11 @@
   flex-direction: column;
   padding: 1.5rem 1rem;
   transition: width 0.3s ease;
+  position: fixed;
+  left: 0;
+  top: 0;
+  height: 100vh;
+  z-index: 100;
 }
 
 .sidebar.collapsed {
@@ -147,10 +152,18 @@
 
 /* Main Wrapper */
 .main-wrapper {
-  flex: 1;
+  margin-left: 260px;
+  width: calc(100% - 260px);
+  min-height: 100vh;
+  height: 100vh;
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  overflow: hidden;
+}
+
+.expenses-page.sidebar-collapsed .main-wrapper {
+  margin-left: 80px;
+  width: calc(100% - 80px);
 }
 
 /* Header */
@@ -161,8 +174,7 @@
   padding: 1rem 2rem;
   background: white;
   border-bottom: 1px solid #e2e8f0;
-  position: sticky;
-  top: 0;
+  flex-shrink: 0;
   z-index: 10;
 }
 
@@ -232,6 +244,7 @@
 /* Main Content */
 .dashboard-main {
   flex: 1;
+  overflow: auto;
   padding: 2rem;
   background: #f8fafc;
 }

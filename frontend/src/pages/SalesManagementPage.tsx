@@ -47,7 +47,7 @@ export function SalesManagementPage() {
   }
 
   return (
-    <div className={styles['expenses-page']}>
+    <div className={`${styles['expenses-page']} ${sidebarCollapsed ? styles['sidebar-collapsed'] : ''}`}>
       {/* Sidebar */}
       <aside className={`${styles.sidebar} ${sidebarCollapsed ? styles.collapsed : ''}`}>
         <div className={styles['sidebar-header']}>
