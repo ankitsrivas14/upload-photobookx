@@ -1,5 +1,15 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { useState, useEffect, useCallback } from 'react';
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  CartesianGrid,
+  Legend,
+} from 'recharts';
 import { api } from '../services/api';
 import type { AdminUser, ShopifyOrder } from '../services/api';
 import styles from './DashboardPage.module.css';
@@ -8,6 +18,17 @@ const STORE_TIMEZONE = 'Asia/Kolkata';
 
 function getOrderDateKey(createdAt: string): string {
   return new Date(createdAt).toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+}
+
+/** Get date (YYYY-MM-DD) and hour (0-23) in store timezone for an order */
+function getOrderDateAndHour(createdAt: string): { dateKey: string; hour: number } {
+  const d = new Date(createdAt);
+  const dateKey = d.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+  const hourStr = d.toLocaleString('en-US', { timeZone: STORE_TIMEZONE, hour: 'numeric', hour12: false });
+  let hour = Number(hourStr);
+  if (Number.isNaN(hour) || hour < 0) hour = 0;
+  if (hour > 23) hour = 23;
+  return { dateKey, hour };
 }
 
 interface COGSField {
@@ -29,6 +50,8 @@ export function DashboardPage() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [dailyPnlMap, setDailyPnlMap] = useState<Record<string, number>>({});
+  const [orders, setOrders] = useState<ShopifyOrder[]>([]);
+  const [adSpendByDate, setAdSpendByDate] = useState<Record<string, number>>({});
   const [tooltip, setTooltip] = useState<{ dateLabel: string; pnl: number | null; x: number; y: number } | null>(null);
 
   useEffect(() => {
@@ -186,10 +209,8 @@ export function DashboardPage() {
         }
       });
 
-      console.log('Daily P/L Map:', JSON.stringify(dailyPnl, null, 2));
-      console.log('Dates with final orders:', Array.from(datesWithFinalOrders));
-      console.log('Ad spend dates:', Object.keys(adSpendByDate));
-
+      setOrders(orders);
+      setAdSpendByDate(adSpendByDate);
       setDailyPnlMap(dailyPnl);
     } catch (err) {
       console.error('Failed to load daily P/L:', err);
@@ -225,6 +246,121 @@ export function DashboardPage() {
     if (abs >= 100) return 1;
     return 0;
   };
+
+  // Today vs same day last week: order counts by hour (store timezone)
+  const orderCountChartData = (() => {
+    const now = new Date();
+    const todayDateKey = now.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+    const lastWeekSameDay = new Date(now);
+    lastWeekSameDay.setDate(lastWeekSameDay.getDate() - 7);
+    const lastWeekDateKey = lastWeekSameDay.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+
+    const todayByHour = new Array(24).fill(0);
+    const lastWeekByHour = new Array(24).fill(0);
+
+    orders.forEach((o) => {
+      if (o.cancelledAt) return;
+      const { dateKey, hour } = getOrderDateAndHour(o.createdAt);
+      if (dateKey === todayDateKey && hour >= 0 && hour < 24) todayByHour[hour]++;
+      if (dateKey === lastWeekDateKey && hour >= 0 && hour < 24) lastWeekByHour[hour]++;
+    });
+
+    // Cumulative counts up to each hour
+    const todayCumul: number[] = [];
+    const lastWeekCumul: number[] = [];
+    let t = 0;
+    let l = 0;
+    for (let h = 0; h < 24; h++) {
+      t += todayByHour[h];
+      l += lastWeekByHour[h];
+      todayCumul.push(t);
+      lastWeekCumul.push(l);
+    }
+
+    const currentHour = Number(
+      now.toLocaleString('en-US', { timeZone: STORE_TIMEZONE, hour: 'numeric', hour12: false })
+    );
+    const currentHourClamped = Math.min(23, Math.max(0, Number.isNaN(currentHour) ? 0 : currentHour));
+
+    const dayLabel = now.toLocaleDateString('en-IN', { weekday: 'long', timeZone: STORE_TIMEZONE });
+    const chartData = Array.from({ length: 24 }, (_, h) => ({
+      hour: h,
+      label: h === 0 ? '12am' : h === 12 ? '12pm' : h < 12 ? `${h}am` : `${h - 12}pm`,
+      today: h <= currentHourClamped ? todayCumul[h] : null,
+      lastWeek: lastWeekCumul[h],
+    }));
+
+    return {
+      chartData,
+      dayLabel,
+      todayDateKey,
+      lastWeekDateKey,
+      currentHourClamped,
+    };
+  })();
+
+  // Revenue by hour (same two days) and summary stats
+  const revenueChartData = (() => {
+    const now = new Date();
+    const todayDateKey = now.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+    const lastWeekSameDay = new Date(now);
+    lastWeekSameDay.setDate(lastWeekSameDay.getDate() - 7);
+    const lastWeekDateKey = lastWeekSameDay.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+    const currentHour = Number(
+      now.toLocaleString('en-US', { timeZone: STORE_TIMEZONE, hour: 'numeric', hour12: false })
+    );
+    const currentHourClamped = Math.min(23, Math.max(0, Number.isNaN(currentHour) ? 0 : currentHour));
+
+    const todayRevenueByHour = new Array(24).fill(0);
+    const lastWeekRevenueByHour = new Array(24).fill(0);
+    let totalRevenueToday = 0;
+    let totalRevenueLastWeek = 0;
+
+    orders.forEach((o) => {
+      if (o.cancelledAt) return;
+      const { dateKey, hour } = getOrderDateAndHour(o.createdAt);
+      const amount = o.totalPrice ?? 0;
+      if (dateKey === todayDateKey && hour >= 0 && hour < 24) {
+        todayRevenueByHour[hour] += amount;
+        totalRevenueToday += amount;
+      }
+      if (dateKey === lastWeekDateKey && hour >= 0 && hour < 24) {
+        lastWeekRevenueByHour[hour] += amount;
+        totalRevenueLastWeek += amount;
+      }
+    });
+
+    let t = 0;
+    let l = 0;
+    const todayCumul: number[] = [];
+    const lastWeekCumul: number[] = [];
+    for (let h = 0; h < 24; h++) {
+      t += todayRevenueByHour[h];
+      l += lastWeekRevenueByHour[h];
+      todayCumul.push(t);
+      lastWeekCumul.push(l);
+    }
+
+    const dayLabel = now.toLocaleDateString('en-IN', { weekday: 'long', timeZone: STORE_TIMEZONE });
+    const chartData = Array.from({ length: 24 }, (_, h) => ({
+      hour: h,
+      label: h === 0 ? '12am' : h === 12 ? '12pm' : h < 12 ? `${h}am` : `${h - 12}pm`,
+      today: h <= currentHourClamped ? todayCumul[h] : null,
+      lastWeek: lastWeekCumul[h],
+    }));
+
+    return {
+      chartData,
+      dayLabel,
+      totalRevenueToday,
+      totalRevenueLastWeek,
+    };
+  })();
+
+  const todayDateKey = orderCountChartData.todayDateKey;
+  const lastWeekDateKey = orderCountChartData.lastWeekDateKey;
+  const adSpendToday = adSpendByDate[todayDateKey] ?? 0;
+  const adSpendLastWeek = adSpendByDate[lastWeekDateKey] ?? 0;
 
   const handleTileHover = (e: React.MouseEvent, dateKey: string | null, dateLabel: string, pnl: number | null) => {
     if (!dateKey) {
@@ -367,6 +503,165 @@ export function DashboardPage() {
             </select>
           </div>
         </header>
+
+        <section className={styles.section}>
+          <h2 className={styles['section-title']}>Orders today vs last {orderCountChartData.dayLabel}</h2>
+          <p className={styles['section-desc']}>
+            Cumulative order count by hour (store time: {STORE_TIMEZONE}).
+          </p>
+          <div className={styles.chartWrap}>
+            <ResponsiveContainer width="100%" height={280}>
+              <LineChart
+                data={orderCountChartData.chartData}
+                margin={{ top: 12, right: 12, left: 0, bottom: 8 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
+                <XAxis
+                  dataKey="label"
+                  tick={{ fontSize: 11, fill: 'var(--chart-muted)' }}
+                  tickLine={false}
+                  axisLine={{ stroke: 'var(--chart-axis)' }}
+                  interval={2}
+                />
+                <YAxis
+                  tick={{ fontSize: 11, fill: 'var(--chart-muted)' }}
+                  tickLine={false}
+                  axisLine={false}
+                  allowDecimals={false}
+                  width={28}
+                />
+                <Tooltip
+                  contentStyle={{
+                    border: 'none',
+                    borderRadius: 8,
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+                    padding: '10px 14px',
+                  }}
+                  labelStyle={{ color: 'var(--chart-muted)', fontWeight: 500, marginBottom: 4 }}
+                />
+                <Legend
+                  wrapperStyle={{ paddingTop: 12 }}
+                  iconType="line"
+                  iconSize={10}
+                  formatter={(value) => <span className={styles.chartLegendText}>{value}</span>}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="today"
+                  name="Today"
+                  stroke="var(--chart-today)"
+                  strokeWidth={2}
+                  dot={false}
+                  activeDot={{ r: 4, strokeWidth: 0, fill: 'var(--chart-today)' }}
+                  connectNulls={false}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="lastWeek"
+                  name={`Last ${orderCountChartData.dayLabel}`}
+                  stroke="var(--chart-lastweek)"
+                  strokeWidth={2}
+                  strokeDasharray="5 5"
+                  dot={false}
+                  activeDot={{ r: 4, strokeWidth: 0, fill: 'var(--chart-lastweek)' }}
+                  connectNulls
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+          <div className={styles.chartStats}>
+            <div className={styles.chartStatBlock}>
+              <span className={styles.chartStatLabel}>Ad spend</span>
+              <span className={styles.chartStatRow}>
+                <span>Today</span>
+                <span className={styles.chartStatValue}>₹{adSpendToday.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+              </span>
+              <span className={styles.chartStatRow}>
+                <span>Last {orderCountChartData.dayLabel}</span>
+                <span className={styles.chartStatValue}>₹{adSpendLastWeek.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+              </span>
+            </div>
+            <div className={styles.chartStatBlock}>
+              <span className={styles.chartStatLabel}>Revenue</span>
+              <span className={styles.chartStatRow}>
+                <span>Today</span>
+                <span className={styles.chartStatValue}>₹{revenueChartData.totalRevenueToday.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+              </span>
+              <span className={styles.chartStatRow}>
+                <span>Last {revenueChartData.dayLabel}</span>
+                <span className={styles.chartStatValue}>₹{revenueChartData.totalRevenueLastWeek.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+              </span>
+            </div>
+          </div>
+        </section>
+
+        <section className={styles.section}>
+          <h2 className={styles['section-title']}>Revenue today vs last {revenueChartData.dayLabel}</h2>
+          <p className={styles['section-desc']}>
+            Cumulative revenue by hour (store time: {STORE_TIMEZONE}). Solid = today, dotted = last {revenueChartData.dayLabel}.
+          </p>
+          <div className={styles.chartWrap}>
+            <ResponsiveContainer width="100%" height={280}>
+              <LineChart
+                data={revenueChartData.chartData}
+                margin={{ top: 12, right: 12, left: 0, bottom: 8 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
+                <XAxis
+                  dataKey="label"
+                  tick={{ fontSize: 11, fill: 'var(--chart-muted)' }}
+                  tickLine={false}
+                  axisLine={{ stroke: 'var(--chart-axis)' }}
+                  interval={2}
+                />
+                <YAxis
+                  tick={{ fontSize: 11, fill: 'var(--chart-muted)' }}
+                  tickLine={false}
+                  axisLine={false}
+                  width={44}
+                  tickFormatter={(v) => `₹${v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v}`}
+                />
+                <Tooltip
+                  contentStyle={{
+                    border: 'none',
+                    borderRadius: 8,
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+                    padding: '10px 14px',
+                  }}
+                  labelStyle={{ color: 'var(--chart-muted)', fontWeight: 500, marginBottom: 4 }}
+                  formatter={(value, name) => [`₹${Number(value ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`, name]}
+                />
+                <Legend
+                  wrapperStyle={{ paddingTop: 12 }}
+                  iconType="line"
+                  iconSize={10}
+                  formatter={(value) => <span className={styles.chartLegendText}>{value}</span>}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="today"
+                  name="Today"
+                  stroke="var(--chart-today)"
+                  strokeWidth={2}
+                  dot={false}
+                  activeDot={{ r: 4, strokeWidth: 0, fill: 'var(--chart-today)' }}
+                  connectNulls={false}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="lastWeek"
+                  name={`Last ${revenueChartData.dayLabel}`}
+                  stroke="var(--chart-lastweek)"
+                  strokeWidth={2}
+                  strokeDasharray="5 5"
+                  dot={false}
+                  activeDot={{ r: 4, strokeWidth: 0, fill: 'var(--chart-lastweek)' }}
+                  connectNulls
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </section>
 
         <section className={styles.section}>
           <h2 className={styles['section-title']}>Daily Profit & Loss — {selectedYear}</h2>
