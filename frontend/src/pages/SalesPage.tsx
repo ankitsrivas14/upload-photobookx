@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { api } from '../services/api';
 import styles from './SalesPage.module.css';
+import { OrdersTableBody } from './SalesPage/OrdersTableBody';
 
 interface ShopifyOrder {
   id: number;
@@ -91,6 +92,9 @@ export function SalesPage() {
   const [showUnfulfilled, setShowUnfulfilled] = useState(false);
   const [showDelivered, setShowDelivered] = useState(false);
   const [showFailed, setShowFailed] = useState(false);
+  const [showAttemptedDelivery, setShowAttemptedDelivery] = useState(false);
+  const [showInTransit, setShowInTransit] = useState(false);
+  const [showOutForDelivery, setShowOutForDelivery] = useState(false);
   
   // Pending drawer
   const [showPendingDrawer, setShowPendingDrawer] = useState(false);
@@ -173,7 +177,7 @@ export function SalesPage() {
           
           if (deliveryStatusLower === 'delivered') {
             deliveredCount++;
-          } else if (deliveryStatusLower === 'failure' || deliveryStatusLower === 'attempted_delivery') {
+          } else if (deliveryStatusLower === 'failure') {
             failedCount++;
           } else if (!fulfillmentStatusLower || fulfillmentStatusLower === '' || fulfillmentStatusLower === 'unfulfilled') {
             unfulfilledCount++;
@@ -285,71 +289,81 @@ export function SalesPage() {
     const deliveryStatus = order.deliveryStatus?.toLowerCase() || '';
     const fulfillmentStatus = order.fulfillmentStatus?.toLowerCase() || '';
     
-    // Failed statuses: failure, attempted_delivery
-    const isFailed = deliveryStatus === 'failure' || 
-                     deliveryStatus === 'attempted_delivery' ||
-                     deliveryStatus.includes('failed') || 
-                     deliveryStatus.includes('attempted') || 
-                     deliveryStatus.includes('delayed');
+    // Failed statuses: failure, RTO-related (attempted_delivery excluded)
+    const isFailed = rtoOrderIds.has(order.id) ||
+                     deliveryStatus === 'failure' ||
+                     deliveryStatus.includes('failed') ||
+                     deliveryStatus.includes('rto');
     
     // Delivered statuses: delivered only
     const isDelivered = deliveryStatus === 'delivered';
     
+    // Attempted delivery: delivery was attempted but not completed
+    const isAttemptedDelivery = deliveryStatus === 'attempted_delivery';
+    
+    // Out for delivery: explicitly out_for_delivery status
+    const isOutForDelivery = deliveryStatus === 'out_for_delivery';
+    
     // Unfulfilled: Check fulfillmentStatus first (null, '', or 'unfulfilled' means not fulfilled)
-    // If fulfillmentStatus is null/empty/unfulfilled, the order is truly unfulfilled
-    const isUnfulfilled = !fulfillmentStatus || 
-                          fulfillmentStatus === '' || 
+    const isUnfulfilled = !fulfillmentStatus ||
+                          fulfillmentStatus === '' ||
                           fulfillmentStatus === 'unfulfilled';
     
-    return { isFailed, isDelivered, isUnfulfilled };
+    // In transit: fulfilled but not delivered, failed, attempted_delivery, or out_for_delivery
+    const isInTransit = !isUnfulfilled && !isDelivered && !isFailed && !isAttemptedDelivery && !isOutForDelivery;
+    
+    return { isFailed, isDelivered, isUnfulfilled, isAttemptedDelivery, isInTransit, isOutForDelivery };
   };
 
-  // Filter orders based on selected month, status filters, and exclude discarded/cancelled orders
-  const getFilteredOrders = () => {
-    // Exclude discarded orders and cancelled orders
-    let filtered = orders.filter(order => 
+  // Orders for stats: month filter + exclude discarded/cancelled only (no status filter). Header stats never change when status filters are applied.
+  const getOrdersForStats = () => {
+    let filtered = orders.filter(order =>
       !discardedOrderIds.has(order.id) && !order.cancelledAt
     );
-    
-    // Apply month filter
     if (selectedMonthFilter !== 'all') {
       let targetMonth: number;
       let targetYear: number;
-      
       if (selectedMonthFilter === 'current') {
         targetMonth = new Date().getMonth();
         targetYear = new Date().getFullYear();
       } else {
-        // Format: YYYY-MM
         const [year, month] = selectedMonthFilter.split('-');
         targetYear = parseInt(year);
         targetMonth = parseInt(month) - 1;
       }
-      
       filtered = filtered.filter(order => {
         const [y, m] = getOrderDateKey(order.createdAt).split('-').map(Number);
         return y === targetYear && m - 1 === targetMonth;
       });
     }
-    
+    return filtered;
+  };
+
+  const ordersForStats = getOrdersForStats();
+
+  // Filter orders based on selected month, status filters, and exclude discarded/cancelled orders
+  const getFilteredOrders = () => {
+    let filtered = ordersForStats;
     // Apply status filters (works with month filter via AND, multiple status filters use OR)
-    if (showUnfulfilled || showDelivered || showFailed) {
+    if (showUnfulfilled || showDelivered || showFailed || showAttemptedDelivery || showInTransit || showOutForDelivery) {
       filtered = filtered.filter(order => {
-        const { isFailed, isDelivered, isUnfulfilled } = getOrderStatus(order);
-        
-        // If multiple status filters are active, order must match at least one (OR logic)
+        const { isFailed, isDelivered, isUnfulfilled, isAttemptedDelivery, isInTransit, isOutForDelivery } = getOrderStatus(order);
         const matchesUnfulfilled = showUnfulfilled && isUnfulfilled;
         const matchesDelivered = showDelivered && isDelivered;
         const matchesFailed = showFailed && isFailed;
-        
-        return matchesUnfulfilled || matchesDelivered || matchesFailed;
+        const matchesAttemptedDelivery = showAttemptedDelivery && isAttemptedDelivery;
+        const matchesInTransit = showInTransit && isInTransit;
+        const matchesOutForDelivery = showOutForDelivery && isOutForDelivery;
+        return matchesUnfulfilled || matchesDelivered || matchesFailed || matchesAttemptedDelivery || matchesInTransit || matchesOutForDelivery;
       });
     }
-    
     return filtered;
   };
 
   const filteredOrders = getFilteredOrders();
+
+  const hasStatusFilter =
+    showUnfulfilled || showDelivered || showFailed || showAttemptedDelivery || showInTransit || showOutForDelivery;
 
   // Whether a date (YYYY-MM-DD) falls within the selected month filter
   const isDateInSelectedMonth = (dateKey: string): boolean => {
@@ -369,6 +383,47 @@ export function SalesPage() {
   };
 
   // Group filtered orders by date; include ad-spend-only dates only when they're in the selected month
+  // Global NDR rate from ALL orders (not filtered by month) — for expected NDR per day
+  const globalNdrRate = (() => {
+    let delivered = 0;
+    let failed = 0;
+    orders.forEach((o) => {
+      if (o.cancelledAt || discardedOrderIds.has(o.id)) return;
+      const status = o.deliveryStatus?.toLowerCase() || '';
+      const isDelivered = status === 'delivered';
+      const isFailed =
+        rtoOrderIds.has(o.id) ||
+        status === 'failure' ||
+        status.includes('failed') ||
+        status.includes('rto');
+      if (isDelivered) delivered++;
+      else if (isFailed) failed++;
+    });
+    const finalCount = delivered + failed;
+    return finalCount > 0 ? (failed / finalCount) * 100 : 0;
+  })();
+
+  // Average P/L per final-status order (all orders) — for estimated P/L per day
+  const avgPnlPerFinalOrder = (() => {
+    let totalPnl = 0;
+    let count = 0;
+    orders.forEach((o) => {
+      if (o.cancelledAt || discardedOrderIds.has(o.id)) return;
+      const status = o.deliveryStatus?.toLowerCase() || '';
+      const isDelivered = status === 'delivered';
+      const isFailed =
+        rtoOrderIds.has(o.id) ||
+        status === 'failure' ||
+        status.includes('failed') ||
+        status.includes('rto');
+      if (isDelivered || isFailed) {
+        totalPnl += orderProfitLoss.get(o.id) ?? 0;
+        count++;
+      }
+    });
+    return count > 0 ? totalPnl / count : 0;
+  })();
+
   const ordersGroupedByDate = (() => {
     const byDate: Record<string, ShopifyOrder[]> = {};
     filteredOrders.forEach((order) => {
@@ -394,7 +449,7 @@ export function SalesPage() {
   useEffect(() => {
     setSelectedOrders(new Set());
     setSelectAll(false);
-  }, [selectedMonthFilter, showUnfulfilled, showDelivered, showFailed]);
+  }, [selectedMonthFilter, showUnfulfilled, showDelivered, showFailed, showAttemptedDelivery, showInTransit, showOutForDelivery]);
 
   // Calculate pending products from unfulfilled orders
   const getPendingProducts = () => {
@@ -476,13 +531,15 @@ export function SalesPage() {
     return Object.values(productCounts).sort((a, b) => b.count - a.count);
   };
 
-  // Calculate stats from filtered orders (already excludes cancelled orders)
+  // Calculate stats from ordersForStats (month only, no status filter) so header stats don't change when filters are applied
   const calculateStats = () => {
-    const totalOrders = filteredOrders.length;
+    const totalOrders = ordersForStats.length;
     let ndrCount = 0;
     let deliveredCount = 0;
     let failedCount = 0;
+    let attemptedDeliveryCount = 0;
     let inTransitCount = 0;
+    let outForDeliveryCount = 0;
     let unfulfilledCount = 0;
     let prepaidCount = 0;
     let codCount = 0;
@@ -490,13 +547,17 @@ export function SalesPage() {
     let deliveredCODCount = 0;
     let failedPrepaidCount = 0;
     let failedCODCount = 0;
+    let attemptedDeliveryPrepaidCount = 0;
+    let attemptedDeliveryCODCount = 0;
     let inTransitPrepaidCount = 0;
     let inTransitCODCount = 0;
+    let outForDeliveryPrepaidCount = 0;
+    let outForDeliveryCODCount = 0;
     let unfulfilledPrepaidCount = 0;
     let unfulfilledCODCount = 0;
-    let fulfilledCount = 0; // Orders that have been fulfilled (delivered or attempted)
+    let fulfilledCount = 0;
 
-    filteredOrders.forEach(order => {
+    ordersForStats.forEach(order => {
       // Count prepaid vs COD (total)
       if (order.paymentMethod === 'Prepaid') {
         prepaidCount++;
@@ -510,7 +571,6 @@ export function SalesPage() {
       // Check if failed/NDR
       const isFailed = rtoOrderIds.has(order.id) ||
                       deliveryStatus === 'failure' ||
-                      deliveryStatus === 'attempted_delivery' ||
                       deliveryStatus.includes('failed') ||
                       deliveryStatus.includes('rto');
 
@@ -544,8 +604,24 @@ export function SalesPage() {
         } else {
           deliveredCODCount++;
         }
+      } else if (deliveryStatus === 'attempted_delivery') {
+        // Attempted delivery (fulfilled, delivery attempted but not completed)
+        attemptedDeliveryCount++;
+        if (order.paymentMethod === 'Prepaid') {
+          attemptedDeliveryPrepaidCount++;
+        } else {
+          attemptedDeliveryCODCount++;
+        }
+      } else if (deliveryStatus === 'out_for_delivery') {
+        // Out for delivery (fulfilled and on the way to customer)
+        outForDeliveryCount++;
+        if (order.paymentMethod === 'Prepaid') {
+          outForDeliveryPrepaidCount++;
+        } else {
+          outForDeliveryCODCount++;
+        }
       } else if (isFulfilledStatus) {
-        // In transit (fulfilled but not delivered or failed)
+        // In transit (fulfilled but not delivered, failed, attempted_delivery, or out_for_delivery)
         inTransitCount++;
         if (order.paymentMethod === 'Prepaid') {
           inTransitPrepaidCount++;
@@ -572,7 +648,9 @@ export function SalesPage() {
       ndrCount,
       deliveredCount,
       failedCount,
+      attemptedDeliveryCount,
       inTransitCount,
+      outForDeliveryCount,
       unfulfilledCount,
       ndrRate,
       finalStatusCount, // Delivered + Failed
@@ -582,8 +660,12 @@ export function SalesPage() {
       deliveredCODCount,
       failedPrepaidCount,
       failedCODCount,
+      attemptedDeliveryPrepaidCount,
+      attemptedDeliveryCODCount,
       inTransitPrepaidCount,
       inTransitCODCount,
+      outForDeliveryPrepaidCount,
+      outForDeliveryCODCount,
       unfulfilledPrepaidCount,
       unfulfilledCODCount,
       fulfilledCount,
@@ -787,8 +869,8 @@ export function SalesPage() {
     // Check delivery status
     const status = order.deliveryStatus?.toLowerCase() || '';
     
-    // NDR statuses: failed, attempted delivery, RTO-related
-    const ndrStatuses = ['failed', 'attempted', 'rto', 'return'];
+    // NDR statuses: failed, RTO-related (attempted_delivery excluded from failed)
+    const ndrStatuses = ['failed', 'rto', 'return'];
     if (ndrStatuses.some(s => status.includes(s))) {
       return false;
     }
@@ -817,6 +899,11 @@ export function SalesPage() {
     
     const variant = detectVariant(order);
     const isDelivered = isOrderDelivered(order);
+    const status = order.deliveryStatus?.toLowerCase() || '';
+    const isFailed = rtoOrderIds.has(order.id) ||
+      status === 'failure' ||
+      status.includes('failed') ||
+      status.includes('rto');
     const paymentMethod = order.paymentMethod?.toLowerCase() === 'prepaid' ? 'prepaid' : 'cod';
     
     // Determine revenue and which fields to use
@@ -828,11 +915,14 @@ export function SalesPage() {
       revenue = order.totalPrice || 0;
       // Use COGS only + Both fields
       fieldsToUse = cogsConfig.filter(f => f.type === 'cogs' || f.type === 'both');
-    } else {
-      // NDR/RTO/Failed = No money
+    } else if (isFailed) {
+      // NDR/RTO/Failed = No money, apply NDR cost (attempted_delivery excluded)
       revenue = 0;
-      // Use NDR only + Both fields
       fieldsToUse = cogsConfig.filter(f => f.type === 'ndr' || f.type === 'both');
+    } else {
+      // Pending (e.g. attempted_delivery, in_transit): no revenue, COGS only
+      revenue = 0;
+      fieldsToUse = cogsConfig.filter(f => f.type === 'cogs' || f.type === 'both');
     }
     
     // Calculate total costs using variant + payment method
@@ -871,7 +961,7 @@ export function SalesPage() {
     const orderDateStr = getOrderDateKey(order.createdAt);
     const adCost = adCostPerOrderByDate[orderDateStr] ?? 0;
     return revenue - totalCosts - adCost;
-  }, [cogsConfig, isOrderDelivered, adCostPerOrderByDate]);
+  }, [cogsConfig, isOrderDelivered, adCostPerOrderByDate, rtoOrderIds]);
 
   // Calculate P/L for all orders when config loads
   useEffect(() => {
@@ -1100,13 +1190,13 @@ export function SalesPage() {
           </div>
         </div>
 
-        {/* Stats Section */}
+        {/* Stats Section - Line 1: Total Orders, NDR Rate, Total P/L | Line 2: Order Status */}
         <div className={styles['stats-section']}>
           <div className={styles['stat-card']}>
             <div className={styles['stat-label']}>Total Orders</div>
             <div className={styles['stat-value']}>{formatIndianNumber(stats.totalOrders, 0)}</div>
           </div>
-          
+
           <div className={styles['stat-card']}>
             <div className={styles['stat-label']}>NDR Rate</div>
             <div className={`${styles['stat-value']} ${stats.ndrRate > 15 ? styles['ndr-high'] : styles['ndr-normal']}`}>
@@ -1114,7 +1204,55 @@ export function SalesPage() {
             </div>
             <div className={styles['stat-subtext']}>{formatIndianNumber(stats.ndrCount, 0)} / {formatIndianNumber(stats.finalStatusCount, 0)} final status</div>
           </div>
-          
+
+          <div className={styles['stat-card']}>
+            <div className={styles['stat-label']}>Total P/L</div>
+            <div className={`${styles['stat-value']} ${(() => {
+              const ordersCountedInPnl = ordersForStats.filter(o => {
+                const deliveryStatus = o.deliveryStatus?.toLowerCase() || '';
+                const isDelivered = deliveryStatus === 'delivered';
+                const isFailed = rtoOrderIds.has(o.id) ||
+                                deliveryStatus === 'failure' ||
+                                deliveryStatus.includes('failed') ||
+                                deliveryStatus.includes('rto');
+                return isDelivered || isFailed || (o.paymentMethod?.toLowerCase() === 'prepaid');
+              });
+              let totalPL = Array.from(orderProfitLoss.entries())
+                .filter(([orderId]) => ordersCountedInPnl.some(o => o.id === orderId))
+                .reduce((sum, [, pl]) => sum + pl, 0);
+              const datesWithOrders = new Set(ordersForStats.map(o => getOrderDateKey(o.createdAt)));
+              Object.entries(adSpendByDate).forEach(([dateKey, amount]) => {
+                if (!isDateInSelectedMonth(dateKey)) return;
+                if (!datesWithOrders.has(dateKey)) totalPL -= amount;
+              });
+              return totalPL > 0 ? styles.profit : totalPL < 0 ? styles.loss : '';
+            })()}`}>
+              {(() => {
+                const ordersCountedInPnl = ordersForStats.filter(o => {
+                  const deliveryStatus = o.deliveryStatus?.toLowerCase() || '';
+                  const isDelivered = deliveryStatus === 'delivered';
+                  const isFailed = rtoOrderIds.has(o.id) ||
+                                  deliveryStatus === 'failure' ||
+                                  deliveryStatus.includes('failed') ||
+                                  deliveryStatus.includes('rto');
+                  return isDelivered || isFailed || (o.paymentMethod?.toLowerCase() === 'prepaid');
+                });
+                let totalPL = Array.from(orderProfitLoss.entries())
+                  .filter(([orderId]) => ordersCountedInPnl.some(o => o.id === orderId))
+                  .reduce((sum, [, pl]) => sum + pl, 0);
+                const datesWithOrders = new Set(ordersForStats.map(o => getOrderDateKey(o.createdAt)));
+                Object.entries(adSpendByDate).forEach(([dateKey, amount]) => {
+                  if (!isDateInSelectedMonth(dateKey)) return;
+                  if (!datesWithOrders.has(dateKey)) totalPL -= amount;
+                });
+                return `${totalPL > 0 ? '+' : ''}₹${formatIndianNumber(totalPL, 0)}`;
+              })()}
+            </div>
+            <div className={styles['stat-subtext']}>
+              {cogsConfig.length > 0 ? 'Delivered, failed & prepaid orders + ad-spend-only days' : 'Configure COGS to calculate'}
+            </div>
+          </div>
+
           <div className={styles['stat-card-combined']}>
             <div className={styles['stat-label']}>Order Status</div>
             <div className={styles['status-breakdown']}>
@@ -1134,10 +1272,24 @@ export function SalesPage() {
                   </span>
                 </div>
                 <div className={styles['status-item']}>
+                  <span className={styles['status-label']}>Attempted Delivery</span>
+                  <span className={styles['status-value']}>{formatIndianNumber(stats.attemptedDeliveryCount, 0)}</span>
+                  <span className={styles['status-detail']}>
+                    {formatIndianNumber(stats.attemptedDeliveryPrepaidCount, 0)}p · {formatIndianNumber(stats.attemptedDeliveryCODCount, 0)}c
+                  </span>
+                </div>
+                <div className={styles['status-item']}>
                   <span className={styles['status-label']}>In Transit</span>
                   <span className={styles['status-value']}>{formatIndianNumber(stats.inTransitCount, 0)}</span>
                   <span className={styles['status-detail']}>
                     {formatIndianNumber(stats.inTransitPrepaidCount, 0)}p · {formatIndianNumber(stats.inTransitCODCount, 0)}c
+                  </span>
+                </div>
+                <div className={styles['status-item']}>
+                  <span className={styles['status-label']}>Out for Delivery</span>
+                  <span className={styles['status-value']}>{formatIndianNumber(stats.outForDeliveryCount, 0)}</span>
+                  <span className={styles['status-detail']}>
+                    {formatIndianNumber(stats.outForDeliveryPrepaidCount, 0)}p · {formatIndianNumber(stats.outForDeliveryCODCount, 0)}c
                   </span>
                 </div>
                 <div className={styles['status-item']}>
@@ -1148,57 +1300,6 @@ export function SalesPage() {
                   </span>
                 </div>
               </div>
-            </div>
-          </div>
-
-          {/* Total P/L Stat */}
-          <div className={styles['stat-card']}>
-            <div className={styles['stat-label']}>Total P/L</div>
-            <div className={`${styles['stat-value']} ${(() => {
-              const finalStatusOrders = filteredOrders.filter(o => {
-                const deliveryStatus = o.deliveryStatus?.toLowerCase() || '';
-                const isDelivered = deliveryStatus === 'delivered';
-                const isFailed = rtoOrderIds.has(o.id) ||
-                                deliveryStatus === 'failure' ||
-                                deliveryStatus === 'attempted_delivery' ||
-                                deliveryStatus.includes('failed') ||
-                                deliveryStatus.includes('rto');
-                return isDelivered || isFailed;
-              });
-              let totalPL = Array.from(orderProfitLoss.entries())
-                .filter(([orderId]) => finalStatusOrders.some(o => o.id === orderId))
-                .reduce((sum, [, pl]) => sum + pl, 0);
-              const datesWithOrders = new Set(filteredOrders.map(o => getOrderDateKey(o.createdAt)));
-              Object.entries(adSpendByDate).forEach(([dateKey, amount]) => {
-                if (!isDateInSelectedMonth(dateKey)) return;
-                if (!datesWithOrders.has(dateKey)) totalPL -= amount;
-              });
-              return totalPL > 0 ? styles.profit : totalPL < 0 ? styles.loss : '';
-            })()}`}>
-              {(() => {
-                const finalStatusOrders = filteredOrders.filter(o => {
-                  const deliveryStatus = o.deliveryStatus?.toLowerCase() || '';
-                  const isDelivered = deliveryStatus === 'delivered';
-                  const isFailed = rtoOrderIds.has(o.id) ||
-                                  deliveryStatus === 'failure' ||
-                                  deliveryStatus === 'attempted_delivery' ||
-                                  deliveryStatus.includes('failed') ||
-                                  deliveryStatus.includes('rto');
-                  return isDelivered || isFailed;
-                });
-                let totalPL = Array.from(orderProfitLoss.entries())
-                  .filter(([orderId]) => finalStatusOrders.some(o => o.id === orderId))
-                  .reduce((sum, [, pl]) => sum + pl, 0);
-                const datesWithOrders = new Set(filteredOrders.map(o => getOrderDateKey(o.createdAt)));
-                Object.entries(adSpendByDate).forEach(([dateKey, amount]) => {
-                  if (!isDateInSelectedMonth(dateKey)) return;
-                  if (!datesWithOrders.has(dateKey)) totalPL -= amount;
-                });
-                return `${totalPL > 0 ? '+' : ''}₹${formatIndianNumber(totalPL, 0)}`;
-              })()}
-            </div>
-            <div className={styles['stat-subtext']}>
-              {cogsConfig.length > 0 ? 'Delivered & failed orders + ad-spend-only days' : 'Configure COGS to calculate'}
             </div>
           </div>
         </div>
@@ -1237,12 +1338,48 @@ export function SalesPage() {
             </svg>
             Failed
           </button>
-          {(showUnfulfilled || showDelivered || showFailed) && (
+          <button
+            onClick={() => setShowAttemptedDelivery(!showAttemptedDelivery)}
+            className={`${styles['filter-chip']} ${showAttemptedDelivery ? styles.active : ''}`}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="12" y1="8" x2="12" y2="12"/>
+              <line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+            Attempted Delivery
+          </button>
+          <button
+            onClick={() => setShowInTransit(!showInTransit)}
+            className={`${styles['filter-chip']} ${showInTransit ? styles.active : ''}`}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="1" y="3" width="15" height="13"/>
+              <polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/>
+              <circle cx="5.5" cy="18.5" r="2.5"/>
+              <circle cx="18.5" cy="18.5" r="2.5"/>
+            </svg>
+            In Transit
+          </button>
+          <button
+            onClick={() => setShowOutForDelivery(!showOutForDelivery)}
+            className={`${styles['filter-chip']} ${showOutForDelivery ? styles.active : ''}`}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M9 11l3 3L22 4"/>
+              <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>
+            </svg>
+            Out for Delivery
+          </button>
+          {(showUnfulfilled || showDelivered || showFailed || showAttemptedDelivery || showInTransit || showOutForDelivery) && (
             <button
               onClick={() => {
                 setShowUnfulfilled(false);
                 setShowDelivered(false);
                 setShowFailed(false);
+                setShowAttemptedDelivery(false);
+                setShowInTransit(false);
+                setShowOutForDelivery(false);
               }}
               className={styles['clear-filters-btn']}
             >
@@ -1250,6 +1387,13 @@ export function SalesPage() {
             </button>
           )}
         </div>
+
+        {/* Filtered Order Count */}
+        {hasStatusFilter && (
+          <div className={styles['filtered-count']}>
+            {filteredOrders.length} {filteredOrders.length === 1 ? 'order' : 'orders'}
+          </div>
+        )}
 
         {/* Orders Table */}
         <div className={styles['orders-table-container']}>
@@ -1272,170 +1416,21 @@ export function SalesPage() {
                 <th className={styles['actions-header']}>Details</th>
               </tr>
             </thead>
-            <tbody>
-              {ordersGroupedByDate.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className={styles['empty-state']}>
-                    <div className={styles['empty-icon']}>📦</div>
-                    <div className={styles['empty-text']}>No orders found</div>
-                  </td>
-                </tr>
-              ) : (
-                ordersGroupedByDate.map(({ dateKey, dateLabel, orders, adSpend }) => {
-                  // Day revenue = total order value (all orders placed that day), not just delivered
-                  const dayRevenue = orders.reduce((s, o) => s + (o.totalPrice || 0), 0);
-                  const isOrderFinalStatus = (o: ShopifyOrder) => {
-                    const deliveryStatus = o.deliveryStatus?.toLowerCase() || '';
-                    const isDelivered = deliveryStatus === 'delivered';
-                    const isFailed = rtoOrderIds.has(o.id) ||
-                      deliveryStatus === 'failure' ||
-                      deliveryStatus === 'attempted_delivery' ||
-                      deliveryStatus.includes('failed') ||
-                      deliveryStatus.includes('rto');
-                    return isDelivered || isFailed;
-                  };
-                  const dayPnL = orders.length > 0
-                    ? orders.reduce((s, o) => s + (isOrderFinalStatus(o) ? (orderProfitLoss.get(o.id) ?? 0) : 0), 0)
-                    : -adSpend;
-                  return (
-                  <React.Fragment key={`day-${dateKey}`}>
-                    <tr className={styles['day-header-row']}>
-                      <td colSpan={7} className={styles['day-header-cell']}>
-                        <span className={styles['day-header-date']}>{dateLabel}</span>
-                        <span className={styles['day-header-ad-spend']}>
-                          Ad spend: {adSpend > 0 ? `₹${formatIndianNumber(adSpend)}` : '—'}
-                        </span>
-                        <span className={styles['day-header-revenue']}>
-                          Revenue: {orders.length > 0 ? `₹${formatIndianNumber(dayRevenue)}` : '—'}
-                        </span>
-                        <span className={`${styles['day-header-pnl']} ${dayPnL > 0 ? styles['pnl-profit'] : dayPnL < 0 ? styles['pnl-loss'] : ''}`}>
-                          P/L: {orders.length > 0 || adSpend > 0 ? `${dayPnL >= 0 ? '+' : ''}₹${formatIndianNumber(dayPnL)}` : '—'}
-                        </span>
-                      </td>
-                    </tr>
-                    {orders.map((order) => (
-                      <tr
-                        key={order.id}
-                        className={selectedOrders.has(order.id) ? styles.selected : ''}
-                      >
-                        <td className={styles['checkbox-cell']}>
-                          <input
-                            type="checkbox"
-                            checked={selectedOrders.has(order.id)}
-                            onChange={() => handleSelectOrder(order.id)}
-                            className={styles['table-checkbox']}
-                          />
-                        </td>
-                        <td className={styles['order-name']}>
-                          <div className={styles['order-name-wrapper']}>
-                            <span className={`${styles['payment-dot']} ${styles[order.paymentMethod?.toLowerCase() || 'prepaid']}`}></span>
-                            <span className={styles['order-number']}>{order.name}</span>
-                          </div>
-                        </td>
-                        <td className={styles['line-items']}>
-                          {order.lineItems && order.lineItems.length > 0 ? (
-                            <div className={styles['items-list']}>
-                              {order.lineItems.map((item, idx) => (
-                                <div key={idx} className={styles.item}>
-                                  {item.quantity}x {item.title}
-                                  {item.variantTitle && ` (${item.variantTitle})`}
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            '—'
-                          )}
-                        </td>
-                        <td className={styles['order-tags']}>
-                          <div className={styles['tags-wrapper']}>
-                            {(() => {
-                              const delayDays = getDelayDays(order);
-                              if (delayDays) {
-                                return (
-                                  <span className={`${styles['tag-badge']} ${styles['delay-tag']}`}>
-                                    {delayDays} day{delayDays > 1 ? 's' : ''} delay
-                                  </span>
-                                );
-                              }
-                              return null;
-                            })()}
-                            {(() => {
-                              const deliveryBadge = getDeliveryStatusBadge(order.deliveryStatus);
-                              return deliveryBadge.text !== '—' && (
-                                <span className={`${styles['tag-badge']} ${styles[`delivery-${deliveryBadge.className}`]}`}>
-                                  {deliveryBadge.text}
-                                </span>
-                              );
-                            })()}
-                            {rtoOrderIds.has(order.id) && (
-                              <span className={`${styles['tag-badge']} ${styles.rto}`}>RTO</span>
-                            )}
-                          </div>
-                        </td>
-                        <td className={styles['profit-loss-cell']}>
-                          {(() => {
-                            const deliveryStatus = order.deliveryStatus?.toLowerCase() || '';
-                            const isDelivered = deliveryStatus === 'delivered';
-                            const isFailed = rtoOrderIds.has(order.id) ||
-                                            deliveryStatus === 'failure' ||
-                                            deliveryStatus === 'attempted_delivery' ||
-                                            deliveryStatus.includes('failed') ||
-                                            deliveryStatus.includes('rto');
-                            if (!isDelivered && !isFailed) {
-                              return <span className={styles['profit-loss-pending']}>—</span>;
-                            }
-                            const profitLoss = orderProfitLoss.get(order.id) || 0;
-                            const isProfit = profitLoss > 0;
-                            const isLoss = profitLoss < 0;
-                            return (
-                              <span className={`${styles['profit-loss-value']} ${isProfit ? styles.profit : isLoss ? styles.loss : styles.neutral}`}>
-                                {isProfit ? '+' : ''}₹{profitLoss.toFixed(0)}
-                              </span>
-                            );
-                          })()}
-                        </td>
-                        <td className={styles['order-date']}>
-                          {new Date(order.createdAt).toLocaleDateString('en-IN', {
-                            year: 'numeric',
-                            month: 'short',
-                            day: 'numeric',
-                          })}
-                        </td>
-                        <td className={styles['actions-cell']}>
-                          <div className={styles['action-buttons']}>
-                            {order.trackingUrl && (
-                              <a
-                                href={order.trackingUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className={styles['action-btn']}
-                                title="Open tracking link"
-                              >
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-                                  <polyline points="15 3 21 3 21 9"/>
-                                  <line x1="10" y1="14" x2="21" y2="3"/>
-                                </svg>
-                              </a>
-                            )}
-                            <button
-                              onClick={() => handleOpenCogsModal(order)}
-                              className={styles['action-btn']}
-                              title="View Breakdown"
-                            >
-                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-                              </svg>
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </React.Fragment>
-                  );
-                })
-              )}
-            </tbody>
+            <OrdersTableBody
+              hasStatusFilter={hasStatusFilter}
+              filteredOrders={filteredOrders}
+              ordersGroupedByDate={ordersGroupedByDate}
+              selectedOrders={selectedOrders}
+              onSelectOrder={handleSelectOrder}
+              orderProfitLoss={orderProfitLoss}
+              rtoOrderIds={rtoOrderIds}
+              getDelayDays={getDelayDays}
+              getDeliveryStatusBadge={getDeliveryStatusBadge}
+              handleOpenCogsModal={handleOpenCogsModal}
+              formatIndianNumber={formatIndianNumber}
+              avgPnlPerFinalOrder={avgPnlPerFinalOrder}
+              globalNdrRate={globalNdrRate}
+            />
           </table>
         </div>
       </div>

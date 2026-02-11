@@ -116,7 +116,7 @@ export function DashboardPage() {
       const isOrderDelivered = (order: ShopifyOrder) => {
         if (rtoOrderIds.has(order.id)) return false;
         const status = order.deliveryStatus?.toLowerCase() || '';
-        const ndrStatuses = ['failed', 'attempted', 'rto', 'return'];
+        const ndrStatuses = ['failed', 'rto', 'return'];
         if (ndrStatuses.some(s => status.includes(s))) return false;
         if (status === 'delivered') return true;
         if (order.paymentMethod?.toLowerCase() === 'prepaid') return true;
@@ -130,7 +130,6 @@ export function DashboardPage() {
         const isFailed =
           rtoOrderIds.has(order.id) ||
           status === 'failure' ||
-          status === 'attempted_delivery' ||
           status.includes('failed') ||
           status.includes('rto');
         return isDelivered || isFailed;
@@ -146,11 +145,17 @@ export function DashboardPage() {
         return hasLarge ? 'large' : 'small';
       };
 
-      // EXACT same calcOrderPnl logic as SalesPage's calculateOrderProfitLoss
+      // EXACT same calcOrderPnl logic as SalesPage's calculateOrderProfitLoss (attempted_delivery out of failed)
       const calcOrderPnl = (order: ShopifyOrder): number => {
         if (cogsFields.length === 0) return 0;
         const variant = detectVariant(order);
         const isDelivered = isOrderDelivered(order);
+        const status = order.deliveryStatus?.toLowerCase() || '';
+        const isFailed =
+          rtoOrderIds.has(order.id) ||
+          status === 'failure' ||
+          status.includes('failed') ||
+          status.includes('rto');
         const paymentMethod = order.paymentMethod?.toLowerCase() === 'prepaid' ? 'prepaid' : 'cod';
         
         let revenue = 0;
@@ -159,9 +164,12 @@ export function DashboardPage() {
         if (isDelivered) {
           revenue = order.totalPrice || 0;
           fieldsToUse = (cogsFields as COGSField[]).filter(f => f.type === 'cogs' || f.type === 'both');
-        } else {
+        } else if (isFailed) {
           revenue = 0;
           fieldsToUse = (cogsFields as COGSField[]).filter(f => f.type === 'ndr' || f.type === 'both');
+        } else {
+          revenue = 0;
+          fieldsToUse = (cogsFields as COGSField[]).filter(f => f.type === 'cogs' || f.type === 'both');
         }
         
         let totalCosts = 0;
@@ -193,11 +201,13 @@ export function DashboardPage() {
       const datesWithFinalOrders = new Set<string>();
       const dailyPnl: Record<string, number> = {};
 
-      // Only count orders with final status (delivered or failed) - EXACT same as SalesPage
+      // Count orders in daily P/L: delivered, failed, or prepaid (prepaid won't fail so count as realized)
+      const isOrderCountedInDayPnl = (order: ShopifyOrder) =>
+        isOrderFinalStatus(order) || (order.paymentMethod?.toLowerCase() === 'prepaid');
       orders.forEach((o) => {
         if (o.cancelledAt) return;
         const d = getOrderDateKey(o.createdAt);
-        if (!isOrderFinalStatus(o)) return;
+        if (!isOrderCountedInDayPnl(o)) return;
         datesWithFinalOrders.add(d);
         dailyPnl[d] = (dailyPnl[d] || 0) + (orderPnlByOrderId.get(o.id) ?? 0);
       });
