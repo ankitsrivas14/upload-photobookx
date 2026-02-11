@@ -1,9 +1,21 @@
 import { useNavigate } from 'react-router-dom';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { api } from '../services/api';
 import styles from './ProfitPredictionCalculator.module.css';
 
 const DEFAULT_WORKING_DAYS = 30;
+
+interface COGSField {
+  id: string;
+  name: string;
+  smallPrepaidValue: number;
+  smallCODValue: number;
+  largePrepaidValue: number;
+  largeCODValue: number;
+  type: 'cogs' | 'ndr' | 'both';
+  calculationType: 'fixed' | 'percentage';
+  percentageType?: 'included' | 'excluded';
+}
 
 function formatIndianNumber(num: number, decimals = 0): string {
   const [intPart, decPart] = num.toFixed(decimals).split('.');
@@ -19,19 +31,19 @@ export function ProfitPredictionCalculator() {
 
   // Input: target monthly profit (₹)
   const [targetMonthlyProfit, setTargetMonthlyProfit] = useState<string>('');
-  // Assumptions
-  const [avgProfitPerOrder, setAvgProfitPerOrder] = useState<string>('');
-  const [avgRevenuePerOrder, setAvgRevenuePerOrder] = useState<string>('');
-  const [roasRequired, setRoasRequired] = useState<string>('');
-  const [workingDaysPerMonth, setWorkingDaysPerMonth] = useState<string>(String(DEFAULT_WORKING_DAYS));
-
-  const [loadingFromData, setLoadingFromData] = useState(false);
+  
+  // Auto-calculated from historical data
+  const [avgProfitPerOrder, setAvgProfitPerOrder] = useState<number>(0);
+  const [avgRevenuePerOrder, setAvgRevenuePerOrder] = useState<number>(0);
+  const [roas, setRoas] = useState<number>(0);
+  const [workingDays] = useState<number>(DEFAULT_WORKING_DAYS);
+  const [dataSource, setDataSource] = useState<string>('');
 
   useEffect(() => {
-    loadUser();
+    loadDataAndCalculate();
   }, []);
 
-  const loadUser = async () => {
+  const loadDataAndCalculate = async () => {
     try {
       const meRes = await api.getMe();
       if (!meRes.success) {
@@ -39,8 +51,134 @@ export function ProfitPredictionCalculator() {
         navigate('/admin');
         return;
       }
+
+      // Load historical data including RTO orders
+      const [ordersRes, adSpendRes, cogsRes, rtoRes] = await Promise.all([
+        api.getOrders(250, true),
+        api.getDailyAdSpend(),
+        api.getCOGSConfiguration(),
+        api.getRTOOrderIds(),
+      ]);
+
+      const orders = ordersRes.success && ordersRes.orders ? ordersRes.orders : [];
+      const adSpendEntries = adSpendRes.success && adSpendRes.entries ? adSpendRes.entries : [];
+      const cogsFields = cogsRes && cogsRes.fields ? cogsRes.fields : [];
+      const rtoOrderIds = new Set(rtoRes.success && rtoRes.rtoOrderIds ? rtoRes.rtoOrderIds : []);
+
+      // Hard cutoff date - do not consider data before this date
+      const hardCutoffDate = new Date('2026-01-28T00:00:00');
+      
+      const now = new Date();
+      const last30DaysCutoff = new Date(now);
+      last30DaysCutoff.setDate(last30DaysCutoff.getDate() - 30);
+
+      // Use the more recent cutoff date (either Jan 28, 2026 or 30 days ago)
+      const effectiveCutoff = hardCutoffDate > last30DaysCutoff ? hardCutoffDate : last30DaysCutoff;
+
+      // Filter orders from last 30 days (exclude cancelled, exclude before hard cutoff)
+      const ordersLast30 = orders.filter((o) => {
+        if (o.cancelledAt) return false;
+        const orderDate = new Date(o.createdAt);
+        return orderDate >= effectiveCutoff;
+      });
+      
+      const orderCount = ordersLast30.length;
+
+      // Calculate total ad spend (also respect hard cutoff)
+      const adSpendLast30 = adSpendEntries
+        .filter((e) => new Date(e.date) >= effectiveCutoff)
+        .reduce((s, e) => s + e.amount, 0);
+
+      // Helper function to determine if order failed
+      const isOrderFailed = (order: any): boolean => {
+        if (rtoOrderIds.has(order.id)) return true;
+        const status = order.deliveryStatus?.toLowerCase() || '';
+        return status === 'failure' || status.includes('failed') || status.includes('rto');
+      };
+
+      // Calculate profit for each order considering delivery status and NDR
+      let totalRevenue = 0;
+      let totalCosts = 0;
+      
+      if (cogsFields.length > 0) {
+        ordersLast30.forEach((order) => {
+          const paymentMethod = order.paymentMethod?.toLowerCase() === 'prepaid' ? 'prepaid' : 'cod';
+          const isPrepaid = paymentMethod === 'prepaid';
+          const variant = 'small'; // Default for averaging
+          
+          const isFailed = isOrderFailed(order);
+          
+          let orderRevenue = 0;
+          let orderCosts = 0;
+          let fieldsToUse: COGSField[] = [];
+          
+          // Determine revenue and which cost fields to apply
+          if (isFailed) {
+            // Failed/RTO = no money, apply NDR costs (loss)
+            orderRevenue = 0;
+            // Apply NDR and Both fields
+            fieldsToUse = cogsFields.filter(f => f.type === 'ndr' || f.type === 'both');
+          } else {
+            // Delivered, Prepaid, or Pending = count revenue
+            // (Pending orders will likely be delivered, so include their revenue for planning)
+            orderRevenue = order.totalPrice || 0;
+            // Apply COGS and Both fields
+            fieldsToUse = cogsFields.filter(f => f.type === 'cogs' || f.type === 'both');
+          }
+          
+          // Calculate costs based on selected fields
+          fieldsToUse.forEach(field => {
+            const key = `${variant}${isPrepaid ? 'Prepaid' : 'COD'}Value` as keyof COGSField;
+            const value = field[key] as number;
+            
+            if (field.calculationType === 'fixed') {
+              orderCosts += value;
+            } else {
+              // Percentage calculation
+              const salePrice = order.totalPrice || 0;
+              const percentageType = field.percentageType || 'excluded';
+              
+              if (percentageType === 'included') {
+                // Included: percentage is part of total amount
+                // Formula: amount × (percentage / (100 + percentage))
+                // Example: ₹100 with 12% included = ₹100 × (12/112) = ₹10.71
+                orderCosts += (value / (100 + value)) * salePrice;
+              } else {
+                // Excluded: percentage is added on top
+                // Formula: amount × (percentage / 100)
+                // Example: ₹100 with 12% excluded = ₹100 × 0.12 = ₹12
+                orderCosts += (value / 100) * salePrice;
+              }
+            }
+          });
+          
+          totalRevenue += orderRevenue;
+          totalCosts += orderCosts;
+        });
+      }
+
+      // Calculate total profit (revenue - costs - ad spend)
+      const totalProfit = totalRevenue - totalCosts - adSpendLast30;
+
+      // Calculate averages
+      if (orderCount > 0) {
+        setAvgRevenuePerOrder(totalRevenue / orderCount);
+        setAvgProfitPerOrder(totalProfit / orderCount);
+      }
+      
+      if (adSpendLast30 > 0 && totalRevenue > 0) {
+        setRoas(totalRevenue / adSpendLast30);
+      }
+
+      // Determine date range for display
+      const isUsingHardCutoff = effectiveCutoff.getTime() === hardCutoffDate.getTime();
+      const dateRangeText = isUsingHardCutoff 
+        ? `from ${hardCutoffDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })} onwards`
+        : 'from last 30 days';
+      
+      setDataSource(`Based on ${orderCount} orders ${dateRangeText}`);
     } catch (err) {
-      console.error('Failed to load user:', err);
+      console.error('Failed to load data:', err);
       api.logout();
       navigate('/admin');
     } finally {
@@ -48,55 +186,15 @@ export function ProfitPredictionCalculator() {
     }
   };
 
-  const loadFromLast30Days = useCallback(async () => {
-    setLoadingFromData(true);
-    try {
-      const [ordersRes, adSpendRes] = await Promise.all([
-        api.getOrders(250, true),
-        api.getDailyAdSpend(),
-      ]);
-
-      const orders = ordersRes.success && ordersRes.orders ? ordersRes.orders : [];
-      const adSpendEntries = adSpendRes.success && adSpendRes.entries ? adSpendRes.entries : [];
-
-      const now = new Date();
-      const cutoff = new Date(now);
-      cutoff.setDate(cutoff.getDate() - 30);
-
-      const ordersLast30 = orders.filter((o) => !o.cancelledAt && new Date(o.createdAt) >= cutoff);
-      const totalRevenue = ordersLast30.reduce((s, o) => s + (o.totalPrice ?? 0), 0);
-      const orderCount = ordersLast30.length;
-
-      const adSpendLast30 = adSpendEntries
-        .filter((e) => new Date(e.date) >= cutoff)
-        .reduce((s, e) => s + e.amount, 0);
-
-      if (orderCount > 0) {
-        setAvgRevenuePerOrder((totalRevenue / orderCount).toFixed(0));
-      }
-      if (adSpendLast30 > 0 && totalRevenue > 0) {
-        setRoasRequired((totalRevenue / adSpendLast30).toFixed(2));
-      }
-    } catch (err) {
-      console.error('Failed to load from last 30 days:', err);
-    } finally {
-      setLoadingFromData(false);
-    }
-  }, []);
-
   const targetProfitNum = parseFloat(targetMonthlyProfit) || 0;
-  const avgProfitNum = parseFloat(avgProfitPerOrder) || 0;
-  const avgRevenueNum = parseFloat(avgRevenuePerOrder) || 0;
-  const roasNum = parseFloat(roasRequired) || 0;
-  const workingDays = Math.max(1, Math.min(31, parseInt(workingDaysPerMonth, 10) || DEFAULT_WORKING_DAYS));
 
   const results = (() => {
-    if (targetProfitNum <= 0 || avgProfitNum <= 0) {
+    if (targetProfitNum <= 0 || avgProfitPerOrder <= 0) {
       return null;
     }
-    const monthlyOrdersRequired = targetProfitNum / avgProfitNum;
-    const monthlyRevenueRequired = monthlyOrdersRequired * (avgRevenueNum || 0);
-    const monthlyAdSpendRequired = roasNum > 0 ? monthlyRevenueRequired / roasNum : 0;
+    const monthlyOrdersRequired = targetProfitNum / avgProfitPerOrder;
+    const monthlyRevenueRequired = monthlyOrdersRequired * avgRevenuePerOrder;
+    const monthlyAdSpendRequired = roas > 0 ? monthlyRevenueRequired / roas : 0;
     const dailyProfitRequired = targetProfitNum / workingDays;
     const dailyRevenueRequired = monthlyRevenueRequired / workingDays;
     const dailyAdSpendRequired = monthlyAdSpendRequired / workingDays;
@@ -111,7 +209,7 @@ export function ProfitPredictionCalculator() {
       dailyAdSpendRequired,
       dailyOrdersRequired,
       monthlyOrdersRequired,
-      roasRequired: roasNum,
+      roasRequired: roas,
     };
   })();
 
@@ -128,15 +226,18 @@ export function ProfitPredictionCalculator() {
         <header className={styles['page-header']}>
           <h1 className={styles['page-title']}>Profit Prediction Calculator</h1>
           <p className={styles['page-subtitle']}>
-            Enter your target monthly profit and assumptions to see required revenue, ad spend, ROAS, and daily orders.
+            Enter your target monthly profit to see what's required to achieve it.
           </p>
+          {dataSource && (
+            <p className={styles['data-source']}>{dataSource}</p>
+          )}
         </header>
 
         <section className={styles.card}>
-          <h2 className={styles['card-title']}>Target</h2>
+          <h2 className={styles['card-title']}>Target Monthly Profit</h2>
           <div className={styles['input-group']}>
             <label className={styles.label} htmlFor="target-profit">
-              Target monthly profit (₹)
+              How much profit do you want to make per month? (₹)
             </label>
             <input
               id="target-profit"
@@ -151,77 +252,33 @@ export function ProfitPredictionCalculator() {
           </div>
         </section>
 
-        <section className={styles.card}>
-          <h2 className={styles['card-title']}>Assumptions</h2>
-          <div className={styles['input-group']}>
-            <label className={styles.label} htmlFor="avg-profit">
-              Average profit per order (₹)
-            </label>
-            <input
-              id="avg-profit"
-              type="number"
-              min="0"
-              step="10"
-              className={styles.input}
-              placeholder="e.g. 250"
-              value={avgProfitPerOrder}
-              onChange={(e) => setAvgProfitPerOrder(e.target.value)}
-            />
-          </div>
-          <div className={styles['input-group']}>
-            <label className={styles.label} htmlFor="avg-revenue">
-              Average revenue per order (₹)
-            </label>
-            <input
-              id="avg-revenue"
-              type="number"
-              min="0"
-              step="10"
-              className={styles.input}
-              placeholder="e.g. 800"
-              value={avgRevenuePerOrder}
-              onChange={(e) => setAvgRevenuePerOrder(e.target.value)}
-            />
-          </div>
-          <div className={styles['input-group']}>
-            <label className={styles.label} htmlFor="roas">
-              ROAS required (Revenue / Ad Spend)
-            </label>
-            <input
-              id="roas"
-              type="number"
-              min="0.1"
-              step="0.1"
-              className={styles.input}
-              placeholder="e.g. 2.5"
-              value={roasRequired}
-              onChange={(e) => setRoasRequired(e.target.value)}
-            />
-          </div>
-          <div className={styles['input-group']}>
-            <label className={styles.label} htmlFor="working-days">
-              Working days per month
-            </label>
-            <input
-              id="working-days"
-              type="number"
-              min="1"
-              max="31"
-              step="1"
-              className={styles.input}
-              value={workingDaysPerMonth}
-              onChange={(e) => setWorkingDaysPerMonth(e.target.value)}
-            />
-          </div>
-          <button
-            type="button"
-            className={styles['load-from-data-btn']}
-            onClick={loadFromLast30Days}
-            disabled={loadingFromData}
-          >
-            {loadingFromData ? 'Loading…' : 'Use averages from last 30 days'}
-          </button>
-        </section>
+        {avgProfitPerOrder > 0 && (
+            <section className={styles.card}>
+              <h2 className={styles['card-title']}>Current Averages (Per Order)</h2>
+              <div className={styles['averages-grid']}>
+                <div className={styles['average-item']}>
+                  <div className={styles['average-label']}>Avg. Revenue per Order</div>
+                  <div className={styles['average-value']}>₹{formatIndianNumber(avgRevenuePerOrder, 2)}</div>
+                </div>
+                <div className={styles['average-item']}>
+                  <div className={styles['average-label']}>Avg. Costs per Order</div>
+                  <div className={styles['average-value']}>₹{formatIndianNumber(avgRevenuePerOrder - avgProfitPerOrder, 2)}</div>
+                </div>
+                <div className={styles['average-item']}>
+                  <div className={styles['average-label']}>Avg. Profit per Order</div>
+                  <div className={styles['average-value']}>₹{formatIndianNumber(avgProfitPerOrder, 2)}</div>
+                </div>
+                <div className={styles['average-item']}>
+                  <div className={styles['average-label']}>Profit Margin</div>
+                  <div className={styles['average-value']}>{avgRevenuePerOrder > 0 ? ((avgProfitPerOrder / avgRevenuePerOrder) * 100).toFixed(1) : '0'}%</div>
+                </div>
+                <div className={styles['average-item']}>
+                  <div className={styles['average-label']}>Current ROAS</div>
+                  <div className={styles['average-value']}>{roas.toFixed(2)}x</div>
+                </div>
+              </div>
+            </section>
+        )}
 
         {results && (
           <section className={styles.card}>
