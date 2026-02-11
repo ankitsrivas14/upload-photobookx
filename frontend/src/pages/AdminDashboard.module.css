@@ -155,18 +155,10 @@
 
 /* ===== MAIN WRAPPER ===== */
 .main-wrapper {
-  margin-left: 260px;
-  width: calc(100% - 260px);
+  width: 100%;
   min-height: 100vh;
-  height: 100vh;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
-}
-
-.admin-dashboard.sidebar-collapsed .main-wrapper {
-  margin-left: 80px;
-  width: calc(100% - 80px);
 }
 
 /* ===== HEADER ===== */

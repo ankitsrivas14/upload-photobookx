@@ -6,6 +6,8 @@ import { ExpensesPage } from './pages/ExpensesPage';
 import { UploadPage } from './pages/UploadPage';
 import { SalesManagementPage } from './pages/SalesManagementPage';
 import { GSTReportsPage } from './pages/GSTReportsPage';
+import { ProfitPredictionCalculator } from './pages/ProfitPredictionCalculator';
+import { AdminLayout } from './layouts/AdminLayout';
 import { api } from './services/api';
 
 // Protected Route component
@@ -29,48 +31,25 @@ function App() {
         {/* Root redirects to photobookx.com */}
         <Route path="/" element={<ExternalRedirect />} />
         
-        {/* Admin routes */}
-        <Route path="/admin" element={<AdminLogin />} />
-        <Route 
-          path="/admin/dashboard" 
-          element={
-            <ProtectedRoute>
-              <DashboardPage />
-            </ProtectedRoute>
-          } 
-        />
-        <Route 
-          path="/admin/:view" 
-          element={
-            <ProtectedRoute>
-              <AdminDashboard />
-            </ProtectedRoute>
-          } 
-        />
-        <Route 
-          path="/admin/sales-management" 
-          element={
-            <ProtectedRoute>
-              <SalesManagementPage />
-            </ProtectedRoute>
-          } 
-        />
-        <Route 
-          path="/admin/expenses/*" 
-          element={
-            <ProtectedRoute>
-              <ExpensesPage />
-            </ProtectedRoute>
-          } 
-        />
-        <Route 
-          path="/admin/gst-reports/*" 
-          element={
-            <ProtectedRoute>
-              <GSTReportsPage />
-            </ProtectedRoute>
-          } 
-        />
+        {/* Admin: login at /admin, all other /admin/* use shared layout with sidebar */}
+        <Route path="/admin">
+          <Route index element={<AdminLogin />} />
+          <Route
+            path="*"
+            element={
+              <ProtectedRoute>
+                <AdminLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route path="dashboard" element={<DashboardPage />} />
+            <Route path="sales-management" element={<SalesManagementPage />} />
+            <Route path="expenses/*" element={<ExpensesPage />} />
+            <Route path="gst-reports/*" element={<GSTReportsPage />} />
+            <Route path="calculator/profit-prediction" element={<ProfitPredictionCalculator />} />
+            <Route path=":view" element={<AdminDashboard />} />
+          </Route>
+        </Route>
         
         {/* Upload page (public with magic link) */}
         <Route path="/upload/:token" element={<UploadPage />} />

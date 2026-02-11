@@ -150,20 +150,12 @@
   color: #64748b;
 }
 
-/* Main Wrapper */
+/* Main Wrapper (sidebar is in AdminLayout) */
 .main-wrapper {
-  margin-left: 260px;
-  width: calc(100% - 260px);
+  width: 100%;
   min-height: 100vh;
-  height: 100vh;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
-}
-
-.expenses-page.sidebar-collapsed .main-wrapper {
-  margin-left: 80px;
-  width: calc(100% - 80px);
 }
 
 /* Header */
@@ -244,7 +236,6 @@
 /* Main Content */
 .dashboard-main {
   flex: 1;
-  overflow: auto;
   padding: 2rem;
   background: #f8fafc;
 }
