@@ -821,14 +821,129 @@
   color: #94a3b8;
 }
 
-/* Loading */
-.sales-page .loading-section {
+/* Content section (shared with loading skeleton) */
+.content-section {
+  width: 100%;
+}
+
+.section-header {
+  margin-bottom: 0.5rem;
+}
+
+/* Loading skeleton – subtle and in-place */
+.loading-skeleton {
+  display: inline-block;
+  height: 1rem;
+  min-width: 48px;
+  max-width: 100%;
+  background: linear-gradient(
+    90deg,
+    #f8fafc 0%,
+    #e2e8f0 50%,
+    #f8fafc 100%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.8s ease-in-out infinite;
+  border-radius: 4px;
+  vertical-align: middle;
+}
+
+.sales-page .orders-table tbody tr:nth-child(1) .loading-skeleton { animation-delay: 0s; }
+.sales-page .orders-table tbody tr:nth-child(2) .loading-skeleton { animation-delay: 0.06s; }
+.sales-page .orders-table tbody tr:nth-child(3) .loading-skeleton { animation-delay: 0.12s; }
+.sales-page .orders-table tbody tr:nth-child(4) .loading-skeleton { animation-delay: 0.18s; }
+.sales-page .orders-table tbody tr:nth-child(5) .loading-skeleton { animation-delay: 0.24s; }
+.sales-page .orders-table tbody tr:nth-child(6) .loading-skeleton { animation-delay: 0.3s; }
+.sales-page .orders-table tbody tr:nth-child(7) .loading-skeleton { animation-delay: 0.36s; }
+.sales-page .orders-table tbody tr:nth-child(8) .loading-skeleton { animation-delay: 0.42s; }
+
+@keyframes skeleton-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.skeleton-label {
+  display: block;
+  width: 72px;
+  height: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.skeleton-value {
+  display: block;
+  width: 56px;
+  height: 1.25rem;
+}
+
+.skeleton-chip {
+  width: 100%;
+  min-width: 48px;
+  height: 2rem;
+  display: block;
+}
+
+.skeleton-filter {
+  display: inline-block;
+  width: 88px;
+  height: 2rem;
+  border-radius: 6px;
+}
+
+.loading-filters {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  padding: 4rem 2rem;
-  gap: 1rem;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin: 1rem 0;
+}
+
+.loading-filters .loading-skeleton {
+  display: inline-block;
+}
+
+.skeleton-check {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  display: inline-block;
+}
+
+.skeleton-order {
+  width: 72px;
+  min-width: 72px;
+}
+
+.skeleton-items {
+  width: 90%;
+  max-width: 140px;
+}
+
+.skeleton-tags {
+  width: 70%;
+  max-width: 100px;
+}
+
+.skeleton-pl {
+  width: 52px;
+  min-width: 52px;
+}
+
+.skeleton-date {
+  width: 72px;
+  min-width: 72px;
+}
+
+.skeleton-details {
+  width: 56px;
+  min-width: 56px;
+}
+
+.loading-hint {
+  margin-top: 1rem;
+  font-size: 0.8125rem;
+  color: #94a3b8;
+  text-align: center;
+  letter-spacing: 0.02em;
 }
 
 .sales-page .spinner {

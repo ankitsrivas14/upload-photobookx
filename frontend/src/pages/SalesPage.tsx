@@ -1065,9 +1065,73 @@ export function SalesPage() {
 
   if (isLoading) {
     return (
-      <div className={styles['loading-section']}>
-        <div className={styles.spinner}></div>
-        <p>Loading orders...</p>
+      <div className={styles['sales-page']}>
+        <div className={styles['content-section']}>
+          <div className={styles['section-header']}>
+            <div className={styles['header-content']}>
+              <div />
+              <div className={styles['header-actions']}>
+                <span className={styles['loading-skeleton']} style={{ width: 110 }} />
+                <span className={styles['loading-skeleton']} style={{ width: 90 }} />
+                <span className={styles['loading-skeleton']} style={{ width: 180 }} />
+              </div>
+            </div>
+          </div>
+
+          <div className={styles['stats-section']}>
+            {[1, 2, 3].map((i) => (
+              <div key={i} className={styles['stat-card']}>
+                <div className={`${styles['loading-skeleton']} ${styles['skeleton-label']}`} />
+                <div className={`${styles['loading-skeleton']} ${styles['skeleton-value']}`} />
+              </div>
+            ))}
+            <div className={styles['stat-card-combined']}>
+              <div className={`${styles['loading-skeleton']} ${styles['skeleton-label']}`} />
+              <div className={styles['status-row']}>
+                {[1, 2, 3, 4, 5, 6].map((i) => (
+                  <div key={i} className={`${styles['loading-skeleton']} ${styles['skeleton-chip']}`} />
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className={styles['loading-filters']}>
+            {[1, 2, 3, 4, 5].map((i) => (
+              <span key={i} className={`${styles['loading-skeleton']} ${styles['skeleton-filter']}`} />
+            ))}
+          </div>
+
+          <div className={styles['orders-table-container']}>
+            <table className={styles['orders-table']}>
+              <thead>
+                <tr>
+                  <th className={styles['checkbox-cell']} />
+                  <th>Order</th>
+                  <th>Items</th>
+                  <th>Tags</th>
+                  <th>P/L</th>
+                  <th>Date</th>
+                  <th className={styles['actions-header']}>Details</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
+                  <tr key={i}>
+                    <td><span className={`${styles['loading-skeleton']} ${styles['skeleton-check']}`} /></td>
+                    <td><span className={`${styles['loading-skeleton']} ${styles['skeleton-order']}`} /></td>
+                    <td><span className={`${styles['loading-skeleton']} ${styles['skeleton-items']}`} /></td>
+                    <td><span className={`${styles['loading-skeleton']} ${styles['skeleton-tags']}`} /></td>
+                    <td><span className={`${styles['loading-skeleton']} ${styles['skeleton-pl']}`} /></td>
+                    <td><span className={`${styles['loading-skeleton']} ${styles['skeleton-date']}`} /></td>
+                    <td><span className={`${styles['loading-skeleton']} ${styles['skeleton-details']}`} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className={styles['loading-hint']}>Loading orders…</div>
+        </div>
       </div>
     );
   }
