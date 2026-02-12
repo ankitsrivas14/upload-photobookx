@@ -6,7 +6,7 @@ import { ExpensesPage } from './pages/ExpensesPage';
 import { UploadPage } from './pages/UploadPage';
 import { SalesManagementPage } from './pages/SalesManagementPage';
 import { GSTReportsPage } from './pages/GSTReportsPage';
-import { ProfitPredictionCalculator } from './pages/ProfitPredictionCalculator';
+import { ToolsPage } from './pages/ToolsPage';
 import { AdminLayout } from './layouts/AdminLayout';
 import { api } from './services/api';
 
@@ -46,7 +46,7 @@ function App() {
             <Route path="sales-management" element={<SalesManagementPage />} />
             <Route path="expenses/*" element={<ExpensesPage />} />
             <Route path="gst-reports/*" element={<GSTReportsPage />} />
-            <Route path="calculator/profit-prediction" element={<ProfitPredictionCalculator />} />
+            <Route path="tools/*" element={<ToolsPage />} />
             <Route path=":view" element={<AdminDashboard />} />
           </Route>
         </Route>

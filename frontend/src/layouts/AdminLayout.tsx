@@ -32,7 +32,7 @@ export function AdminLayout() {
     if (href === '/admin/sales-management') return path === '/admin/sales-management';
     if (href === '/admin/expenses/overview' || href === '/admin/expenses') return path.startsWith('/admin/expenses');
     if (href === '/admin/gst-reports') return path.startsWith('/admin/gst-reports');
-    if (href === '/admin/calculator/profit-prediction') return path.startsWith('/admin/calculator');
+    if (href === '/admin/tools') return path.startsWith('/admin/tools');
     if (href.startsWith('/admin/')) return path === href || (href !== '/admin' && path.startsWith(href + '/'));
     return path === href;
   };
@@ -138,14 +138,13 @@ export function AdminLayout() {
           </Link>
 
           <Link
-            to="/admin/calculator/profit-prediction"
-            className={`${styles['nav-item']} ${path.startsWith('/admin/calculator') ? styles.active : ''}`}
+            to="/admin/tools"
+            className={`${styles['nav-item']} ${path.startsWith('/admin/tools') ? styles.active : ''}`}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="2" y="4" width="20" height="16" rx="2" />
-              <path d="M8 8h8M8 12h8M8 16h4" />
+              <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
             </svg>
-            {!sidebarCollapsed && <span>Profit Calculator</span>}
+            {!sidebarCollapsed && <span>Tools</span>}
           </Link>
 
           <Link
