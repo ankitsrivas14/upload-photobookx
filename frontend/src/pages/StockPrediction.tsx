@@ -89,9 +89,34 @@ export function StockPrediction() {
   if (isLoading) {
     return (
       <div className={styles['stock-prediction']}>
-        <div className={styles.loading}>
-          <div className={styles.spinner}></div>
-          <p>Analyzing orders...</p>
+        <div className={styles['loading-header']}>
+          <div className={styles['loading-title']} />
+          <div className={styles['loading-subtitle']} />
+        </div>
+        <div className={styles['table-container']}>
+          <table className={styles.table}>
+            <thead>
+              <tr>
+                <th>Product Name</th>
+                <th>Variant</th>
+                <th>Total Orders</th>
+                <th>Avg Orders/Day</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[1, 2, 3, 4, 5, 6].map((i) => (
+                <tr key={i}>
+                  <td><span className={`${styles['skeleton']} ${styles['skeleton-wide']}`} /></td>
+                  <td><span className={`${styles['skeleton']} ${styles['skeleton-narrow']}`} /></td>
+                  <td><span className={styles['skeleton']} /></td>
+                  <td><span className={styles['skeleton']} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className={styles['loading-hint']}>
+          Analyzing orders…
         </div>
       </div>
     );

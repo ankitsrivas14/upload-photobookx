@@ -5,7 +5,88 @@
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
-.loading,
+/* Loading skeleton */
+.loading-header {
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.loading-title {
+  width: 140px;
+  height: 1.25rem;
+  background: linear-gradient(
+    90deg,
+    #f1f5f9 0%,
+    #e2e8f0 50%,
+    #f1f5f9 100%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+  border-radius: 4px;
+}
+
+.loading-subtitle {
+  width: 220px;
+  height: 0.875rem;
+  margin-top: 0.5rem;
+  background: linear-gradient(
+    90deg,
+    #f8fafc 0%,
+    #e2e8f0 50%,
+    #f8fafc 100%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s ease-in-out infinite 0.15s;
+  border-radius: 4px;
+}
+
+.skeleton {
+  display: inline-block;
+  height: 1rem;
+  min-width: 48px;
+  max-width: 100%;
+  background: linear-gradient(
+    90deg,
+    #f8fafc 0%,
+    #e2e8f0 50%,
+    #f8fafc 100%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+  border-radius: 4px;
+}
+
+.skeleton-wide {
+  min-width: 120px;
+  width: 70%;
+}
+
+.skeleton-narrow {
+  min-width: 64px;
+  width: 45%;
+}
+
+.stock-prediction .table tbody tr:nth-child(1) .skeleton { animation-delay: 0s; }
+.stock-prediction .table tbody tr:nth-child(2) .skeleton { animation-delay: 0.08s; }
+.stock-prediction .table tbody tr:nth-child(3) .skeleton { animation-delay: 0.16s; }
+.stock-prediction .table tbody tr:nth-child(4) .skeleton { animation-delay: 0.24s; }
+.stock-prediction .table tbody tr:nth-child(5) .skeleton { animation-delay: 0.32s; }
+.stock-prediction .table tbody tr:nth-child(6) .skeleton { animation-delay: 0.4s; }
+
+@keyframes skeleton-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.loading-hint {
+  margin-top: 1rem;
+  font-size: 0.8125rem;
+  color: #94a3b8;
+  text-align: center;
+  letter-spacing: 0.02em;
+}
+
 .error {
   display: flex;
   flex-direction: column;
@@ -13,26 +94,6 @@
   justify-content: center;
   padding: 3rem;
   gap: 1rem;
-}
-
-.spinner {
-  width: 40px;
-  height: 40px;
-  border: 3px solid #e2e8f0;
-  border-top-color: #3b82f6;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.loading p {
-  font-size: 0.875rem;
-  color: #64748b;
 }
 
 .error {
