@@ -674,6 +674,83 @@ export function SalesPage() {
 
   const stats = calculateStats();
 
+  // Calculate Expected Profit for current month
+  const calculateExpectedProfit = () => {
+    // Only calculate for current month or specific month selection
+    if (selectedMonthFilter === 'all') {
+      return null;
+    }
+
+    let targetMonth: number;
+    let targetYear: number;
+    if (selectedMonthFilter === 'current') {
+      targetMonth = new Date().getMonth();
+      targetYear = new Date().getFullYear();
+    } else {
+      const [year, month] = selectedMonthFilter.split('-');
+      targetYear = parseInt(year);
+      targetMonth = parseInt(month) - 1;
+    }
+
+    const today = new Date();
+    const currentDay = today.getDate();
+    const currentMonth = today.getMonth();
+    const currentYear = today.getFullYear();
+
+    // Check if selected month is current month
+    const isCurrentMonth = targetYear === currentYear && targetMonth === currentMonth;
+
+    // If it's not the current month and the month is in the past, return null (show actual P/L only)
+    if (!isCurrentMonth && (targetYear < currentYear || (targetYear === currentYear && targetMonth < currentMonth))) {
+      return null;
+    }
+
+    // Calculate total days in the selected month
+    const totalDaysInMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
+
+    // If current month, calculate based on days elapsed
+    const daysElapsed = isCurrentMonth ? currentDay : totalDaysInMonth;
+
+    // Calculate current P/L for the month (same logic as Total P/L)
+    const ordersCountedInPnl = ordersForStats.filter(o => {
+      const deliveryStatus = o.deliveryStatus?.toLowerCase() || '';
+      const isDelivered = deliveryStatus === 'delivered';
+      const isFailed = rtoOrderIds.has(o.id) ||
+                      deliveryStatus === 'failure' ||
+                      deliveryStatus.includes('failed') ||
+                      deliveryStatus.includes('rto');
+      return isDelivered || isFailed || (o.paymentMethod?.toLowerCase() === 'prepaid');
+    });
+
+    let currentPL = Array.from(orderProfitLoss.entries())
+      .filter(([orderId]) => ordersCountedInPnl.some(o => o.id === orderId))
+      .reduce((sum, [, pl]) => sum + pl, 0);
+
+    // Add ad spend for dates in the selected month
+    const datesWithOrders = new Set(ordersForStats.map(o => getOrderDateKey(o.createdAt)));
+    Object.entries(adSpendByDate).forEach(([dateKey, amount]) => {
+      if (!isDateInSelectedMonth(dateKey)) return;
+      if (!datesWithOrders.has(dateKey)) currentPL -= amount;
+    });
+
+    // Calculate average P/L per day
+    const avgPLPerDay = daysElapsed > 0 ? currentPL / daysElapsed : 0;
+
+    // Project to end of month
+    const expectedMonthEndPL = avgPLPerDay * totalDaysInMonth;
+
+    return {
+      expectedPL: expectedMonthEndPL,
+      avgPLPerDay,
+      daysElapsed,
+      totalDays: totalDaysInMonth,
+      currentPL,
+      isCurrentMonth,
+    };
+  };
+
+  const expectedProfit = calculateExpectedProfit();
+
   const handleDiscardOrders = async () => {
     if (selectedOrders.size === 0) return;
     
@@ -1079,7 +1156,7 @@ export function SalesPage() {
           </div>
 
           <div className={styles['stats-section']}>
-            {[1, 2, 3].map((i) => (
+            {[1, 2, 3, 4].map((i) => (
               <div key={i} className={styles['stat-card']}>
                 <div className={`${styles['loading-skeleton']} ${styles['skeleton-label']}`} />
                 <div className={`${styles['loading-skeleton']} ${styles['skeleton-value']}`} />
@@ -1254,7 +1331,7 @@ export function SalesPage() {
           </div>
         </div>
 
-        {/* Stats Section - Line 1: Total Orders, NDR Rate, Total P/L | Line 2: Order Status */}
+        {/* Stats Section - Line 1: Total Orders, NDR Rate, Total P/L, Expected Profit | Line 2: Order Status */}
         <div className={styles['stats-section']}>
           <div className={styles['stat-card']}>
             <div className={styles['stat-label']}>Total Orders</div>
@@ -1316,6 +1393,23 @@ export function SalesPage() {
               {cogsConfig.length > 0 ? 'Delivered, failed & prepaid orders + ad-spend-only days' : 'Configure COGS to calculate'}
             </div>
           </div>
+
+          {expectedProfit && (
+            <div className={styles['stat-card']}>
+              <div className={styles['stat-label']}>
+                {expectedProfit.isCurrentMonth ? 'Expected Profit' : 'Projected Profit'}
+              </div>
+              <div className={`${styles['stat-value']} ${expectedProfit.expectedPL > 0 ? styles.profit : expectedProfit.expectedPL < 0 ? styles.loss : ''}`}>
+                {expectedProfit.expectedPL > 0 ? '+' : ''}₹{formatIndianNumber(expectedProfit.expectedPL, 0)}
+              </div>
+              <div className={styles['stat-subtext']}>
+                {expectedProfit.isCurrentMonth 
+                  ? `Day ${expectedProfit.daysElapsed}/${expectedProfit.totalDays} • Avg: ₹${formatIndianNumber(expectedProfit.avgPLPerDay, 0)}/day`
+                  : `Based on ${expectedProfit.daysElapsed} days data`
+                }
+              </div>
+            </div>
+          )}
 
           <div className={styles['stat-card-combined']}>
             <div className={styles['stat-label']}>Order Status</div>
