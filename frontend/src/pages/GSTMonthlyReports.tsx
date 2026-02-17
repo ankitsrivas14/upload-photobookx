@@ -35,7 +35,7 @@ export function GSTMonthlyReports() {
     setIsLoading(true);
     try {
       // Fetch ALL orders (not just printed photos) with a higher limit for GST reporting
-      const response = await api.getOrders(250, true); // allOrders = true
+      const response = await api.getOrders(1000, true, '2026-01-28'); // Fetch ALL from Jan 28, 2026
       if (response.success && response.orders) {
         console.log('Total orders loaded:', response.orders.length);
         

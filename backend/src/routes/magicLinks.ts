@@ -196,8 +196,10 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
     
     // Check if we want all orders or just printed photos orders
     const allOrders = req.query.all === 'true';
+    const createdAtMin = typeof req.query.created_at_min === 'string' ? req.query.created_at_min : undefined;
+    
     const orders = allOrders 
-      ? await shopifyService.getAllOrders(limit)
+      ? await shopifyService.getAllOrders(limit, createdAtMin)
       : await shopifyService.getRecentOrders(limit);
     
     // Fetch delivery dates from database for all orders

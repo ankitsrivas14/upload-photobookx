@@ -51,6 +51,60 @@ class ShopifyService {
   }
 
   /**
+   * Make request that returns both data and headers (for pagination with Link header)
+   */
+  private async makeRequestWithHeaders<T>(endpoint: string): Promise<{ data: T; linkHeader: string | null }> {
+    const url = `${this.getBaseUrl()}${endpoint}`;
+    
+    const fetchOptions: RequestInit = {
+      method: 'GET',
+      headers: {
+        'X-Shopify-Access-Token': this.accessToken,
+        'Content-Type': 'application/json',
+      },
+    };
+
+    const response = await fetch(url, fetchOptions);
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Shopify API Error: ${response.status} - ${error}`);
+    }
+
+    const data = await response.json() as T;
+    const linkHeader = response.headers.get('Link');
+
+    return { data, linkHeader };
+  }
+
+  /**
+   * Parse page_info from Shopify's Link header
+   * Format: '<https://shop.myshopify.com/...?page_info=TOKEN&limit=250>; rel="next"'
+   */
+  private parseNextPageInfo(linkHeader: string | null): string | null {
+    if (!linkHeader) return null;
+
+    // Link header can have multiple links separated by comma
+    const links = linkHeader.split(',');
+    
+    for (const link of links) {
+      // Check if this is the "next" link
+      if (link.includes('rel="next"') || link.includes("rel='next'") || link.includes('rel=next')) {
+        // Extract URL from <URL>
+        const urlMatch = link.match(/<([^>]+)>/);
+        if (urlMatch && urlMatch[1]) {
+          // Extract page_info parameter
+          const url = new URL(urlMatch[1]);
+          const pageInfo = url.searchParams.get('page_info');
+          return pageInfo;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * Check if an order contains the printed photos product
    */
   private orderContainsPrintedPhotos(order: ShopifyOrder): boolean {
@@ -247,32 +301,120 @@ class ShopifyService {
    * For sales tracking and general order management
    * Uses caching with 5-minute TTL
    */
-  async getAllOrders(limit: number = 50): Promise<ShopifyOrder[]> {
+  async getAllOrders(limit: number = 50, createdAtMin?: string): Promise<ShopifyOrder[]> {
     try {
-      const cacheKey = `all_orders_${limit}`;
+      const cacheKey = createdAtMin ? `all_orders_${limit}_${createdAtMin}` : `all_orders_${limit}`;
       
       // Try to get from cache first
       const cachedOrders = await this.getCachedOrders(cacheKey);
       if (cachedOrders) {
+        console.log(`Using cached orders: ${cachedOrders.length}`);
         return cachedOrders;
       }
       
-      // Cache miss - fetch from Shopify
-      console.log('Fetching all orders from Shopify API...');
+      // Cache miss - fetch from Shopify with pagination using Link header
+      console.log(`Fetching up to ${limit} orders from Shopify API${createdAtMin ? ` since ${createdAtMin}` : ''}...`);
       
-      // Shopify max is 250 per request
-      const fetchLimit = Math.min(limit, 250);
+      const allOrders: ShopifyOrder[] = [];
+      const perPage = 250; // Shopify max per request
+      let page = 1;
+      let pageInfo: string | null = null;
       
-      const data = await this.makeRequest<ShopifyOrdersResponse>(
-        `/orders.json?status=any&limit=${fetchLimit}`
-      );
+      // Build initial request URL with filters
+      // IMPORTANT: Filters (created_at_min) must be in the FIRST request only
+      // Subsequent requests with page_info cannot include other params
+      let initialParams = new URLSearchParams({
+        status: 'any',
+        limit: perPage.toString(),
+      });
       
-      const orders = data.orders || [];
+      if (createdAtMin) {
+        // Shopify expects ISO 8601 format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS
+        initialParams.append('created_at_min', createdAtMin);
+      }
+      
+      // Fetch pages using cursor-based pagination with Link header
+      while (allOrders.length < limit) {
+        let url: string;
+        
+        if (page === 1) {
+          // First request: use filters
+          url = `/orders.json?${initialParams.toString()}`;
+          console.log(`Fetching page ${page}: limit=${perPage}, created_at_min=${createdAtMin || 'none'}`);
+        } else if (pageInfo) {
+          // Subsequent requests: use page_info token from Link header
+          // Can only include limit, no other params allowed
+          url = `/orders.json?page_info=${pageInfo}&limit=${perPage}`;
+          console.log(`Fetching page ${page}: using page_info token`);
+        } else {
+          // No more pages
+          console.log('No page_info found, reached end');
+          break;
+        }
+        
+        const { data, linkHeader } = await this.makeRequestWithHeaders<ShopifyOrdersResponse>(url);
+        const orders = data.orders || [];
+        
+        console.log(`Fetched page ${page}: ${orders.length} orders (total so far: ${allOrders.length + orders.length})`);
+        
+        if (orders.length === 0) {
+          break; // No more orders
+        }
+        
+        allOrders.push(...orders);
+        
+        // Parse page_info for next page from Link header
+        pageInfo = this.parseNextPageInfo(linkHeader);
+        
+        if (pageInfo) {
+          console.log(`Found next page_info token: ${pageInfo.substring(0, 20)}...`);
+        } else {
+          console.log('No next page_info found in Link header, reached end');
+          break;
+        }
+        
+        // If we got less than requested, we've reached the end
+        if (orders.length < perPage) {
+          console.log('Reached end of orders (got less than limit)');
+          break;
+        }
+        
+        // If we've collected enough orders, stop
+        if (allOrders.length >= limit) {
+          console.log(`Collected ${allOrders.length} orders, reached requested limit`);
+          break;
+        }
+        
+        page++;
+        
+        // Safety: max 10 pages (2500 orders)
+        if (page > 10) {
+          console.log('Reached max pages limit (10)');
+          break;
+        }
+      }
+      
+      console.log(`Total fetched: ${allOrders.length} orders`);
+      
+      // Debug: Log date range of orders
+      if (allOrders.length > 0) {
+        const dates = allOrders.map(o => new Date(o.created_at).toISOString().split('T')[0]);
+        const uniqueDates = [...new Set(dates)].sort();
+        console.log(`Order dates range: ${uniqueDates[0]} to ${uniqueDates[uniqueDates.length - 1]}`);
+        console.log(`Total unique dates: ${uniqueDates.length}`);
+        
+        // Count orders per date
+        const dateCounts: Record<string, number> = {};
+        dates.forEach(d => {
+          dateCounts[d] = (dateCounts[d] || 0) + 1;
+        });
+        console.log('Orders per date:', JSON.stringify(dateCounts, null, 2));
+      }
       
       // Update cache
-      await this.updateCache(cacheKey, orders);
+      await this.updateCache(cacheKey, allOrders);
       
-      return orders;
+      return allOrders;
     } catch (error) {
       console.error('Error fetching all orders:', error);
       throw error;

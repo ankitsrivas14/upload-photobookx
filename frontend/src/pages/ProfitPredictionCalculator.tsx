@@ -54,7 +54,7 @@ export function ProfitPredictionCalculator() {
 
       // Load historical data including RTO orders
       const [ordersRes, adSpendRes, cogsRes, rtoRes] = await Promise.all([
-        api.getOrders(250, true),
+        api.getOrders(1000, true, '2026-01-28'),
         api.getDailyAdSpend(),
         api.getCOGSConfiguration(),
         api.getRTOOrderIds(),

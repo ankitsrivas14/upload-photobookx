@@ -270,9 +270,10 @@ class ApiService {
   }
 
   // Shopify Orders
-  async getOrders(limit = 50, allOrders = false): Promise<OrdersResponse> {
+  async getOrders(limit = 50, allOrders = false, createdAtMin?: string): Promise<OrdersResponse> {
     const allParam = allOrders ? '&all=true' : '';
-    return this.request<OrdersResponse>(`/api/admin/magic-links/shopify/orders?limit=${limit}${allParam}`);
+    const dateParam = createdAtMin ? `&created_at_min=${encodeURIComponent(createdAtMin)}` : '';
+    return this.request<OrdersResponse>(`/api/admin/magic-links/shopify/orders?limit=${limit}${allParam}${dateParam}`);
   }
 
   async getOrder(orderNumber: string): Promise<{ success: boolean; order?: ShopifyOrder; error?: string }> {

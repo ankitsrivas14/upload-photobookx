@@ -139,7 +139,7 @@ export function SalesPage() {
     setIsLoading(true);
     try {
       const [ordersResponse, discardedResponse, rtoResponse, cogsConfigResponse, adSpendResponse] = await Promise.all([
-        api.getOrders(250, true), // Fetch all orders (not filtered) - Shopify max per request is 250
+        api.getOrders(1000, true, '2026-01-28'), // Fetch ALL orders from Jan 28, 2026 onwards
         api.getDiscardedOrderIds(),
         api.getRTOOrderIds(),
         api.getCOGSConfiguration(),
@@ -148,6 +148,20 @@ export function SalesPage() {
       
       if (ordersResponse.success && ordersResponse.orders) {
         console.log(`Loaded ${ordersResponse.orders.length} orders from API`);
+        
+        // Debug: Check date range of fetched orders
+        if (ordersResponse.orders.length > 0) {
+          const dates = ordersResponse.orders.map(o => new Date(o.createdAt).toISOString().split('T')[0]);
+          const uniqueDates = [...new Set(dates)].sort();
+          console.log(`Frontend: Order dates range: ${uniqueDates[0]} to ${uniqueDates[uniqueDates.length - 1]}`);
+          
+          // Count orders per date
+          const dateCounts: Record<string, number> = {};
+          dates.forEach(d => {
+            dateCounts[d] = (dateCounts[d] || 0) + 1;
+          });
+          console.log('Frontend: Orders per date:', dateCounts);
+        }
         
         // Debug: Log delivery statuses to understand what we're getting
         const deliveryStatusCounts: Record<string, number> = {};
@@ -228,6 +242,8 @@ export function SalesPage() {
         const count = orderCountByDate[d] || 0;
         if (count > 0) adCostPerOrder[d] = adSpendByDate[d] / count;
       });
+      console.log('Ad spend by date:', adSpendByDate);
+      console.log('Order count by date:', orderCountByDate);
       setAdCostPerOrderByDate(adCostPerOrder);
       setAdSpendByDate(adSpendByDate);
     } catch (err) {
@@ -435,7 +451,8 @@ export function SalesPage() {
       if (!isDateInSelectedMonth(dateKey)) return;
       if (!byDate[dateKey]) byDate[dateKey] = [];
     });
-    return Object.entries(byDate)
+    
+    const grouped = Object.entries(byDate)
       .sort(([a], [b]) => b.localeCompare(a))
       .map(([dateKey, orders]) => ({
         dateKey,
@@ -443,6 +460,23 @@ export function SalesPage() {
         orders,
         adSpend: adSpendByDate[dateKey] ?? 0,
       }));
+    
+    // Debug logging
+    console.log('Orders grouped by date:', grouped.map(g => ({ date: g.dateKey, orderCount: g.orders.length, adSpend: g.adSpend })));
+    console.log('Total ordersForStats:', ordersForStats.length);
+    console.log('Filtered orders:', filteredOrders.length);
+    
+    // Log ordersForStats date breakdown
+    if (ordersForStats.length > 0) {
+      const statsDateCounts: Record<string, number> = {};
+      ordersForStats.forEach(o => {
+        const d = getOrderDateKey(o.createdAt);
+        statsDateCounts[d] = (statsDateCounts[d] || 0) + 1;
+      });
+      console.log('OrdersForStats by date (after month filter):', statsDateCounts);
+    }
+    
+    return grouped;
   })();
 
   // Clear selections when filters change
@@ -710,8 +744,9 @@ export function SalesPage() {
 
     // If current month, calculate based on days elapsed
     const daysElapsed = isCurrentMonth ? currentDay : totalDaysInMonth;
+    const remainingDays = totalDaysInMonth - daysElapsed;
 
-    // Calculate current P/L for the month (same logic as Total P/L)
+    // Calculate CURRENT P/L for the month (same logic as Total P/L stat)
     const ordersCountedInPnl = ordersForStats.filter(o => {
       const deliveryStatus = o.deliveryStatus?.toLowerCase() || '';
       const isDelivered = deliveryStatus === 'delivered';
@@ -733,18 +768,61 @@ export function SalesPage() {
       if (!datesWithOrders.has(dateKey)) currentPL -= amount;
     });
 
-    // Calculate average P/L per day
-    const avgPLPerDay = daysElapsed > 0 ? currentPL / daysElapsed : 0;
+    // Count pending orders (not yet delivered/failed, EXCLUDING prepaid which are already counted)
+    const pendingOrders = ordersForStats.filter(o => {
+      const deliveryStatus = o.deliveryStatus?.toLowerCase() || '';
+      const isFailed = rtoOrderIds.has(o.id) ||
+                      deliveryStatus === 'failure' ||
+                      deliveryStatus.includes('failed') ||
+                      deliveryStatus.includes('rto');
+      const isDelivered = deliveryStatus === 'delivered';
+      const isPrepaid = o.paymentMethod?.toLowerCase() === 'prepaid';
+      
+      // Include pending orders only (prepaid already counted in current P/L)
+      return !isDelivered && !isFailed && !isPrepaid;
+    });
 
-    // Project to end of month
-    const expectedMonthEndPL = avgPLPerDay * totalDaysInMonth;
+    // Calculate average P/L per delivered order from historical data (since Jan 28, 2026)
+    const historicalStartDate = new Date('2026-01-28');
+    const historicalDeliveredOrders = orders.filter(o => {
+      const orderDate = new Date(o.createdAt);
+      const deliveryStatus = o.deliveryStatus?.toLowerCase() || '';
+      return orderDate >= historicalStartDate && 
+             !o.cancelledAt && 
+             !discardedOrderIds.has(o.id) &&
+             deliveryStatus === 'delivered';
+    });
+
+    const totalHistoricalPL = Array.from(orderProfitLoss.entries())
+      .filter(([orderId]) => historicalDeliveredOrders.some(o => o.id === orderId))
+      .reduce((sum, [, pl]) => sum + pl, 0);
+
+    const avgPLPerDeliveredOrder = historicalDeliveredOrders.length > 0 
+      ? totalHistoricalPL / historicalDeliveredOrders.length 
+      : 0;
+
+    // Expected P/L from pending orders (adjusted for NDR rate)
+    const deliveryRate = 1 - (globalNdrRate / 100);
+    const expectedPendingPL = pendingOrders.length * avgPLPerDeliveredOrder * deliveryRate;
+
+    // Linear projection for future orders (from remaining days)
+    const avgPLPerDay = daysElapsed > 0 ? currentPL / daysElapsed : 0;
+    const expectedFuturePL = avgPLPerDay * remainingDays;
+
+    // Total expected month-end P/L = Current P/L + Pending Orders P/L + Future Orders P/L
+    const expectedMonthEndPL = currentPL + expectedPendingPL + expectedFuturePL;
 
     return {
       expectedPL: expectedMonthEndPL,
+      currentPL,
+      expectedPendingPL,
+      expectedFuturePL,
       avgPLPerDay,
+      avgPLPerDeliveredOrder,
+      pendingOrdersCount: pendingOrders.length,
       daysElapsed,
       totalDays: totalDaysInMonth,
-      currentPL,
+      remainingDays,
       isCurrentMonth,
     };
   };
@@ -1402,10 +1480,10 @@ export function SalesPage() {
               <div className={`${styles['stat-value']} ${expectedProfit.expectedPL > 0 ? styles.profit : expectedProfit.expectedPL < 0 ? styles.loss : ''}`}>
                 {expectedProfit.expectedPL > 0 ? '+' : ''}₹{formatIndianNumber(expectedProfit.expectedPL, 0)}
               </div>
-              <div className={styles['stat-subtext']}>
+              <div className={styles['stat-subtext']} title={`Current P/L: ₹${formatIndianNumber(expectedProfit.currentPL, 0)} | Pending (${expectedProfit.pendingOrdersCount} orders): +₹${formatIndianNumber(expectedProfit.expectedPendingPL, 0)} | Future (${expectedProfit.remainingDays}d): +₹${formatIndianNumber(expectedProfit.expectedFuturePL, 0)} | Avg per order: ₹${formatIndianNumber(expectedProfit.avgPLPerDeliveredOrder, 0)}`}>
                 {expectedProfit.isCurrentMonth 
-                  ? `Day ${expectedProfit.daysElapsed}/${expectedProfit.totalDays} • Avg: ₹${formatIndianNumber(expectedProfit.avgPLPerDay, 0)}/day`
-                  : `Based on ${expectedProfit.daysElapsed} days data`
+                  ? `Day ${expectedProfit.daysElapsed}/${expectedProfit.totalDays} • ${formatIndianNumber(expectedProfit.pendingOrdersCount, 0)} pending`
+                  : `${formatIndianNumber(expectedProfit.pendingOrdersCount, 0)} pending orders`
                 }
               </div>
             </div>

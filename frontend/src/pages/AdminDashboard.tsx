@@ -72,7 +72,7 @@ export function AdminDashboard() {
     try {
       const [meRes, ordersRes, linksRes] = await Promise.all([
         api.getMe(),
-        api.getOrders(),
+        api.getOrders(2500, true), // Fetch 250 all orders
         api.getMagicLinks(),
       ]);
 
