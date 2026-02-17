@@ -11,7 +11,7 @@ class ShopifyService {
   private accessToken: string;
   private apiVersion: string;
   private printedPhotosProductId: number;
-  private cacheTTL: number = 5 * 60 * 1000; // 5 minutes in milliseconds
+  // Cache is now infinite - only cleared by explicit refresh button click
 
   constructor() {
     this.storeDomain = config.shopify.storeDomain;
@@ -172,14 +172,11 @@ class ShopifyService {
   }
 
   /**
-   * Check if cached data exists and is still fresh
+   * Check if cached data exists (infinite cache - no expiry check)
    */
   private async getCachedOrders(cacheKey: string): Promise<ShopifyOrder[] | null> {
     try {
-      const cached = await ShopifyOrderCache.findOne({ 
-        cacheKey,
-        expiresAt: { $gt: new Date() }
-      });
+      const cached = await ShopifyOrderCache.findOne({ cacheKey });
       
       if (cached) {
         console.log(`Cache hit for ${cacheKey}, cached at ${cached.cachedAt}`);
@@ -195,12 +192,13 @@ class ShopifyService {
   }
 
   /**
-   * Update cache with fresh data
+   * Update cache with fresh data (infinite cache)
    */
   private async updateCache(cacheKey: string, orders: ShopifyOrder[]): Promise<void> {
     try {
       const now = new Date();
-      const expiresAt = new Date(now.getTime() + this.cacheTTL);
+      // Set expiresAt to 100 years in the future (effectively infinite)
+      const expiresAt = new Date(now.getTime() + (100 * 365 * 24 * 60 * 60 * 1000));
       
       await ShopifyOrderCache.findOneAndUpdate(
         { cacheKey },
@@ -212,7 +210,6 @@ class ShopifyService {
         { upsert: true, new: true }
       );
       
-      console.log(`Cache updated for ${cacheKey}, expires at ${expiresAt}`);
     } catch (error) {
       console.error('Error updating cache:', error);
       // Don't throw - caching is not critical
