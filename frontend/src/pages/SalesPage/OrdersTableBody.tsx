@@ -51,6 +51,7 @@ interface OrdersTableBodyProps {
   formatIndianNumber: (num: number, decimals?: number) => string;
   avgPnlPerFinalOrder: number;
   globalNdrRate: number;
+  onUpdateDeliveryStatus?: (orderId: number, orderName: string) => void;
 }
 
 export const OrdersTableBody: React.FC<OrdersTableBodyProps> = ({
@@ -67,6 +68,7 @@ export const OrdersTableBody: React.FC<OrdersTableBodyProps> = ({
   formatIndianNumber,
   avgPnlPerFinalOrder,
   globalNdrRate,
+  onUpdateDeliveryStatus,
 }) => {
   if (hasStatusFilter) {
     // Filtered view: flat list, no day headers
@@ -96,6 +98,7 @@ export const OrdersTableBody: React.FC<OrdersTableBodyProps> = ({
             getDelayDays={getDelayDays}
             getDeliveryStatusBadge={getDeliveryStatusBadge}
             handleOpenCogsModal={handleOpenCogsModal}
+            onUpdateDeliveryStatus={onUpdateDeliveryStatus}
           />
         ))}
       </tbody>
@@ -181,6 +184,7 @@ export const OrdersTableBody: React.FC<OrdersTableBodyProps> = ({
                 getDelayDays={getDelayDays}
                 getDeliveryStatusBadge={getDeliveryStatusBadge}
                 handleOpenCogsModal={handleOpenCogsModal}
+                onUpdateDeliveryStatus={onUpdateDeliveryStatus}
               />
             ))}
           </React.Fragment>

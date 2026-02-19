@@ -120,6 +120,11 @@ export function SalesPage() {
   const [cogsConfig, setCogsConfig] = useState<COGSField[]>([]);
   const [cogsBreakdown, setCogsBreakdown] = useState<COGSBreakdown[]>([]);
   
+  // Delivery Status Update Modal State
+  const [showDeliveryStatusModal, setShowDeliveryStatusModal] = useState(false);
+  const [selectedOrderForStatus, setSelectedOrderForStatus] = useState<{id: number; name: string} | null>(null);
+  const [updatingStatus, setUpdatingStatus] = useState(false);
+  
   // Per-order P/L cache (orderId -> profit/loss)
   const [orderProfitLoss, setOrderProfitLoss] = useState<Map<number, number>>(new Map());
 
@@ -1198,6 +1203,34 @@ export function SalesPage() {
     setShowCogsModal(true);
   };
 
+  const handleUpdateDeliveryStatus = (orderId: number, orderName: string) => {
+    setSelectedOrderForStatus({ id: orderId, name: orderName });
+    setShowDeliveryStatusModal(true);
+  };
+
+  const handleMarkDeliveryStatus = async (status: 'Delivered' | 'Failed') => {
+    if (!selectedOrderForStatus) return;
+    
+    setUpdatingStatus(true);
+    try {
+      const response = await api.updateOrderDeliveryStatus(selectedOrderForStatus.name, status);
+      
+      if (response.success) {
+        // Reload data to reflect the change
+        await loadData();
+        setShowDeliveryStatusModal(false);
+        setSelectedOrderForStatus(null);
+      } else {
+        alert(`Failed to update delivery status: ${response.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error updating delivery status:', error);
+      alert('An error occurred while updating delivery status');
+    } finally {
+      setUpdatingStatus(false);
+    }
+  };
+
   const calculateCogsBreakdown = (
     fields: COGSField[],
     salePrice: number,
@@ -1726,6 +1759,7 @@ export function SalesPage() {
               formatIndianNumber={formatIndianNumber}
               avgPnlPerFinalOrder={avgPnlPerFinalOrder}
               globalNdrRate={globalNdrRate}
+              onUpdateDeliveryStatus={handleUpdateDeliveryStatus}
             />
           </table>
         </div>
@@ -2141,6 +2175,69 @@ export function SalesPage() {
                     })()}
                   </div>
                 </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delivery Status Update Modal */}
+      {showDeliveryStatusModal && selectedOrderForStatus && (
+        <div className={styles['modal-overlay']} onClick={() => !updatingStatus && setShowDeliveryStatusModal(false)}>
+          <div className={styles['modal-content']} style={{ width: '500px', maxWidth: '90vw', height: 'auto' }} onClick={(e) => e.stopPropagation()}>
+            <div className={styles['modal-header']}>
+              <h3>Mark Delivery Status</h3>
+              <button
+                onClick={() => !updatingStatus && setShowDeliveryStatusModal(false)}
+                className={styles['modal-close']}
+                disabled={updatingStatus}
+              >
+                ×
+              </button>
+            </div>
+            <div className={styles['modal-body']} style={{ padding: '2rem' }}>
+              <p style={{ marginBottom: '1.5rem', color: '#64748b' }}>
+                Update delivery status for order <strong>{selectedOrderForStatus.name}</strong>
+              </p>
+              <div style={{ display: 'flex', gap: '1rem' }}>
+                <button
+                  onClick={() => handleMarkDeliveryStatus('Delivered')}
+                  disabled={updatingStatus}
+                  style={{
+                    flex: 1,
+                    padding: '1rem',
+                    background: '#10b981',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontSize: '1rem',
+                    fontWeight: 600,
+                    cursor: updatingStatus ? 'not-allowed' : 'pointer',
+                    opacity: updatingStatus ? 0.6 : 1,
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  {updatingStatus ? 'Updating...' : 'Mark as Delivered'}
+                </button>
+                <button
+                  onClick={() => handleMarkDeliveryStatus('Failed')}
+                  disabled={updatingStatus}
+                  style={{
+                    flex: 1,
+                    padding: '1rem',
+                    background: '#ef4444',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontSize: '1rem',
+                    fontWeight: 600,
+                    cursor: updatingStatus ? 'not-allowed' : 'pointer',
+                    opacity: updatingStatus ? 0.6 : 1,
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  {updatingStatus ? 'Updating...' : 'Mark as Failed'}
+                </button>
               </div>
             </div>
           </div>

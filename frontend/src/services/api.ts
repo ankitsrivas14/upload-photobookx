@@ -320,6 +320,16 @@ class ApiService {
     );
   }
 
+  async updateOrderDeliveryStatus(orderNumber: string, status: 'Delivered' | 'Failed'): Promise<{ success: boolean; message?: string; error?: string }> {
+    return this.request<{ success: boolean; message?: string; error?: string }>(
+      '/api/admin/magic-links/shopify/update-delivery-status',
+      {
+        method: 'POST',
+        body: JSON.stringify({ orderNumber, status }),
+      }
+    );
+  }
+
   async getWalletTransactions(startDate?: string, endDate?: string): Promise<{ success: boolean; transactions?: any[]; count?: number; error?: string }> {
     const params = new URLSearchParams();
     if (startDate) params.append('start_date', startDate);

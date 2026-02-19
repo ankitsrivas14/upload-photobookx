@@ -338,6 +338,51 @@ router.get('/shopify/orders/:orderNumber', requireAdmin, async (req: Authenticat
 });
 
 /**
+ * POST /api/admin/magic-links/shopify/update-delivery-status
+ * Update delivery status for an order
+ */
+router.post('/shopify/update-delivery-status', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { orderNumber, status } = req.body;
+
+    if (!orderNumber || !status) {
+      return res.status(400).json({
+        success: false,
+        error: 'Order number and status are required',
+      });
+    }
+
+    if (status !== 'Delivered' && status !== 'Failed') {
+      return res.status(400).json({
+        success: false,
+        error: 'Status must be either "Delivered" or "Failed"',
+      });
+    }
+
+    // Update the delivery status
+    const result = await shopifyService.updateOrderDeliveryStatus(orderNumber, status);
+
+    if (!result.success) {
+      return res.status(400).json({
+        success: false,
+        error: result.error || 'Failed to update delivery status',
+      });
+    }
+
+    res.json({
+      success: true,
+      message: `Order ${orderNumber} marked as ${status}`,
+    });
+  } catch (error) {
+    console.error('Error updating delivery status:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update delivery status',
+    });
+  }
+});
+
+/**
  * GET /api/admin/magic-links/shopify/products
  * Get all products from Shopify
  */

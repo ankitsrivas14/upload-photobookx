@@ -520,6 +520,149 @@ class ShopifyService {
   }
 
   /**
+   * Update delivery status for an order
+   */
+  async updateOrderDeliveryStatus(orderNumber: string, status: 'Delivered' | 'Failed'): Promise<{ success: boolean; error?: string }> {
+    try {
+      // Find the order first
+      const order = await this.findOrderByNumber(orderNumber);
+      
+      if (!order) {
+        return {
+          success: false,
+          error: `Order ${orderNumber} not found`,
+        };
+      }
+
+      // Step 1: Get existing fulfillments
+      const existingFulfillmentsResponse = await this.makeRequest<{ fulfillments: any[] }>(
+        `/orders/${order.id}/fulfillments.json`,
+        { method: 'GET' }
+      );
+
+      const existingFulfillments = existingFulfillmentsResponse.fulfillments || [];
+      let fulfillmentId: number;
+
+      if (existingFulfillments.length > 0) {
+        // Use the latest fulfillment
+        fulfillmentId = existingFulfillments[existingFulfillments.length - 1].id;
+        console.log(`[Shopify] Using existing fulfillment ${fulfillmentId} for order ${orderNumber}`);
+      } else {
+        // Create a new fulfillment if none exists
+        const fulfillmentOrdersResponse = await this.makeRequest<{ fulfillment_orders: any[] }>(
+          `/orders/${order.id}/fulfillment_orders.json`,
+          { method: 'GET' }
+        );
+
+        const fulfillmentOrders = fulfillmentOrdersResponse.fulfillment_orders;
+        
+        if (!fulfillmentOrders || fulfillmentOrders.length === 0) {
+          return {
+            success: false,
+            error: 'No fulfillment orders found for this order',
+          };
+        }
+
+        const fulfillmentOrder = fulfillmentOrders.find(
+          (fo: any) => fo.status === 'open' || fo.status === 'in_progress'
+        );
+
+        if (!fulfillmentOrder) {
+          return {
+            success: false,
+            error: 'No open fulfillment orders found. Order may already be fulfilled.',
+          };
+        }
+
+        // Create a new fulfillment
+        const fulfillmentData = {
+          fulfillment: {
+            line_items_by_fulfillment_order: [
+              {
+                fulfillment_order_id: fulfillmentOrder.id,
+              },
+            ],
+            tracking_info: {
+              company: 'Other',
+              number: `MANUAL-${Date.now()}`,
+              url: '',
+            },
+            notify_customer: false,
+          },
+        };
+
+        const fulfillmentResponse = await this.makeRequest<{ fulfillment: any }>(
+          `/fulfillments.json`,
+          {
+            method: 'POST',
+            body: fulfillmentData,
+          }
+        );
+
+        fulfillmentId = fulfillmentResponse.fulfillment.id;
+        console.log(`[Shopify] Created new fulfillment ${fulfillmentId} for order ${orderNumber}`);
+      }
+
+      // Step 2: Create a fulfillment event to mark as delivered or failed
+      // This is what actually updates the delivery status in Shopify!
+      const eventStatus = status === 'Delivered' ? 'delivered' : 'failure';
+      
+      const eventData = {
+        event: {
+          status: eventStatus,
+          message: `Order manually marked as ${status}`,
+        },
+      };
+
+      await this.makeRequest<{ fulfillment_event: any }>(
+        `/orders/${order.id}/fulfillments/${fulfillmentId}/events.json`,
+        {
+          method: 'POST',
+          body: eventData,
+        }
+      );
+
+      console.log(`[Shopify] Created fulfillment event '${eventStatus}' for order ${orderNumber}`);
+      
+      // Step 3: Also update note_attributes for backward compatibility
+      const deliveryStatus = status.toLowerCase();
+      const updateData = {
+        order: {
+          note_attributes: [
+            {
+              name: 'delivery_status',
+              value: deliveryStatus,
+            },
+            {
+              name: 'delivery_status_updated_at',
+              value: new Date().toISOString(),
+            },
+          ],
+        },
+      };
+
+      await this.makeRequest<{ order: any }>(
+        `/orders/${order.id}.json`,
+        {
+          method: 'PUT',
+          body: updateData,
+        }
+      );
+      
+      // Clear orders cache so the change is reflected
+      await this.clearOrdersCache();
+
+      return { success: true };
+    } catch (error: any) {
+      console.error('[Shopify] Error updating delivery status:', error.message || error);
+      return {
+        success: false,
+        error: error.message || 'Failed to update delivery status',
+      };
+    }
+  }
+
+  /**
    * Bulk update prices for multiple products
    */
   async bulkUpdateProductPrices(

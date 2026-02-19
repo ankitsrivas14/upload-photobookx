@@ -1,4 +1,11 @@
 import React from 'react';
+import { MoreVertical, CheckCircle } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import styles from '../SalesPage.module.css';
 
 interface ShippingChargeBreakdown {
@@ -40,6 +47,7 @@ interface OrderRowProps {
   getDelayDays: (order: ShopifyOrder) => number | null;
   getDeliveryStatusBadge: (status: string | null | undefined) => { text: string; className: string };
   handleOpenCogsModal: (order: ShopifyOrder) => void;
+  onUpdateDeliveryStatus?: (orderId: number, orderName: string) => void;
 }
 
 export const OrderRow: React.FC<OrderRowProps> = ({
@@ -51,7 +59,14 @@ export const OrderRow: React.FC<OrderRowProps> = ({
   getDelayDays,
   getDeliveryStatusBadge,
   handleOpenCogsModal,
+  onUpdateDeliveryStatus,
 }) => {
+  const handleMarkDeliveryStatus = () => {
+    if (onUpdateDeliveryStatus) {
+      onUpdateDeliveryStatus(order.id, order.name);
+    }
+  };
+
   return (
     <tr
       key={order.id}
@@ -166,6 +181,23 @@ export const OrderRow: React.FC<OrderRowProps> = ({
               <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
             </svg>
           </button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                className={styles['action-btn']}
+                title="More actions"
+                style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+              >
+                <MoreVertical style={{ width: '18px', height: '18px' }} />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="font-sans">
+              <DropdownMenuItem onClick={handleMarkDeliveryStatus} className="cursor-pointer">
+                <CheckCircle />
+                <span>Mark Delivery Status</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </td>
     </tr>
