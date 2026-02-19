@@ -9,6 +9,10 @@ interface Config {
     accessToken: string;
     printedPhotosProductId: string;
   };
+  shiprocket: {
+    email: string;
+    password: string;
+  };
   jwt: {
     secret: string;
     expiresIn: string;
@@ -31,6 +35,11 @@ const config: Config = {
     storeDomain: process.env.SHOPIFY_STORE_DOMAIN || '',
     accessToken: process.env.SHOPIFY_ACCESS_TOKEN || '',
     printedPhotosProductId: process.env.PRINTED_PHOTOS_PRODUCT_ID || '9990160548160',
+  },
+  
+  shiprocket: {
+    email: process.env.SHIPROCKET_API_EMAIL || '',
+    password: process.env.SHIPROCKET_API_PASSWORD || '',
   },
   
   jwt: {

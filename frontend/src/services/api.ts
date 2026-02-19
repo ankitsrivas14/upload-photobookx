@@ -90,6 +90,7 @@ interface ShopifyOrder {
   paymentMethod?: string;
   maxUploads: number;
   totalPrice?: number;
+  shippingCharge?: number; // Shipping charge paid to Shiprocket
   cancelledAt?: string | null;
   lineItems?: Array<{
     title: string;
@@ -286,6 +287,46 @@ class ApiService {
       {
         method: 'POST',
       }
+    );
+  }
+
+  // Shiprocket Shipping Charges
+  async fetchShippingCharge(orderNumber: string, refetch: boolean = true): Promise<{ success: boolean; shippingCharge?: number; message?: string; error?: string }> {
+    return this.request<{ success: boolean; shippingCharge?: number; message?: string; error?: string }>(
+      '/api/admin/magic-links/shiprocket/fetch-shipping-charge',
+      {
+        method: 'POST',
+        body: JSON.stringify({ orderNumber, refetch }),
+      }
+    );
+  }
+
+  async clearShippingChargesCache(): Promise<{ success: boolean; message?: string; error?: string }> {
+    return this.request<{ success: boolean; message?: string; error?: string }>(
+      '/api/admin/magic-links/shiprocket/clear-cache',
+      {
+        method: 'POST',
+      }
+    );
+  }
+
+  async syncShippingCharges(orderNumbers: string[]): Promise<{ success: boolean; fetched?: number; message?: string; error?: string }> {
+    return this.request<{ success: boolean; fetched?: number; message?: string; error?: string }>(
+      '/api/admin/magic-links/shiprocket/sync-shipping-charges',
+      {
+        method: 'POST',
+        body: JSON.stringify({ orderNumbers }),
+      }
+    );
+  }
+
+  async getWalletTransactions(startDate?: string, endDate?: string): Promise<{ success: boolean; transactions?: any[]; count?: number; error?: string }> {
+    const params = new URLSearchParams();
+    if (startDate) params.append('start_date', startDate);
+    if (endDate) params.append('end_date', endDate);
+    
+    return this.request<{ success: boolean; transactions?: any[]; count?: number; error?: string }>(
+      `/api/admin/magic-links/shiprocket/wallet-transactions?${params.toString()}`
     );
   }
 

@@ -2,10 +2,12 @@ import { Router, Response } from 'express';
 import { requireAdmin } from './adminAuth';
 import magicLinkService from '../services/magicLinkService';
 import shopifyService from '../services/shopifyService';
+import shiprocketService from '../services/shiprocketService';
 import type { AuthenticatedRequest } from '../types';
 import config from '../config';
 import { UploadedImage } from '../models';
 import OrderDeliveryDate from '../models/OrderDeliveryDate';
+import ShippingCharge from '../models/ShippingCharge';
 import { S3Client, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { fromInstanceMetadata } from '@aws-sdk/credential-provider-imds';
 import archiver from 'archiver';
@@ -213,6 +215,14 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
       deliveryDates.map(dd => [dd.orderNumber, dd.deliveredAt])
     );
     
+    // Fetch shipping charges from database only (no auto-fetch)
+    let shippingChargesMap = new Map<string, any>();
+    try {
+      shippingChargesMap = await shiprocketService.getShippingCharges(orderNumbers);
+    } catch (error) {
+      console.error('[API] Error fetching shipping charges:', error);
+    }
+    
     res.json({
       success: true,
       orders: orders.map(order => {
@@ -277,6 +287,8 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
           paymentMethod: paymentMethod,
           maxUploads: shopifyService.getMaxUploadsForOrder(order),
           totalPrice: order.current_total_price ? parseFloat(order.current_total_price) : undefined,
+          shippingCharge: shippingChargesMap.get(order.name)?.shippingCharge || 0,
+          shippingBreakdown: shippingChargesMap.get(order.name)?.breakdown || null,
           cancelledAt: order.cancelled_at,
           lineItems: order.line_items?.map(item => ({
             title: item.title,
@@ -683,6 +695,142 @@ router.delete('/:token/delete-images', requireAdmin, async (req: AuthenticatedRe
   } catch (error) {
     console.error('Error deleting images:', error);
     res.status(500).json({ success: false, error: 'Failed to delete images' });
+  }
+});
+
+/**
+ * POST /api/admin/magic-links/shiprocket/fetch-shipping-charge
+ * Fetch shipping charge for a single order from Shiprocket with breakdown
+ */
+router.post('/shiprocket/fetch-shipping-charge', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { orderNumber, refetch } = req.body;
+    
+    if (!orderNumber) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'orderNumber is required' 
+      });
+    }
+    
+    // If refetch is true, delete existing cache first
+    if (refetch) {
+      const ShippingCharge = (await import('../models/ShippingCharge')).default;
+      await ShippingCharge.deleteOne({ orderNumber });
+    }
+    
+    const shippingCharge = await shiprocketService.fetchShippingChargeForOrder(orderNumber);
+    
+    if (shippingCharge === null) {
+      return res.json({
+        success: true,
+        shippingCharge: 0,
+        breakdown: null,
+        message: 'Order not found in Shiprocket or not yet shipped',
+      });
+    }
+    
+    // Get the saved record to return breakdown
+    const ShippingCharge = (await import('../models/ShippingCharge')).default;
+    const saved = await ShippingCharge.findOne({ orderNumber });
+    
+    res.json({
+      success: true,
+      shippingCharge,
+      breakdown: saved ? {
+        freightForward: saved.freightForward || 0,
+        freightCOD: saved.freightCOD || 0,
+        freightRTO: saved.freightRTO || 0,
+        whatsappCharges: saved.whatsappCharges || 0,
+        otherCharges: saved.otherCharges || 0,
+      } : null,
+      message: `Fetched shipping charge: ₹${shippingCharge}`,
+    });
+  } catch (error) {
+    console.error('Error fetching shipping charge:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to fetch shipping charge' 
+    });
+  }
+});
+
+/**
+ * POST /api/admin/magic-links/shiprocket/clear-cache
+ * Clear all shipping charges from database
+ */
+router.post('/shiprocket/clear-cache', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const result = await ShippingCharge.deleteMany({});
+    res.json({
+      success: true,
+      message: `Cleared ${result.deletedCount} shipping charges from cache`,
+    });
+  } catch (error) {
+    console.error('[API] Error clearing shipping charges cache:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to clear shipping charges cache' 
+    });
+  }
+});
+
+/**
+ * POST /api/admin/magic-links/shiprocket/sync-shipping-charges
+ * Fetch shipping charges for all provided orders (BULK - optimized)
+ */
+router.post('/shiprocket/sync-shipping-charges', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { orderNumbers } = req.body;
+    
+    if (!Array.isArray(orderNumbers)) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'orderNumbers must be an array' 
+      });
+    }
+
+    // Use bulk fetch method (much faster)
+    const result = await shiprocketService.bulkFetchShippingCharges(orderNumbers);
+
+    res.json({
+      success: true,
+      fetched: result.fetched,
+      skipped: result.skipped,
+      message: `Fetched ${result.fetched}, skipped ${result.skipped} out of ${orderNumbers.length} orders`,
+    });
+  } catch (error) {
+    console.error('[API] Error syncing shipping charges:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to sync shipping charges' 
+    });
+  }
+});
+
+/**
+ * GET /api/admin/magic-links/shiprocket/wallet-transactions
+ * Get all wallet transactions for a date range
+ * Query params: start_date (YYYY-MM-DD), end_date (YYYY-MM-DD)
+ */
+router.get('/shiprocket/wallet-transactions', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const startDate = typeof req.query.start_date === 'string' ? req.query.start_date : undefined;
+    const endDate = typeof req.query.end_date === 'string' ? req.query.end_date : undefined;
+    
+    const transactions = await shiprocketService.getAllWalletTransactions(startDate, endDate);
+
+    res.json({
+      success: true,
+      transactions,
+      count: transactions.length,
+    });
+  } catch (error) {
+    console.error('[API] Error fetching wallet transactions:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to fetch wallet transactions' 
+    });
   }
 });
 

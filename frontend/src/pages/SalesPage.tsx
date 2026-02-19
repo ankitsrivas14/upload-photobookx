@@ -3,6 +3,14 @@ import { api } from '../services/api';
 import styles from './SalesPage.module.css';
 import { OrdersTableBody } from './SalesPage/OrdersTableBody';
 
+interface ShippingChargeBreakdown {
+  freightForward: number;
+  freightCOD: number;
+  freightRTO: number;
+  whatsappCharges: number;
+  otherCharges: number;
+}
+
 interface ShopifyOrder {
   id: number;
   name: string;
@@ -15,6 +23,8 @@ interface ShopifyOrder {
   paymentMethod?: string;
   maxUploads: number;
   totalPrice?: number;
+  shippingCharge?: number;
+  shippingBreakdown?: ShippingChargeBreakdown;
   cancelledAt?: string | null;
   lineItems?: Array<{
     title: string;
@@ -139,7 +149,7 @@ export function SalesPage() {
     setIsLoading(true);
     try {
       const [ordersResponse, discardedResponse, rtoResponse, cogsConfigResponse, adSpendResponse] = await Promise.all([
-        api.getOrders(1000, true, '2026-01-28'), // Fetch ALL orders from Jan 28, 2026 onwards
+        api.getOrders(1000, true), // Fetch ALL orders (no date filter)
         api.getDiscardedOrderIds(),
         api.getRTOOrderIds(),
         api.getCOGSConfiguration(),
@@ -208,6 +218,8 @@ export function SalesPage() {
           other: ordersResponse.orders.length - unfulfilledCount - deliveredCount - failedCount - cancelledCount
         });
         
+        // Orders already include shipping breakdown from AWB data
+        // (Wallet transactions API not available for this account)
         setOrders(ordersResponse.orders);
       }
       
@@ -256,9 +268,22 @@ export function SalesPage() {
   const handleRefresh = async () => {
     setIsRefreshing(true);
     try {
-      // Clear the cache first
-      await api.clearOrdersCache();
-      // Then reload the data
+      // Step 1: Clear both caches
+      await Promise.all([
+        api.clearOrdersCache(),
+        api.clearShippingChargesCache()
+      ]);
+      
+      // Step 2: Load fresh orders (ALL orders, no date filter)
+      const response = await api.getOrders(1000, true);
+      
+      // Step 3: Bulk sync shipping charges (fast - fetches all Shiprocket orders once)
+      if (response.success && response.orders) {
+        const orderNumbers = response.orders.map((o: any) => o.name);
+        await api.syncShippingCharges(orderNumbers);
+      }
+      
+      // Step 4: Reload to get updated data with shipping breakdown
       await loadData();
     } catch (err) {
       console.error('Failed to refresh data:', err);
@@ -782,8 +807,9 @@ export function SalesPage() {
       return !isDelivered && !isFailed && !isPrepaid;
     });
 
-    // Calculate average P/L per delivered order from historical data (since Jan 28, 2026)
-    const historicalStartDate = new Date('2026-01-28');
+    // Calculate average P/L per delivered order from historical data
+    // Note: Using all available orders for historical calculation
+    const historicalStartDate = new Date('2020-01-01'); // Far past date to include all orders
     const historicalDeliveredOrders = orders.filter(o => {
       const orderDate = new Date(o.createdAt);
       const deliveryStatus = o.deliveryStatus?.toLowerCase() || '';
@@ -1046,6 +1072,31 @@ export function SalesPage() {
     return false;
   }, [rtoOrderIds]);
 
+  // Calculate actual shipping charge with proper RTO COD handling
+  const calculateActualShippingCharge = useCallback((order: ShopifyOrder): number => {
+    if (!order.shippingBreakdown) {
+      return order.shippingCharge || 0;
+    }
+    
+    const { freightForward, freightCOD, freightRTO, whatsappCharges, otherCharges } = order.shippingBreakdown;
+    
+    // Check if this is an RTO COD order
+    const isRTO = rtoOrderIds.has(order.id) || 
+                  order.deliveryStatus?.toLowerCase().includes('rto') ||
+                  order.deliveryStatus?.toLowerCase().includes('failed') ||
+                  freightRTO > 0;
+    const isCODPayment = order.paymentMethod?.toLowerCase() === 'cod';
+    
+    // For RTO COD orders: COD is charged then reversed (net = 0)
+    // So we don't include COD in the total for RTO COD orders
+    if (isRTO && isCODPayment) {
+      return freightForward + freightRTO + whatsappCharges + otherCharges;
+    }
+    
+    // For all other orders: include COD normally
+    return freightForward + freightCOD + freightRTO + whatsappCharges + otherCharges;
+  }, [rtoOrderIds]);
+
   // Calculate profit/loss for an order based on delivery status and payment method
   const calculateOrderProfitLoss = useCallback((order: ShopifyOrder): number => {
     if (cogsConfig.length === 0) {
@@ -1115,8 +1166,10 @@ export function SalesPage() {
 
     const orderDateStr = getOrderDateKey(order.createdAt);
     const adCost = adCostPerOrderByDate[orderDateStr] ?? 0;
-    return revenue - totalCosts - adCost;
-  }, [cogsConfig, isOrderDelivered, adCostPerOrderByDate, rtoOrderIds]);
+    const shippingCharge = calculateActualShippingCharge(order);
+    
+    return revenue - totalCosts - adCost - shippingCharge;
+  }, [cogsConfig, isOrderDelivered, adCostPerOrderByDate, rtoOrderIds, calculateActualShippingCharge]);
 
   // Calculate P/L for all orders when config loads
   useEffect(() => {
@@ -1209,7 +1262,14 @@ export function SalesPage() {
   };
 
   const calculateTotalCogs = () => {
-    return cogsBreakdown.reduce((sum, item) => sum + item.calculatedCost, 0);
+    // Sum COGS items only (exclude Ad Cost which is shown separately)
+    return cogsBreakdown
+      .filter(item => item.fieldName !== 'Ad cost (Meta)')
+      .reduce((sum, item) => sum + item.calculatedCost, 0);
+  };
+  
+  const getAdCost = () => {
+    return adCostPerOrderByDate[getOrderDateKey(selectedOrderForCogs?.createdAt || '')] ?? 0;
   };
 
   const calculateProfit = () => {
@@ -1808,78 +1868,280 @@ export function SalesPage() {
             </div>
 
             <div className={styles['modal-body']}>
-              <div className={styles['order-info']}>
-                <div className={styles['info-row']}>
-                  <span className={styles['info-label']}>Order:</span>
-                  <span className={styles['info-value']}>{selectedOrderForCogs.name}</span>
-                </div>
-                <div className={styles['info-row']}>
-                  <span className={styles['info-label']}>Sale Price:</span>
-                  <span className={styles['info-value']}>
-                    ₹{formatIndianNumber(selectedOrderForCogs.totalPrice || 0)}
-                  </span>
-                </div>
-                <div className={styles['info-row']}>
-                  <span className={styles['info-label']}>Variant:</span>
-                  <span className={styles['info-value']}>
-                    {selectedVariant === 'small' ? 'Small Book' : 'Large Book'}
-                  </span>
-                </div>
-                <div className={styles['info-row']}>
-                  <span className={styles['info-label']}>Config Type:</span>
-                  <span className={styles['info-value']}>
-                    {isOrderDelivered(selectedOrderForCogs) ? 'COGS' : 'NDR'}
-                  </span>
+              {/* Section 1: Order Details */}
+              <div className={styles['cost-section']}>
+                <h3 className={styles['section-title']}>Order Details</h3>
+                <div className={styles['order-info']}>
+                  <div className={styles['info-row']}>
+                    <span className={styles['info-label']}>Order:</span>
+                    <span className={styles['info-value']}>{selectedOrderForCogs.name}</span>
+                  </div>
+                  <div className={styles['info-row']}>
+                    <span className={styles['info-label']}>Sale Price:</span>
+                    <span className={styles['info-value']}>
+                      ₹{formatIndianNumber(selectedOrderForCogs.totalPrice || 0)}
+                    </span>
+                  </div>
+                  <div className={styles['info-row']}>
+                    <span className={styles['info-label']}>Variant:</span>
+                    <span className={styles['info-value']}>
+                      {selectedVariant === 'small' ? 'Small Book' : 'Large Book'}
+                    </span>
+                  </div>
+                  <div className={styles['info-row']}>
+                    <span className={styles['info-label']}>Config Type:</span>
+                    <span className={styles['info-value']}>
+                      {isOrderDelivered(selectedOrderForCogs) ? 'COGS' : 'NDR'}
+                    </span>
+                  </div>
                 </div>
               </div>
 
-              <div className={styles['cogs-breakdown']}>
-                    <h4>COGS Breakdown</h4>
-                    <div className={styles['breakdown-list']}>
-                      {cogsBreakdown.length === 0 ? (
-                        <p className={styles['no-data']}>No COGS configuration available</p>
-                      ) : (
-                        cogsBreakdown.map((item, idx) => (
-                          <div key={idx} className={styles['breakdown-item']}>
-                            <div className={styles['breakdown-info']}>
-                              <span className={styles['breakdown-name']}>{item.fieldName}</span>
-                              <span className={styles['breakdown-type']}>
-                              {item.calculationType === 'percentage' 
-                                ? `${formatIndianNumber(item.value, 1)}%` 
-                                : `₹${formatIndianNumber(item.value)}`}
-                              </span>
-                            </div>
-                            <span className={styles['breakdown-cost']}>
-                              ₹{formatIndianNumber(item.calculatedCost)}
+              {/* Section 2: COGS Config Charges */}
+              <div className={styles['cost-section']}>
+                <h3 className={styles['section-title']}>COGS Configuration</h3>
+                <div className={styles['breakdown-list']}>
+                  {cogsBreakdown.length === 0 ? (
+                    <p className={styles['no-data']}>No COGS configuration available</p>
+                  ) : (
+                    cogsBreakdown
+                      .filter(item => item.fieldName !== 'Ad cost (Meta)') // Exclude Ad Cost, shown separately
+                      .map((item, idx) => (
+                        <div key={idx} className={styles['breakdown-item']}>
+                          <div className={styles['breakdown-info']}>
+                            <span className={styles['breakdown-name']}>{item.fieldName}</span>
+                            <span className={styles['breakdown-type']}>
+                            {item.calculationType === 'percentage' 
+                              ? `${formatIndianNumber(item.value, 1)}%` 
+                              : `₹${formatIndianNumber(item.value)}`}
                             </span>
                           </div>
-                        ))
+                          <span className={styles['breakdown-cost']}>
+                            ₹{formatIndianNumber(item.calculatedCost)}
+                          </span>
+                        </div>
+                      ))
+                  )}
+                </div>
+              </div>
+
+              {/* Section 3: Ad Cost */}
+              <div className={styles['cost-section']}>
+                <h3 className={styles['section-title']}>Advertisement Cost</h3>
+                <div className={styles['breakdown-list']}>
+                  <div className={styles['breakdown-item']}>
+                    <div className={styles['breakdown-info']}>
+                      <span className={styles['breakdown-name']}>Ad Cost (Meta)</span>
+                      <span className={styles['breakdown-type']}>Per Order</span>
+                    </div>
+                    <span className={styles['breakdown-cost']}>
+                      ₹{formatIndianNumber(adCostPerOrderByDate[getOrderDateKey(selectedOrderForCogs.createdAt)] ?? 0)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 4: Shipping Charges */}
+              <div className={styles['cost-section']}>
+                <h3 className={styles['section-title']}>Shipping Charges</h3>
+                <div className={styles['breakdown-list']}>
+                  {selectedOrderForCogs.shippingCharge && selectedOrderForCogs.shippingCharge > 0 ? (
+                        <>
+                          {selectedOrderForCogs.shippingBreakdown ? (
+                            <>
+                              {/* Detailed breakdown if available */}
+                              {selectedOrderForCogs.shippingBreakdown.freightForward > 0 && (
+                                <div className={styles['breakdown-item']}>
+                                  <div className={styles['breakdown-info']}>
+                                    <span className={styles['breakdown-name']}>Base Freight</span>
+                                    <span className={styles['breakdown-type']}>Shiprocket</span>
+                                  </div>
+                                  <span className={styles['breakdown-cost']}>
+                                    ₹{formatIndianNumber(selectedOrderForCogs.shippingBreakdown.freightForward)}
+                                  </span>
+                                </div>
+                              )}
+                              {selectedOrderForCogs.shippingBreakdown.freightCOD !== 0 && (() => {
+                                // COD is only reversed when: order is RTO AND payment method is COD
+                                // Check for RTO: in RTO list, status contains RTO/failed, OR has RTO charges
+                                const isRTO = rtoOrderIds.has(selectedOrderForCogs.id) || 
+                                              selectedOrderForCogs.deliveryStatus?.toLowerCase().includes('rto') ||
+                                              selectedOrderForCogs.deliveryStatus?.toLowerCase().includes('failed') ||
+                                              (selectedOrderForCogs.shippingBreakdown.freightRTO || 0) > 0; // Has RTO charges
+                                const isCODPayment = selectedOrderForCogs.paymentMethod?.toLowerCase() === 'cod';
+                                const shouldReverse = isRTO && isCODPayment && selectedOrderForCogs.shippingBreakdown.freightCOD > 0;
+                                
+                                // For RTO orders, show both charge and reversal
+                                if (shouldReverse) {
+                                  return (
+                                    <>
+                                      {/* Initial COD charge */}
+                                      <div className={styles['breakdown-item']}>
+                                        <div className={styles['breakdown-info']}>
+                                          <span className={styles['breakdown-name']}>Freight COD</span>
+                                          <span className={styles['breakdown-type']}>Applied</span>
+                                        </div>
+                                        <span className={styles['breakdown-cost']}>
+                                          ₹{formatIndianNumber(Math.abs(selectedOrderForCogs.shippingBreakdown.freightCOD))}
+                                        </span>
+                                      </div>
+                                      {/* COD reversal */}
+                                      <div className={styles['breakdown-item']}>
+                                        <div className={styles['breakdown-info']}>
+                                          <span className={styles['breakdown-name']}>Freight COD Reversal</span>
+                                          <span className={styles['breakdown-type']}>RTO Refund</span>
+                                        </div>
+                                        <span className={styles['breakdown-cost']} style={{ color: '#10b981' }}>
+                                          -₹{formatIndianNumber(Math.abs(selectedOrderForCogs.shippingBreakdown.freightCOD))}
+                                        </span>
+                                      </div>
+                                    </>
+                                  );
+                                }
+                                
+                                // For non-RTO orders, show single line
+                                return (
+                                  <div className={styles['breakdown-item']}>
+                                    <div className={styles['breakdown-info']}>
+                                      <span className={styles['breakdown-name']}>Freight COD</span>
+                                      <span className={styles['breakdown-type']}>Applied</span>
+                                    </div>
+                                    <span className={styles['breakdown-cost']}>
+                                      ₹{formatIndianNumber(Math.abs(selectedOrderForCogs.shippingBreakdown.freightCOD))}
+                                    </span>
+                                  </div>
+                                );
+                              })()}
+                              {selectedOrderForCogs.shippingBreakdown.freightRTO > 0 && (
+                                <div className={styles['breakdown-item']}>
+                                  <div className={styles['breakdown-info']}>
+                                    <span className={styles['breakdown-name']}>Freight RTO</span>
+                                    <span className={styles['breakdown-type']}>Return</span>
+                                  </div>
+                                  <span className={styles['breakdown-cost']}>
+                                    ₹{formatIndianNumber(selectedOrderForCogs.shippingBreakdown.freightRTO)}
+                                  </span>
+                                </div>
+                              )}
+                              {selectedOrderForCogs.shippingBreakdown.whatsappCharges > 0 && (
+                                <div className={styles['breakdown-item']}>
+                                  <div className={styles['breakdown-info']}>
+                                    <span className={styles['breakdown-name']}>WhatsApp Charges</span>
+                                    <span className={styles['breakdown-type']}>Communication</span>
+                                  </div>
+                                  <span className={styles['breakdown-cost']}>
+                                    ₹{formatIndianNumber(selectedOrderForCogs.shippingBreakdown.whatsappCharges)}
+                                  </span>
+                                </div>
+                              )}
+                              {selectedOrderForCogs.shippingBreakdown.otherCharges > 0 && (
+                                <div className={styles['breakdown-item']}>
+                                  <div className={styles['breakdown-info']}>
+                                    <span className={styles['breakdown-name']}>Other Charges</span>
+                                    <span className={styles['breakdown-type']}>Misc</span>
+                                  </div>
+                                  <span className={styles['breakdown-cost']}>
+                                    ₹{formatIndianNumber(selectedOrderForCogs.shippingBreakdown.otherCharges)}
+                                  </span>
+                                </div>
+                              )}
+                            </>
+                          ) : (
+                            /* Simple total if no breakdown */
+                            <div className={styles['breakdown-item']}>
+                              <div className={styles['breakdown-info']}>
+                                <span className={styles['breakdown-name']}>Shipping Charge</span>
+                                <span className={styles['breakdown-type']}>Shiprocket</span>
+                              </div>
+                              <span className={styles['breakdown-cost']}>
+                                ₹{formatIndianNumber(selectedOrderForCogs.shippingCharge)}
+                              </span>
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <p className={styles['no-data']}>No shipping charges available</p>
                       )}
                     </div>
                   </div>
 
-                  <div className={styles['cogs-summary']}>
-                    <div className={styles['summary-row']}>
-                      <span className={styles['summary-label']}>Total COGS:</span>
-                      <span className={styles['summary-value']}>
-                        ₹{formatIndianNumber(calculateTotalCogs())}
-                      </span>
+              {/* Section 5: Total Costs Summary */}
+              <div className={styles['cost-section']}>
+                <h3 className={styles['section-title']}>Cost Summary</h3>
+                <div className={styles['breakdown-list']}>
+                  <div className={styles['breakdown-item']}>
+                    <div className={styles['breakdown-info']}>
+                      <span className={styles['breakdown-name']}>Total COGS</span>
+                      <span className={styles['breakdown-type']}>From Configuration</span>
                     </div>
-                    <div className={styles['summary-row']}>
-                      <span className={styles['summary-label']}>Sale Price:</span>
-                      <span className={styles['summary-value']}>
-                        ₹{formatIndianNumber(selectedOrderForCogs.totalPrice || 0)}
-                      </span>
-                    </div>
-                    <div className={`${styles['summary-row']} ${styles['profit-row']}`}>
-                      <span className={styles['summary-label']}>
-                        {calculateProfit() >= 0 ? 'Profit' : 'Loss'}:
-                      </span>
-                      <span className={`${styles['summary-value']} ${calculateProfit() >= 0 ? styles.profit : styles.loss}`}>
-                        ₹{formatIndianNumber(Math.abs(calculateProfit()))}
-                      </span>
-                    </div>
+                    <span className={styles['breakdown-cost']}>
+                      ₹{formatIndianNumber(calculateTotalCogs())}
+                    </span>
                   </div>
+                  <div className={styles['breakdown-item']}>
+                    <div className={styles['breakdown-info']}>
+                      <span className={styles['breakdown-name']}>Ad Cost</span>
+                      <span className={styles['breakdown-type']}>Meta Ads</span>
+                    </div>
+                    <span className={styles['breakdown-cost']}>
+                      ₹{formatIndianNumber(adCostPerOrderByDate[getOrderDateKey(selectedOrderForCogs.createdAt)] ?? 0)}
+                    </span>
+                  </div>
+                  <div className={styles['breakdown-item']}>
+                    <div className={styles['breakdown-info']}>
+                      <span className={styles['breakdown-name']}>Shipping Charge</span>
+                      <span className={styles['breakdown-type']}>Shiprocket</span>
+                    </div>
+                    <span className={styles['breakdown-cost']}>
+                      ₹{formatIndianNumber(calculateActualShippingCharge(selectedOrderForCogs))}
+                    </span>
+                  </div>
+                  <div className={styles['breakdown-item']} style={{ borderTop: '2px solid #cbd5e1', paddingTop: '1rem', marginTop: '0.5rem' }}>
+                    <div className={styles['breakdown-info']}>
+                      <span className={styles['breakdown-name']} style={{ fontSize: '1.125rem', fontWeight: '700' }}>Total Costs</span>
+                      <span className={styles['breakdown-type']}>Sum of All Costs</span>
+                    </div>
+                    <span className={styles['breakdown-cost']} style={{ fontSize: '1.125rem' }}>
+                      ₹{formatIndianNumber(calculateTotalCogs() + (adCostPerOrderByDate[getOrderDateKey(selectedOrderForCogs.createdAt)] ?? 0) + calculateActualShippingCharge(selectedOrderForCogs))}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 6: Net Profit/Loss */}
+              <div className={styles['cost-section']}>
+                <h3 className={styles['section-title']}>Net Result</h3>
+                <div className={styles['cogs-summary']}>
+                  <div className={styles['summary-row']}>
+                    <span className={styles['summary-label']}>Sale Price:</span>
+                    <span className={styles['summary-value']}>
+                      ₹{formatIndianNumber(selectedOrderForCogs.totalPrice || 0)}
+                    </span>
+                  </div>
+                  <div className={styles['summary-row']}>
+                    <span className={styles['summary-label']}>Total Costs:</span>
+                    <span className={styles['summary-value']}>
+                      ₹{formatIndianNumber(calculateTotalCogs() + (adCostPerOrderByDate[getOrderDateKey(selectedOrderForCogs.createdAt)] ?? 0) + calculateActualShippingCharge(selectedOrderForCogs))}
+                    </span>
+                  </div>
+                  <div className={`${styles['summary-row']} ${styles['profit-row']}`}>
+                    {(() => {
+                      const totalCosts = calculateTotalCogs() + (adCostPerOrderByDate[getOrderDateKey(selectedOrderForCogs.createdAt)] ?? 0) + calculateActualShippingCharge(selectedOrderForCogs);
+                      const profit = (selectedOrderForCogs.totalPrice || 0) - totalCosts;
+                      return (
+                        <>
+                          <span className={styles['summary-label']}>
+                            {profit >= 0 ? 'Profit' : 'Loss'}:
+                          </span>
+                          <span className={`${styles['summary-value']} ${profit >= 0 ? styles.profit : styles.loss}`}>
+                            {profit >= 0 ? '+' : ''}₹{formatIndianNumber(Math.abs(profit))}
+                          </span>
+                        </>
+                      );
+                    })()}
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>

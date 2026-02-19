@@ -2,6 +2,14 @@ import React from 'react';
 import { OrderRow } from './OrderRow';
 import styles from '../SalesPage.module.css';
 
+interface ShippingChargeBreakdown {
+  freightForward: number;
+  freightCOD: number;
+  freightRTO: number;
+  whatsappCharges: number;
+  otherCharges: number;
+}
+
 interface ShopifyOrder {
   id: number;
   name: string;
@@ -14,6 +22,8 @@ interface ShopifyOrder {
   paymentMethod?: string;
   maxUploads: number;
   totalPrice?: number;
+  shippingCharge?: number;
+  shippingBreakdown?: ShippingChargeBreakdown;
   cancelledAt?: string | null;
   lineItems?: Array<{
     title: string;
