@@ -131,9 +131,9 @@ export const OrderRow: React.FC<OrderRowProps> = ({
           const deliveryStatus = order.deliveryStatus?.toLowerCase() || '';
           const isDelivered = deliveryStatus === 'delivered';
           const isFailed = rtoOrderIds.has(order.id) ||
-                          deliveryStatus === 'failure' ||
-                          deliveryStatus.includes('failed') ||
-                          deliveryStatus.includes('rto');
+            deliveryStatus === 'failure' ||
+            deliveryStatus.includes('failed') ||
+            deliveryStatus.includes('rto');
           const isPrepaid = order.paymentMethod?.toLowerCase() === 'prepaid';
           if (!isDelivered && !isFailed && !isPrepaid) {
             return <span className={styles['profit-loss-pending']}>—</span>;
@@ -166,9 +166,9 @@ export const OrderRow: React.FC<OrderRowProps> = ({
               title="Open tracking link"
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-                <polyline points="15 3 21 3 21 9"/>
-                <line x1="10" y1="14" x2="21" y2="3"/>
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                <polyline points="15 3 21 3 21 9" />
+                <line x1="10" y1="14" x2="21" y2="3" />
               </svg>
             </a>
           )}
@@ -178,7 +178,7 @@ export const OrderRow: React.FC<OrderRowProps> = ({
             title="View Breakdown"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+              <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
             </svg>
           </button>
           <DropdownMenu>
@@ -192,7 +192,7 @@ export const OrderRow: React.FC<OrderRowProps> = ({
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="font-sans">
-              <DropdownMenuItem onClick={handleMarkDeliveryStatus} className="cursor-pointer">
+              <DropdownMenuItem onClick={handleMarkDeliveryStatus} className={styles['action-dropdown-item']}>
                 <CheckCircle />
                 <span>Mark Delivery Status</span>
               </DropdownMenuItem>

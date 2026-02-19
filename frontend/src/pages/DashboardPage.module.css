@@ -17,7 +17,9 @@
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .header {
@@ -93,6 +95,22 @@
   margin-top: 0.5rem;
   margin-bottom: 0.5rem;
   min-height: 280px;
+}
+
+/* Recharts Pie focus reset - EXTREME */
+.chartWrap :focus,
+.chartWrap :focus-visible,
+.chartWrap :focus-within {
+  outline: none !important;
+}
+
+.chartWrap :global(.recharts-pie-sector:focus),
+.chartWrap :global(g:focus),
+.chartWrap :global(path:focus),
+.chartWrap :global(.recharts-wrapper:focus),
+.chartWrap :global(.recharts-surface:focus) {
+  outline: none !important;
+  border: none !important;
 }
 
 .chartLegendText {
@@ -271,4 +289,75 @@
 .tooltipNone {
   color: #94a3b8;
   font-weight: 500;
+}
+
+/* Modal Styles */
+.modalOverlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 2000;
+  backdrop-filter: blur(4px);
+}
+
+.modalContent {
+  background: white;
+  width: 95vw;
+  height: 95vh;
+  border-radius: 12px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  animation: modalSlideUp 0.3s ease-out;
+}
+
+@keyframes modalSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.modalCloseBtn {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 100;
+  color: #64748b;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s;
+}
+
+.modalCloseBtn:hover {
+  background: #f1f5f9;
+  color: #ef4444;
+  transform: scale(1.1);
+}
+
+.modalBody {
+  flex: 1;
+  overflow: auto;
+  padding: 1rem;
 }

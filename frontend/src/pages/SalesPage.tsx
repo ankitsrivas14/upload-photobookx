@@ -68,36 +68,44 @@ function getOrderDateKey(createdAt: string): string {
 // Helper function to format numbers with Indian comma notation
 const formatIndianNumber = (num: number, decimals: number = 2): string => {
   const [integerPart, decimalPart] = num.toFixed(decimals).split('.');
-  
+
   // Indian numbering system: First 3 digits, then groups of 2
   let lastThree = integerPart.substring(integerPart.length - 3);
   const otherNumbers = integerPart.substring(0, integerPart.length - 3);
-  
+
   if (otherNumbers !== '') {
     lastThree = ',' + lastThree;
   }
-  
+
   let result = otherNumbers.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + lastThree;
-  
+
   if (decimals > 0 && decimalPart) {
     result += '.' + decimalPart;
   }
-  
+
   return result;
 };
 
-export function SalesPage() {
+export interface SalesPageProps {
+  initialFilter?: {
+    type: 'status' | 'payment';
+    value: string;
+    period?: string;
+  };
+}
+
+export function SalesPage({ initialFilter }: SalesPageProps = {}) {
   const [isLoading, setIsLoading] = useState(true);
   const [orders, setOrders] = useState<ShopifyOrder[]>([]);
   const [discardedOrderIds, setDiscardedOrderIds] = useState<Set<number>>(new Set());
   const [rtoOrderIds, setRTOOrderIds] = useState<Set<number>>(new Set());
   const [selectedOrders, setSelectedOrders] = useState<Set<number>>(new Set());
   const [selectAll, setSelectAll] = useState(false);
-  const [selectedMonthFilter, setSelectedMonthFilter] = useState<string>('current'); // 'all', 'current', or 'YYYY-MM' - Default to current month
+  const [selectedMonthFilter, setSelectedMonthFilter] = useState<string>(initialFilter?.period || 'current'); // 'all', 'current', 'last30', or 'YYYY-MM'
   const [showBulkMenu, setShowBulkMenu] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  
+
   // Status filters (AND filters)
   const [showUnfulfilled, setShowUnfulfilled] = useState(false);
   const [showDelivered, setShowDelivered] = useState(false);
@@ -105,26 +113,68 @@ export function SalesPage() {
   const [showAttemptedDelivery, setShowAttemptedDelivery] = useState(false);
   const [showInTransit, setShowInTransit] = useState(false);
   const [showOutForDelivery, setShowOutForDelivery] = useState(false);
-  
+  const [showConfirmed, setShowConfirmed] = useState(false);
+
+  // Payment filters
+  const [showPrepaid, setShowPrepaid] = useState(false);
+  const [showCOD, setShowCOD] = useState(false);
+
+  // Apply initial filters if provided
+  useEffect(() => {
+    if (initialFilter) {
+      // Reset all first
+      setShowUnfulfilled(false);
+      setShowDelivered(false);
+      setShowFailed(false);
+      setShowAttemptedDelivery(false);
+      setShowInTransit(false);
+      setShowOutForDelivery(false);
+      setShowConfirmed(false);
+      setShowPrepaid(false);
+      setShowCOD(false);
+
+      if (initialFilter.period) {
+        setSelectedMonthFilter(initialFilter.period);
+      }
+
+      if (initialFilter.type === 'status') {
+        switch (initialFilter.value) {
+          case 'Delivered': setShowDelivered(true); break;
+          case 'Failed': setShowFailed(true); break;
+          case 'Attempted Delivery': setShowAttemptedDelivery(true); break;
+          case 'Out for Delivery': setShowOutForDelivery(true); break;
+          case 'In Transit': setShowInTransit(true); break;
+          case 'Confirmed': setShowConfirmed(true); break;
+          case 'In Progress': setShowInTransit(true); break;
+        }
+      } else if (initialFilter.type === 'payment') {
+        switch (initialFilter.value) {
+          case 'Prepaid': setShowPrepaid(true); break;
+          case 'COD': setShowCOD(true); break;
+        }
+      }
+    }
+  }, [initialFilter]);
+
   // Pending drawer
   const [showPendingDrawer, setShowPendingDrawer] = useState(false);
   const [pendingFilterCOD, setPendingFilterCOD] = useState(false);
   const [pendingFilterPaid, setPendingFilterPaid] = useState(false);
   const [pendingFilterDelayDays, setPendingFilterDelayDays] = useState<Set<number>>(new Set());
   const [showDelayDropdown, setShowDelayDropdown] = useState(false);
-  
+
   // COGS Calculator Modal State
   const [showCogsModal, setShowCogsModal] = useState(false);
   const [selectedOrderForCogs, setSelectedOrderForCogs] = useState<ShopifyOrder | null>(null);
   const [selectedVariant, setSelectedVariant] = useState<'small' | 'large'>('small');
   const [cogsConfig, setCogsConfig] = useState<COGSField[]>([]);
   const [cogsBreakdown, setCogsBreakdown] = useState<COGSBreakdown[]>([]);
-  
+
   // Delivery Status Update Modal State
   const [showDeliveryStatusModal, setShowDeliveryStatusModal] = useState(false);
-  const [selectedOrderForStatus, setSelectedOrderForStatus] = useState<{id: number; name: string} | null>(null);
+  const [selectedOrderForStatus, setSelectedOrderForStatus] = useState<{ id: number; name: string } | null>(null);
   const [updatingStatus, setUpdatingStatus] = useState(false);
-  
+
   // Per-order P/L cache (orderId -> profit/loss)
   const [orderProfitLoss, setOrderProfitLoss] = useState<Map<number, number>>(new Map());
 
@@ -160,16 +210,16 @@ export function SalesPage() {
         api.getCOGSConfiguration(),
         api.getDailyAdSpend(),
       ]);
-      
+
       if (ordersResponse.success && ordersResponse.orders) {
         console.log(`Loaded ${ordersResponse.orders.length} orders from API`);
-        
+
         // Debug: Check date range of fetched orders
         if (ordersResponse.orders.length > 0) {
           const dates = ordersResponse.orders.map(o => new Date(o.createdAt).toISOString().split('T')[0]);
           const uniqueDates = [...new Set(dates)].sort();
           console.log(`Frontend: Order dates range: ${uniqueDates[0]} to ${uniqueDates[uniqueDates.length - 1]}`);
-          
+
           // Count orders per date
           const dateCounts: Record<string, number> = {};
           dates.forEach(d => {
@@ -177,33 +227,33 @@ export function SalesPage() {
           });
           console.log('Frontend: Orders per date:', dateCounts);
         }
-        
+
         // Debug: Log delivery statuses to understand what we're getting
         const deliveryStatusCounts: Record<string, number> = {};
         const fulfillmentStatusCounts: Record<string, number> = {};
         let unfulfilledCount = 0;
         let deliveredCount = 0;
         let failedCount = 0;
-        
+
         let cancelledCount = 0;
-        
+
         ordersResponse.orders.forEach(order => {
           // Skip cancelled orders in categorization
           if (order.cancelledAt) {
             cancelledCount++;
             return;
           }
-          
+
           const deliveryStatus = order.deliveryStatus || 'no_delivery_status';
           const fulfillmentStatus = order.fulfillmentStatus || 'no_fulfillment_status';
-          
+
           deliveryStatusCounts[deliveryStatus] = (deliveryStatusCounts[deliveryStatus] || 0) + 1;
           fulfillmentStatusCounts[fulfillmentStatus] = (fulfillmentStatusCounts[fulfillmentStatus] || 0) + 1;
-          
+
           // Categorize
           const deliveryStatusLower = order.deliveryStatus?.toLowerCase() || '';
           const fulfillmentStatusLower = order.fulfillmentStatus?.toLowerCase() || '';
-          
+
           if (deliveryStatusLower === 'delivered') {
             deliveredCount++;
           } else if (deliveryStatusLower === 'failure') {
@@ -212,7 +262,7 @@ export function SalesPage() {
             unfulfilledCount++;
           }
         });
-        
+
         console.log('Delivery status breakdown:', deliveryStatusCounts);
         console.log('Fulfillment status breakdown:', fulfillmentStatusCounts);
         console.log('Filter categories:', {
@@ -222,20 +272,20 @@ export function SalesPage() {
           cancelled: cancelledCount,
           other: ordersResponse.orders.length - unfulfilledCount - deliveredCount - failedCount - cancelledCount
         });
-        
+
         // Orders already include shipping breakdown from AWB data
         // (Wallet transactions API not available for this account)
         setOrders(ordersResponse.orders);
       }
-      
+
       if (discardedResponse.success) {
         setDiscardedOrderIds(new Set(discardedResponse.discardedOrderIds));
       }
-      
+
       if (rtoResponse.success) {
         setRTOOrderIds(new Set(rtoResponse.rtoOrderIds));
       }
-      
+
       if (cogsConfigResponse && cogsConfigResponse.fields) {
         setCogsConfig(cogsConfigResponse.fields);
       }
@@ -278,16 +328,16 @@ export function SalesPage() {
         api.clearOrdersCache(),
         api.clearShippingChargesCache()
       ]);
-      
+
       // Step 2: Load fresh orders (ALL orders, no date filter)
       const response = await api.getOrders(1000, true);
-      
+
       // Step 3: Bulk sync shipping charges (fast - fetches all Shiprocket orders once)
       if (response.success && response.orders) {
         const orderNumbers = response.orders.map((o: any) => o.name);
         await api.syncShippingCharges(orderNumbers);
       }
-      
+
       // Step 4: Reload to get updated data with shipping breakdown
       await loadData();
     } catch (err) {
@@ -334,31 +384,36 @@ export function SalesPage() {
   const getOrderStatus = (order: ShopifyOrder) => {
     const deliveryStatus = order.deliveryStatus?.toLowerCase() || '';
     const fulfillmentStatus = order.fulfillmentStatus?.toLowerCase() || '';
-    
+
     // Failed statuses: failure, RTO-related (attempted_delivery excluded)
     const isFailed = rtoOrderIds.has(order.id) ||
-                     deliveryStatus === 'failure' ||
-                     deliveryStatus.includes('failed') ||
-                     deliveryStatus.includes('rto');
-    
+      deliveryStatus === 'failure' ||
+      deliveryStatus.includes('failed') ||
+      deliveryStatus.includes('rto');
+
     // Delivered statuses: delivered only
     const isDelivered = deliveryStatus === 'delivered';
-    
+
     // Attempted delivery: delivery was attempted but not completed
     const isAttemptedDelivery = deliveryStatus === 'attempted_delivery';
-    
+
     // Out for delivery: explicitly out_for_delivery status
     const isOutForDelivery = deliveryStatus === 'out_for_delivery';
-    
+
     // Unfulfilled: Check fulfillmentStatus first (null, '', or 'unfulfilled' means not fulfilled)
     const isUnfulfilled = !fulfillmentStatus ||
-                          fulfillmentStatus === '' ||
-                          fulfillmentStatus === 'unfulfilled';
-    
-    // In transit: fulfilled but not delivered, failed, attempted_delivery, or out_for_delivery
-    const isInTransit = !isUnfulfilled && !isDelivered && !isFailed && !isAttemptedDelivery && !isOutForDelivery;
-    
-    return { isFailed, isDelivered, isUnfulfilled, isAttemptedDelivery, isInTransit, isOutForDelivery };
+      fulfillmentStatus === '' ||
+      fulfillmentStatus === 'unfulfilled';
+
+    // In transit: explicit keywords check
+    const isInTransit = !isUnfulfilled && !isDelivered && !isFailed &&
+      (deliveryStatus.includes('transit') || deliveryStatus.includes('shipped') || deliveryStatus.includes('picked'));
+
+    // Confirmed: Active but not yet moving (and not Unfulfilled in strict sense, though often overlaps or is Label Created)
+    // Captures "Ready to Ship", "Label Created", or just empty status if not caught by Unfulfilled
+    const isConfirmed = !isUnfulfilled && !isDelivered && !isFailed && !isAttemptedDelivery && !isOutForDelivery && !isInTransit;
+
+    return { isFailed, isDelivered, isUnfulfilled, isAttemptedDelivery, isInTransit, isOutForDelivery, isConfirmed };
   };
 
   // Orders for stats: month filter + exclude discarded/cancelled only (no status filter). Header stats never change when status filters are applied.
@@ -367,20 +422,28 @@ export function SalesPage() {
       !discardedOrderIds.has(order.id) && !order.cancelledAt
     );
     if (selectedMonthFilter !== 'all') {
-      let targetMonth: number;
-      let targetYear: number;
-      if (selectedMonthFilter === 'current') {
-        targetMonth = new Date().getMonth();
-        targetYear = new Date().getFullYear();
+      if (selectedMonthFilter === 'last30') {
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        thirtyDaysAgo.setHours(0, 0, 0, 0);
+        filtered = filtered.filter(order => new Date(order.createdAt) >= thirtyDaysAgo);
+      } else if (selectedMonthFilter === 'current') {
+        const now = new Date();
+        const targetMonth = now.getMonth();
+        const targetYear = now.getFullYear();
+        filtered = filtered.filter(order => {
+          const [y, m] = getOrderDateKey(order.createdAt).split('-').map(Number);
+          return y === targetYear && m - 1 === targetMonth;
+        });
       } else {
         const [year, month] = selectedMonthFilter.split('-');
-        targetYear = parseInt(year);
-        targetMonth = parseInt(month) - 1;
+        const targetYear = parseInt(year);
+        const targetMonth = parseInt(month) - 1;
+        filtered = filtered.filter(order => {
+          const [y, m] = getOrderDateKey(order.createdAt).split('-').map(Number);
+          return y === targetYear && m - 1 === targetMonth;
+        });
       }
-      filtered = filtered.filter(order => {
-        const [y, m] = getOrderDateKey(order.createdAt).split('-').map(Number);
-        return y === targetYear && m - 1 === targetMonth;
-      });
     }
     return filtered;
   };
@@ -390,17 +453,29 @@ export function SalesPage() {
   // Filter orders based on selected month, status filters, and exclude discarded/cancelled orders
   const getFilteredOrders = () => {
     let filtered = ordersForStats;
-    // Apply status filters (works with month filter via AND, multiple status filters use OR)
-    if (showUnfulfilled || showDelivered || showFailed || showAttemptedDelivery || showInTransit || showOutForDelivery) {
+
+    // Apply Payment Method filters
+    if (showPrepaid || showCOD) {
       filtered = filtered.filter(order => {
-        const { isFailed, isDelivered, isUnfulfilled, isAttemptedDelivery, isInTransit, isOutForDelivery } = getOrderStatus(order);
+        const isPrepaid = order.paymentMethod?.toLowerCase() === 'prepaid';
+        const isCOD = order.paymentMethod?.toLowerCase() === 'cod';
+        return (showPrepaid && isPrepaid) || (showCOD && isCOD);
+      });
+    }
+
+    // Apply status filters (works with month filter via AND, multiple status filters use OR)
+    if (showUnfulfilled || showDelivered || showFailed || showAttemptedDelivery || showInTransit || showOutForDelivery || showConfirmed) {
+      filtered = filtered.filter(order => {
+        const { isFailed, isDelivered, isUnfulfilled, isAttemptedDelivery, isInTransit, isOutForDelivery, isConfirmed } = getOrderStatus(order);
         const matchesUnfulfilled = showUnfulfilled && isUnfulfilled;
         const matchesDelivered = showDelivered && isDelivered;
         const matchesFailed = showFailed && isFailed;
         const matchesAttemptedDelivery = showAttemptedDelivery && isAttemptedDelivery;
         const matchesInTransit = showInTransit && isInTransit;
         const matchesOutForDelivery = showOutForDelivery && isOutForDelivery;
-        return matchesUnfulfilled || matchesDelivered || matchesFailed || matchesAttemptedDelivery || matchesInTransit || matchesOutForDelivery;
+        const matchesConfirmed = showConfirmed && isConfirmed; // Confirmed filter strictly for confirmed/label created status
+
+        return matchesUnfulfilled || matchesDelivered || matchesFailed || matchesAttemptedDelivery || matchesInTransit || matchesOutForDelivery || matchesConfirmed;
       });
     }
     return filtered;
@@ -409,7 +484,7 @@ export function SalesPage() {
   const filteredOrders = getFilteredOrders();
 
   const hasStatusFilter =
-    showUnfulfilled || showDelivered || showFailed || showAttemptedDelivery || showInTransit || showOutForDelivery;
+    showUnfulfilled || showDelivered || showFailed || showAttemptedDelivery || showInTransit || showOutForDelivery || showConfirmed;
 
   // Whether a date (YYYY-MM-DD) falls within the selected month filter
   const isDateInSelectedMonth = (dateKey: string): boolean => {
@@ -481,7 +556,7 @@ export function SalesPage() {
       if (!isDateInSelectedMonth(dateKey)) return;
       if (!byDate[dateKey]) byDate[dateKey] = [];
     });
-    
+
     const grouped = Object.entries(byDate)
       .sort(([a], [b]) => b.localeCompare(a))
       .map(([dateKey, orders]) => ({
@@ -490,12 +565,12 @@ export function SalesPage() {
         orders,
         adSpend: adSpendByDate[dateKey] ?? 0,
       }));
-    
+
     // Debug logging
     console.log('Orders grouped by date:', grouped.map(g => ({ date: g.dateKey, orderCount: g.orders.length, adSpend: g.adSpend })));
     console.log('Total ordersForStats:', ordersForStats.length);
     console.log('Filtered orders:', filteredOrders.length);
-    
+
     // Log ordersForStats date breakdown
     if (ordersForStats.length > 0) {
       const statsDateCounts: Record<string, number> = {};
@@ -505,7 +580,7 @@ export function SalesPage() {
       });
       console.log('OrdersForStats by date (after month filter):', statsDateCounts);
     }
-    
+
     return grouped;
   })();
 
@@ -513,7 +588,7 @@ export function SalesPage() {
   useEffect(() => {
     setSelectedOrders(new Set());
     setSelectAll(false);
-  }, [selectedMonthFilter, showUnfulfilled, showDelivered, showFailed, showAttemptedDelivery, showInTransit, showOutForDelivery]);
+  }, [selectedMonthFilter, showUnfulfilled, showDelivered, showFailed, showAttemptedDelivery, showInTransit, showOutForDelivery, showConfirmed, showPrepaid, showCOD]);
 
   // Calculate pending products from unfulfilled orders
   const getPendingProducts = () => {
@@ -525,8 +600,8 @@ export function SalesPage() {
     ];
 
     // Get unfulfilled orders (not cancelled, not discarded, fulfillmentStatus is null/unfulfilled)
-    let unfulfilledOrders = orders.filter(order => 
-      !order.cancelledAt && 
+    let unfulfilledOrders = orders.filter(order =>
+      !order.cancelledAt &&
       !discardedOrderIds.has(order.id) &&
       (!order.fulfillmentStatus || order.fulfillmentStatus.toLowerCase() === 'unfulfilled')
     );
@@ -558,11 +633,11 @@ export function SalesPage() {
     };
 
     // Aggregate products by variant
-    const productCounts: Record<string, { 
-      title: string; 
-      variantTitle: string; 
-      count: number; 
-      orderNumbers: string[] 
+    const productCounts: Record<string, {
+      title: string;
+      variantTitle: string;
+      count: number;
+      orderNumbers: string[]
     }> = {};
 
     unfulfilledOrders.forEach(order => {
@@ -574,7 +649,7 @@ export function SalesPage() {
 
         const key = `${item.title}${item.variantTitle ? ` - ${item.variantTitle}` : ''}`;
         const orderNum = extractOrderNumber(order.name);
-        
+
         if (productCounts[key]) {
           productCounts[key].count += item.quantity;
           if (!productCounts[key].orderNumbers.includes(orderNum)) {
@@ -631,12 +706,12 @@ export function SalesPage() {
 
       // Check delivery status
       const deliveryStatus = order.deliveryStatus?.toLowerCase() || '';
-      
+
       // Check if failed/NDR
       const isFailed = rtoOrderIds.has(order.id) ||
-                      deliveryStatus === 'failure' ||
-                      deliveryStatus.includes('failed') ||
-                      deliveryStatus.includes('rto');
+        deliveryStatus === 'failure' ||
+        deliveryStatus.includes('failed') ||
+        deliveryStatus.includes('rto');
 
       // Check if order has been fulfilled (shipped)
       // Use fulfillment_status - if it's 'fulfilled' or 'partial', the order has been fulfilled
@@ -649,7 +724,7 @@ export function SalesPage() {
 
       // Determine delivery status category
       const isDelivered = deliveryStatus === 'delivered';
-      
+
       // Count orders by delivery status
       if (isFailed) {
         // Failed/NDR orders
@@ -781,9 +856,9 @@ export function SalesPage() {
       const deliveryStatus = o.deliveryStatus?.toLowerCase() || '';
       const isDelivered = deliveryStatus === 'delivered';
       const isFailed = rtoOrderIds.has(o.id) ||
-                      deliveryStatus === 'failure' ||
-                      deliveryStatus.includes('failed') ||
-                      deliveryStatus.includes('rto');
+        deliveryStatus === 'failure' ||
+        deliveryStatus.includes('failed') ||
+        deliveryStatus.includes('rto');
       return isDelivered || isFailed || (o.paymentMethod?.toLowerCase() === 'prepaid');
     });
 
@@ -802,12 +877,12 @@ export function SalesPage() {
     const pendingOrders = ordersForStats.filter(o => {
       const deliveryStatus = o.deliveryStatus?.toLowerCase() || '';
       const isFailed = rtoOrderIds.has(o.id) ||
-                      deliveryStatus === 'failure' ||
-                      deliveryStatus.includes('failed') ||
-                      deliveryStatus.includes('rto');
+        deliveryStatus === 'failure' ||
+        deliveryStatus.includes('failed') ||
+        deliveryStatus.includes('rto');
       const isDelivered = deliveryStatus === 'delivered';
       const isPrepaid = o.paymentMethod?.toLowerCase() === 'prepaid';
-      
+
       // Include pending orders only (prepaid already counted in current P/L)
       return !isDelivered && !isFailed && !isPrepaid;
     });
@@ -818,18 +893,18 @@ export function SalesPage() {
     const historicalDeliveredOrders = orders.filter(o => {
       const orderDate = new Date(o.createdAt);
       const deliveryStatus = o.deliveryStatus?.toLowerCase() || '';
-      return orderDate >= historicalStartDate && 
-             !o.cancelledAt && 
-             !discardedOrderIds.has(o.id) &&
-             deliveryStatus === 'delivered';
+      return orderDate >= historicalStartDate &&
+        !o.cancelledAt &&
+        !discardedOrderIds.has(o.id) &&
+        deliveryStatus === 'delivered';
     });
 
     const totalHistoricalPL = Array.from(orderProfitLoss.entries())
       .filter(([orderId]) => historicalDeliveredOrders.some(o => o.id === orderId))
       .reduce((sum, [, pl]) => sum + pl, 0);
 
-    const avgPLPerDeliveredOrder = historicalDeliveredOrders.length > 0 
-      ? totalHistoricalPL / historicalDeliveredOrders.length 
+    const avgPLPerDeliveredOrder = historicalDeliveredOrders.length > 0
+      ? totalHistoricalPL / historicalDeliveredOrders.length
       : 0;
 
     // Expected P/L from pending orders (adjusted for NDR rate)
@@ -862,7 +937,7 @@ export function SalesPage() {
 
   const handleDiscardOrders = async () => {
     if (selectedOrders.size === 0) return;
-    
+
     setIsProcessing(true);
     try {
       const orderIds = Array.from(selectedOrders);
@@ -870,7 +945,7 @@ export function SalesPage() {
         const order = orders.find(o => o.id === id);
         return order?.name || '';
       });
-      
+
       const response = await api.discardOrders(orderIds, orderNames);
       if (response.success) {
         // Update local state
@@ -889,7 +964,7 @@ export function SalesPage() {
 
   const handleMarkAsRTO = async () => {
     if (selectedOrders.size === 0) return;
-    
+
     setIsProcessing(true);
     try {
       const orderIds = Array.from(selectedOrders);
@@ -897,7 +972,7 @@ export function SalesPage() {
         const order = orders.find(o => o.id === id);
         return order?.name || '';
       });
-      
+
       const response = await api.markOrdersAsRTO(orderIds, orderNames);
       if (response.success) {
         // Update local state
@@ -916,7 +991,7 @@ export function SalesPage() {
 
   const handleUnmarkRTO = async () => {
     if (selectedOrders.size === 0) return;
-    
+
     setIsProcessing(true);
     try {
       const orderIds = Array.from(selectedOrders);
@@ -948,7 +1023,7 @@ export function SalesPage() {
     if (!status) {
       return { text: '—', className: 'none' };
     }
-    
+
     switch (status.toLowerCase()) {
       case 'delivered':
         return { text: 'Delivered', className: 'delivered' };
@@ -977,19 +1052,19 @@ export function SalesPage() {
     // Only calculate for unfulfilled orders
     const fulfillmentStatus = order.fulfillmentStatus?.toLowerCase() || '';
     const isUnfulfilled = !fulfillmentStatus || fulfillmentStatus === '' || fulfillmentStatus === 'unfulfilled';
-    
+
     if (!isUnfulfilled) return null;
 
     const orderDate = new Date(order.createdAt);
     const today = new Date();
-    
+
     // Reset time parts to compare dates only
     orderDate.setHours(0, 0, 0, 0);
     today.setHours(0, 0, 0, 0);
-    
+
     const diffTime = today.getTime() - orderDate.getTime();
     const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-    
+
     // Return null for 0 days (same day orders - no delay)
     return diffDays > 0 ? diffDays : null;
   };
@@ -998,23 +1073,23 @@ export function SalesPage() {
   const getDelayDaysIncludingZero = (order: ShopifyOrder): number | null => {
     const fulfillmentStatus = order.fulfillmentStatus?.toLowerCase() || '';
     const isUnfulfilled = !fulfillmentStatus || fulfillmentStatus === '' || fulfillmentStatus === 'unfulfilled';
-    
+
     if (!isUnfulfilled) return null;
 
     const orderDate = new Date(order.createdAt);
     const today = new Date();
-    
+
     orderDate.setHours(0, 0, 0, 0);
     today.setHours(0, 0, 0, 0);
-    
+
     const diffTime = today.getTime() - orderDate.getTime();
     return Math.floor(diffTime / (1000 * 60 * 60 * 24));
   };
 
   // Get available delay days from unfulfilled orders
   const getAvailableDelayDays = (): number[] => {
-    const unfulfilledOrders = orders.filter(order => 
-      !order.cancelledAt && 
+    const unfulfilledOrders = orders.filter(order =>
+      !order.cancelledAt &&
       !discardedOrderIds.has(order.id) &&
       (!order.fulfillmentStatus || order.fulfillmentStatus.toLowerCase() === 'unfulfilled')
     );
@@ -1035,13 +1110,13 @@ export function SalesPage() {
     if (!order.lineItems || order.lineItems.length === 0) {
       return 'small'; // Default to small
     }
-    
+
     // Check if any line item contains "Large" in title or variant
-    const hasLarge = order.lineItems.some(item => 
-      item.title?.toLowerCase().includes('large') || 
+    const hasLarge = order.lineItems.some(item =>
+      item.title?.toLowerCase().includes('large') ||
       item.variantTitle?.toLowerCase().includes('large')
     );
-    
+
     return hasLarge ? 'large' : 'small';
   };
 
@@ -1051,26 +1126,26 @@ export function SalesPage() {
     if (rtoOrderIds.has(order.id)) {
       return false;
     }
-    
+
     // Check delivery status
     const status = order.deliveryStatus?.toLowerCase() || '';
-    
+
     // NDR statuses: failed, RTO-related (attempted_delivery excluded from failed)
     const ndrStatuses = ['failed', 'rto', 'return'];
     if (ndrStatuses.some(s => status.includes(s))) {
       return false;
     }
-    
+
     // Delivered status means we got the money
     if (status === 'delivered') {
       return true;
     }
-    
+
     // Prepaid orders = already got the money, so treat as delivered for P/L calculation
     if (order.paymentMethod?.toLowerCase() === 'prepaid') {
       return true;
     }
-    
+
     // In transit, confirmed, etc. are considered as not yet delivered (but not NDR either)
     // For P/L calculation, we'll treat these as "not delivered" = no revenue yet
     // But we won't apply NDR costs, just show 0 P/L
@@ -1082,22 +1157,22 @@ export function SalesPage() {
     if (!order.shippingBreakdown) {
       return order.shippingCharge || 0;
     }
-    
+
     const { freightForward, freightCOD, freightRTO, whatsappCharges, otherCharges } = order.shippingBreakdown;
-    
+
     // Check if this is an RTO COD order
-    const isRTO = rtoOrderIds.has(order.id) || 
-                  order.deliveryStatus?.toLowerCase().includes('rto') ||
-                  order.deliveryStatus?.toLowerCase().includes('failed') ||
-                  freightRTO > 0;
+    const isRTO = rtoOrderIds.has(order.id) ||
+      order.deliveryStatus?.toLowerCase().includes('rto') ||
+      order.deliveryStatus?.toLowerCase().includes('failed') ||
+      freightRTO > 0;
     const isCODPayment = order.paymentMethod?.toLowerCase() === 'cod';
-    
+
     // For RTO COD orders: COD is charged then reversed (net = 0)
     // So we don't include COD in the total for RTO COD orders
     if (isRTO && isCODPayment) {
       return freightForward + freightRTO + whatsappCharges + otherCharges;
     }
-    
+
     // For all other orders: include COD normally
     return freightForward + freightCOD + freightRTO + whatsappCharges + otherCharges;
   }, [rtoOrderIds]);
@@ -1107,7 +1182,7 @@ export function SalesPage() {
     if (cogsConfig.length === 0) {
       return 0;
     }
-    
+
     const variant = detectVariant(order);
     const isDelivered = isOrderDelivered(order);
     const status = order.deliveryStatus?.toLowerCase() || '';
@@ -1116,11 +1191,11 @@ export function SalesPage() {
       status.includes('failed') ||
       status.includes('rto');
     const paymentMethod = order.paymentMethod?.toLowerCase() === 'prepaid' ? 'prepaid' : 'cod';
-    
+
     // Determine revenue and which fields to use
     let revenue = 0;
     let fieldsToUse: COGSField[] = [];
-    
+
     if (isDelivered) {
       // Delivered = Got money
       revenue = order.totalPrice || 0;
@@ -1135,26 +1210,26 @@ export function SalesPage() {
       revenue = 0;
       fieldsToUse = cogsConfig.filter(f => f.type === 'cogs' || f.type === 'both');
     }
-    
+
     // Calculate total costs using variant + payment method
     let totalCosts = 0;
     fieldsToUse.forEach(field => {
       // Get the correct value based on variant and payment method
       const key = `${variant}${paymentMethod === 'prepaid' ? 'Prepaid' : 'COD'}Value` as keyof COGSField;
       let value = field[key] as number;
-      
+
       // Fallback to old structure if new structure not available
       if (value === undefined || value === null) {
         value = variant === 'small' ? (field.smallValue || 0) : (field.largeValue || 0);
       }
-      
+
       if (field.calculationType === 'fixed') {
         totalCosts += value;
       } else {
         // Percentage calculation based on type
         const salePrice = order.totalPrice || 0;
         const percentageType = field.percentageType || 'excluded'; // Default to excluded for backwards compatibility
-        
+
         if (percentageType === 'included') {
           // Included: percentage is part of total amount
           // Formula: amount × (percentage / (100 + percentage))
@@ -1172,7 +1247,7 @@ export function SalesPage() {
     const orderDateStr = getOrderDateKey(order.createdAt);
     const adCost = adCostPerOrderByDate[orderDateStr] ?? 0;
     const shippingCharge = calculateActualShippingCharge(order);
-    
+
     return revenue - totalCosts - adCost - shippingCharge;
   }, [cogsConfig, isOrderDelivered, adCostPerOrderByDate, rtoOrderIds, calculateActualShippingCharge]);
 
@@ -1210,11 +1285,11 @@ export function SalesPage() {
 
   const handleMarkDeliveryStatus = async (status: 'Delivered' | 'Failed') => {
     if (!selectedOrderForStatus) return;
-    
+
     setUpdatingStatus(true);
     try {
       const response = await api.updateOrderDeliveryStatus(selectedOrderForStatus.name, status);
-      
+
       if (response.success) {
         // Reload data to reflect the change
         await loadData();
@@ -1244,8 +1319,8 @@ export function SalesPage() {
     // Filter fields based on config type
     const fieldsToUse: COGSField[] =
       configType === 'cogs' ? fields.filter(f => f.type === 'cogs' || f.type === 'both') :
-      configType === 'ndr' ? fields.filter(f => f.type === 'ndr' || f.type === 'both') :
-      fields; // 'both' uses all fields
+        configType === 'ndr' ? fields.filter(f => f.type === 'ndr' || f.type === 'both') :
+          fields; // 'both' uses all fields
 
     fieldsToUse.forEach(field => {
       // Get the correct value based on variant and payment method
@@ -1300,7 +1375,7 @@ export function SalesPage() {
       .filter(item => item.fieldName !== 'Ad cost (Meta)')
       .reduce((sum, item) => sum + item.calculatedCost, 0);
   };
-  
+
   const getAdCost = () => {
     return adCostPerOrderByDate[getOrderDateKey(selectedOrderForCogs?.createdAt || '')] ?? 0;
   };
@@ -1398,8 +1473,8 @@ export function SalesPage() {
                 title="Show pending products to fulfill"
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
-                  <path d="M9 12h6m-6 4h6"/>
+                  <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                  <path d="M9 12h6m-6 4h6" />
                 </svg>
                 Show Pending
               </button>
@@ -1409,22 +1484,22 @@ export function SalesPage() {
                 className={styles['refresh-btn']}
                 title="Refresh orders from Shopify"
               >
-                <svg 
-                  viewBox="0 0 24 24" 
-                  fill="none" 
-                  stroke="currentColor" 
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
                   strokeWidth="2"
                   className={isRefreshing ? styles.spinning : ''}
                 >
-                  <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+                  <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2" />
                 </svg>
                 {isRefreshing ? 'Refreshing...' : 'Refresh'}
               </button>
               <div className={styles['month-filter']}>
                 <label htmlFor="month-select">Period:</label>
-                <select 
+                <select
                   id="month-select"
-                  value={selectedMonthFilter} 
+                  value={selectedMonthFilter}
                   onChange={(e) => {
                     setSelectedMonthFilter(e.target.value);
                     setSelectedOrders(new Set());
@@ -1433,6 +1508,7 @@ export function SalesPage() {
                   className={styles['filter-select']}
                 >
                   <option value="all">All Time</option>
+                  <option value="last30">Last 30 Days</option>
                   <option value="current">This Month</option>
                   {availableMonths.length > 0 && <option disabled>───────────</option>}
                   {availableMonths.map(monthKey => (
@@ -1446,50 +1522,50 @@ export function SalesPage() {
                 <div className={styles['bulk-actions']}>
                   <span className={styles['selected-count']}>{selectedOrders.size} selected</span>
                   <div className={styles['bulk-action-dropdown']}>
-                    <button 
+                    <button
                       className={styles['bulk-action-btn']}
                       onClick={() => setShowBulkMenu(!showBulkMenu)}
                       disabled={isProcessing}
                     >
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M12 5v14"/>
-                        <path d="M19 12l-7 7-7-7"/>
+                        <path d="M12 5v14" />
+                        <path d="M19 12l-7 7-7-7" />
                       </svg>
                       {isProcessing ? 'Processing...' : 'Actions'}
                     </button>
                     {showBulkMenu && (
                       <div className={styles['bulk-menu']}>
-                        <button 
+                        <button
                           className={`${styles['bulk-menu-item']} ${styles.rto}`}
                           onClick={handleMarkAsRTO}
                         >
                           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path d="M9 11l-6 6v-6h6z"/>
-                            <path d="M20 12h-8"/>
-                            <path d="M20 12l-4-4"/>
-                            <path d="M20 12l-4 4"/>
+                            <path d="M9 11l-6 6v-6h6z" />
+                            <path d="M20 12h-8" />
+                            <path d="M20 12l-4-4" />
+                            <path d="M20 12l-4 4" />
                           </svg>
                           Mark as RTO
                         </button>
-                        <button 
+                        <button
                           className={`${styles['bulk-menu-item']} ${styles['unmark-rto']}`}
                           onClick={handleUnmarkRTO}
                         >
                           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path d="M18 6L6 18"/>
-                            <path d="M6 6l12 12"/>
+                            <path d="M18 6L6 18" />
+                            <path d="M6 6l12 12" />
                           </svg>
                           Unmark RTO
                         </button>
                         <div className={styles['menu-divider']}></div>
-                        <button 
+                        <button
                           className={`${styles['bulk-menu-item']} ${styles.discard}`}
                           onClick={handleDiscardOrders}
                         >
                           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <circle cx="12" cy="12" r="10"/>
-                            <path d="M15 9l-6 6"/>
-                            <path d="M9 9l6 6"/>
+                            <circle cx="12" cy="12" r="10" />
+                            <path d="M15 9l-6 6" />
+                            <path d="M9 9l6 6" />
                           </svg>
                           Discard Orders
                         </button>
@@ -1524,9 +1600,9 @@ export function SalesPage() {
                 const deliveryStatus = o.deliveryStatus?.toLowerCase() || '';
                 const isDelivered = deliveryStatus === 'delivered';
                 const isFailed = rtoOrderIds.has(o.id) ||
-                                deliveryStatus === 'failure' ||
-                                deliveryStatus.includes('failed') ||
-                                deliveryStatus.includes('rto');
+                  deliveryStatus === 'failure' ||
+                  deliveryStatus.includes('failed') ||
+                  deliveryStatus.includes('rto');
                 return isDelivered || isFailed || (o.paymentMethod?.toLowerCase() === 'prepaid');
               });
               let totalPL = Array.from(orderProfitLoss.entries())
@@ -1544,9 +1620,9 @@ export function SalesPage() {
                   const deliveryStatus = o.deliveryStatus?.toLowerCase() || '';
                   const isDelivered = deliveryStatus === 'delivered';
                   const isFailed = rtoOrderIds.has(o.id) ||
-                                  deliveryStatus === 'failure' ||
-                                  deliveryStatus.includes('failed') ||
-                                  deliveryStatus.includes('rto');
+                    deliveryStatus === 'failure' ||
+                    deliveryStatus.includes('failed') ||
+                    deliveryStatus.includes('rto');
                   return isDelivered || isFailed || (o.paymentMethod?.toLowerCase() === 'prepaid');
                 });
                 let totalPL = Array.from(orderProfitLoss.entries())
@@ -1574,7 +1650,7 @@ export function SalesPage() {
                 {expectedProfit.expectedPL > 0 ? '+' : ''}₹{formatIndianNumber(expectedProfit.expectedPL, 0)}
               </div>
               <div className={styles['stat-subtext']} title={`Current P/L: ₹${formatIndianNumber(expectedProfit.currentPL, 0)} | Pending (${expectedProfit.pendingOrdersCount} orders): +₹${formatIndianNumber(expectedProfit.expectedPendingPL, 0)} | Future (${expectedProfit.remainingDays}d): +₹${formatIndianNumber(expectedProfit.expectedFuturePL, 0)} | Avg per order: ₹${formatIndianNumber(expectedProfit.avgPLPerDeliveredOrder, 0)}`}>
-                {expectedProfit.isCurrentMonth 
+                {expectedProfit.isCurrentMonth
                   ? `Day ${expectedProfit.daysElapsed}/${expectedProfit.totalDays} • ${formatIndianNumber(expectedProfit.pendingOrdersCount, 0)} pending`
                   : `${formatIndianNumber(expectedProfit.pendingOrdersCount, 0)} pending orders`
                 }
@@ -1641,8 +1717,8 @@ export function SalesPage() {
             className={`${styles['filter-chip']} ${showUnfulfilled ? styles.active : ''}`}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10"/>
-              <path d="M12 6v6l4 2"/>
+              <circle cx="12" cy="12" r="10" />
+              <path d="M12 6v6l4 2" />
             </svg>
             Unfulfilled
           </button>
@@ -1651,8 +1727,8 @@ export function SalesPage() {
             className={`${styles['filter-chip']} ${showDelivered ? styles.active : ''}`}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
-              <polyline points="22 4 12 14.01 9 11.01"/>
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+              <polyline points="22 4 12 14.01 9 11.01" />
             </svg>
             Delivered
           </button>
@@ -1661,9 +1737,9 @@ export function SalesPage() {
             className={`${styles['filter-chip']} ${showFailed ? styles.active : ''}`}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10"/>
-              <line x1="15" y1="9" x2="9" y2="15"/>
-              <line x1="9" y1="9" x2="15" y2="15"/>
+              <circle cx="12" cy="12" r="10" />
+              <line x1="15" y1="9" x2="9" y2="15" />
+              <line x1="9" y1="9" x2="15" y2="15" />
             </svg>
             Failed
           </button>
@@ -1672,21 +1748,31 @@ export function SalesPage() {
             className={`${styles['filter-chip']} ${showAttemptedDelivery ? styles.active : ''}`}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10"/>
-              <line x1="12" y1="8" x2="12" y2="12"/>
-              <line x1="12" y1="16" x2="12.01" y2="16"/>
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
             </svg>
             Attempted Delivery
+          </button>
+          <button
+            onClick={() => setShowConfirmed(!showConfirmed)}
+            className={`${styles['filter-chip']} ${showConfirmed ? styles.active : ''}`}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+              <polyline points="22 4 12 14.01 9 11.01" />
+            </svg>
+            Confirmed
           </button>
           <button
             onClick={() => setShowInTransit(!showInTransit)}
             className={`${styles['filter-chip']} ${showInTransit ? styles.active : ''}`}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="1" y="3" width="15" height="13"/>
-              <polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/>
-              <circle cx="5.5" cy="18.5" r="2.5"/>
-              <circle cx="18.5" cy="18.5" r="2.5"/>
+              <rect x="1" y="3" width="15" height="13" />
+              <polygon points="16 8 20 8 23 11 23 16 16 16 16 8" />
+              <circle cx="5.5" cy="18.5" r="2.5" />
+              <circle cx="18.5" cy="18.5" r="2.5" />
             </svg>
             In Transit
           </button>
@@ -1695,12 +1781,12 @@ export function SalesPage() {
             className={`${styles['filter-chip']} ${showOutForDelivery ? styles.active : ''}`}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M9 11l3 3L22 4"/>
-              <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>
+              <path d="M9 11l3 3L22 4" />
+              <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
             </svg>
             Out for Delivery
           </button>
-          {(showUnfulfilled || showDelivered || showFailed || showAttemptedDelivery || showInTransit || showOutForDelivery) && (
+          {(showUnfulfilled || showDelivered || showFailed || showAttemptedDelivery || showInTransit || showOutForDelivery || showConfirmed) && (
             <button
               onClick={() => {
                 setShowUnfulfilled(false);
@@ -1709,6 +1795,7 @@ export function SalesPage() {
                 setShowAttemptedDelivery(false);
                 setShowInTransit(false);
                 setShowOutForDelivery(false);
+                setShowConfirmed(false);
               }}
               className={styles['clear-filters-btn']}
             >
@@ -1771,13 +1858,13 @@ export function SalesPage() {
           <div className={styles['drawer']} onClick={(e) => e.stopPropagation()}>
             <div className={styles['drawer-header']}>
               <h3>Pending Products to Fulfill</h3>
-              <button 
-                className={styles['drawer-close']} 
+              <button
+                className={styles['drawer-close']}
                 onClick={() => setShowPendingDrawer(false)}
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="18" y1="6" x2="6" y2="18"/>
-                  <line x1="6" y1="6" x2="18" y2="18"/>
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
                 </svg>
               </button>
             </div>
@@ -1806,14 +1893,14 @@ export function SalesPage() {
                     onClick={() => setShowDelayDropdown(!showDelayDropdown)}
                     className={`${styles['dropdown-trigger']} ${pendingFilterDelayDays.size > 0 ? styles.active : ''}`}
                   >
-                    {pendingFilterDelayDays.size > 0 
-                      ? `${pendingFilterDelayDays.size} selected` 
+                    {pendingFilterDelayDays.size > 0
+                      ? `${pendingFilterDelayDays.size} selected`
                       : 'Select delay days'}
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <polyline points="6 9 12 15 18 9"/>
+                      <polyline points="6 9 12 15 18 9" />
                     </svg>
                   </button>
-                  
+
                   {showDelayDropdown && (
                     <div className={styles['dropdown-menu']}>
                       {getAvailableDelayDays().map(days => (
@@ -1857,7 +1944,7 @@ export function SalesPage() {
               {getPendingProducts().length === 0 ? (
                 <div className={styles['drawer-empty']}>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <polyline points="20 6 9 17 4 12"/>
+                    <polyline points="20 6 9 17 4 12" />
                   </svg>
                   <p>No pending products</p>
                   <span>All orders are fulfilled!</span>
@@ -1893,8 +1980,8 @@ export function SalesPage() {
           <div className={styles['modal-content']} onClick={(e) => e.stopPropagation()}>
             <div className={styles['modal-header']}>
               <h3>Profit/Loss Calculator</h3>
-              <button 
-                className={styles['modal-close']} 
+              <button
+                className={styles['modal-close']}
                 onClick={() => setShowCogsModal(false)}
               >
                 ×
@@ -1945,9 +2032,9 @@ export function SalesPage() {
                           <div className={styles['breakdown-info']}>
                             <span className={styles['breakdown-name']}>{item.fieldName}</span>
                             <span className={styles['breakdown-type']}>
-                            {item.calculationType === 'percentage' 
-                              ? `${formatIndianNumber(item.value, 1)}%` 
-                              : `₹${formatIndianNumber(item.value)}`}
+                              {item.calculationType === 'percentage'
+                                ? `${formatIndianNumber(item.value, 1)}%`
+                                : `₹${formatIndianNumber(item.value)}`}
                             </span>
                           </div>
                           <span className={styles['breakdown-cost']}>
@@ -1980,61 +2067,36 @@ export function SalesPage() {
                 <h3 className={styles['section-title']}>Shipping Charges</h3>
                 <div className={styles['breakdown-list']}>
                   {selectedOrderForCogs.shippingCharge && selectedOrderForCogs.shippingCharge > 0 ? (
+                    <>
+                      {selectedOrderForCogs.shippingBreakdown ? (
                         <>
-                          {selectedOrderForCogs.shippingBreakdown ? (
-                            <>
-                              {/* Detailed breakdown if available */}
-                              {selectedOrderForCogs.shippingBreakdown.freightForward > 0 && (
-                                <div className={styles['breakdown-item']}>
-                                  <div className={styles['breakdown-info']}>
-                                    <span className={styles['breakdown-name']}>Base Freight</span>
-                                    <span className={styles['breakdown-type']}>Shiprocket</span>
-                                  </div>
-                                  <span className={styles['breakdown-cost']}>
-                                    ₹{formatIndianNumber(selectedOrderForCogs.shippingBreakdown.freightForward)}
-                                  </span>
-                                </div>
-                              )}
-                              {selectedOrderForCogs.shippingBreakdown.freightCOD !== 0 && (() => {
-                                // COD is only reversed when: order is RTO AND payment method is COD
-                                // Check for RTO: in RTO list, status contains RTO/failed, OR has RTO charges
-                                const isRTO = rtoOrderIds.has(selectedOrderForCogs.id) || 
-                                              selectedOrderForCogs.deliveryStatus?.toLowerCase().includes('rto') ||
-                                              selectedOrderForCogs.deliveryStatus?.toLowerCase().includes('failed') ||
-                                              (selectedOrderForCogs.shippingBreakdown.freightRTO || 0) > 0; // Has RTO charges
-                                const isCODPayment = selectedOrderForCogs.paymentMethod?.toLowerCase() === 'cod';
-                                const shouldReverse = isRTO && isCODPayment && selectedOrderForCogs.shippingBreakdown.freightCOD > 0;
-                                
-                                // For RTO orders, show both charge and reversal
-                                if (shouldReverse) {
-                                  return (
-                                    <>
-                                      {/* Initial COD charge */}
-                                      <div className={styles['breakdown-item']}>
-                                        <div className={styles['breakdown-info']}>
-                                          <span className={styles['breakdown-name']}>Freight COD</span>
-                                          <span className={styles['breakdown-type']}>Applied</span>
-                                        </div>
-                                        <span className={styles['breakdown-cost']}>
-                                          ₹{formatIndianNumber(Math.abs(selectedOrderForCogs.shippingBreakdown.freightCOD))}
-                                        </span>
-                                      </div>
-                                      {/* COD reversal */}
-                                      <div className={styles['breakdown-item']}>
-                                        <div className={styles['breakdown-info']}>
-                                          <span className={styles['breakdown-name']}>Freight COD Reversal</span>
-                                          <span className={styles['breakdown-type']}>RTO Refund</span>
-                                        </div>
-                                        <span className={styles['breakdown-cost']} style={{ color: '#10b981' }}>
-                                          -₹{formatIndianNumber(Math.abs(selectedOrderForCogs.shippingBreakdown.freightCOD))}
-                                        </span>
-                                      </div>
-                                    </>
-                                  );
-                                }
-                                
-                                // For non-RTO orders, show single line
-                                return (
+                          {/* Detailed breakdown if available */}
+                          {selectedOrderForCogs.shippingBreakdown.freightForward > 0 && (
+                            <div className={styles['breakdown-item']}>
+                              <div className={styles['breakdown-info']}>
+                                <span className={styles['breakdown-name']}>Base Freight</span>
+                                <span className={styles['breakdown-type']}>Shiprocket</span>
+                              </div>
+                              <span className={styles['breakdown-cost']}>
+                                ₹{formatIndianNumber(selectedOrderForCogs.shippingBreakdown.freightForward)}
+                              </span>
+                            </div>
+                          )}
+                          {selectedOrderForCogs.shippingBreakdown.freightCOD !== 0 && (() => {
+                            // COD is only reversed when: order is RTO AND payment method is COD
+                            // Check for RTO: in RTO list, status contains RTO/failed, OR has RTO charges
+                            const isRTO = rtoOrderIds.has(selectedOrderForCogs.id) ||
+                              selectedOrderForCogs.deliveryStatus?.toLowerCase().includes('rto') ||
+                              selectedOrderForCogs.deliveryStatus?.toLowerCase().includes('failed') ||
+                              (selectedOrderForCogs.shippingBreakdown.freightRTO || 0) > 0; // Has RTO charges
+                            const isCODPayment = selectedOrderForCogs.paymentMethod?.toLowerCase() === 'cod';
+                            const shouldReverse = isRTO && isCODPayment && selectedOrderForCogs.shippingBreakdown.freightCOD > 0;
+
+                            // For RTO orders, show both charge and reversal
+                            if (shouldReverse) {
+                              return (
+                                <>
+                                  {/* Initial COD charge */}
                                   <div className={styles['breakdown-item']}>
                                     <div className={styles['breakdown-info']}>
                                       <span className={styles['breakdown-name']}>Freight COD</span>
@@ -2044,60 +2106,85 @@ export function SalesPage() {
                                       ₹{formatIndianNumber(Math.abs(selectedOrderForCogs.shippingBreakdown.freightCOD))}
                                     </span>
                                   </div>
-                                );
-                              })()}
-                              {selectedOrderForCogs.shippingBreakdown.freightRTO > 0 && (
-                                <div className={styles['breakdown-item']}>
-                                  <div className={styles['breakdown-info']}>
-                                    <span className={styles['breakdown-name']}>Freight RTO</span>
-                                    <span className={styles['breakdown-type']}>Return</span>
+                                  {/* COD reversal */}
+                                  <div className={styles['breakdown-item']}>
+                                    <div className={styles['breakdown-info']}>
+                                      <span className={styles['breakdown-name']}>Freight COD Reversal</span>
+                                      <span className={styles['breakdown-type']}>RTO Refund</span>
+                                    </div>
+                                    <span className={styles['breakdown-cost']} style={{ color: '#10b981' }}>
+                                      -₹{formatIndianNumber(Math.abs(selectedOrderForCogs.shippingBreakdown.freightCOD))}
+                                    </span>
                                   </div>
-                                  <span className={styles['breakdown-cost']}>
-                                    ₹{formatIndianNumber(selectedOrderForCogs.shippingBreakdown.freightRTO)}
-                                  </span>
+                                </>
+                              );
+                            }
+
+                            // For non-RTO orders, show single line
+                            return (
+                              <div className={styles['breakdown-item']}>
+                                <div className={styles['breakdown-info']}>
+                                  <span className={styles['breakdown-name']}>Freight COD</span>
+                                  <span className={styles['breakdown-type']}>Applied</span>
                                 </div>
-                              )}
-                              {selectedOrderForCogs.shippingBreakdown.whatsappCharges > 0 && (
-                                <div className={styles['breakdown-item']}>
-                                  <div className={styles['breakdown-info']}>
-                                    <span className={styles['breakdown-name']}>WhatsApp Charges</span>
-                                    <span className={styles['breakdown-type']}>Communication</span>
-                                  </div>
-                                  <span className={styles['breakdown-cost']}>
-                                    ₹{formatIndianNumber(selectedOrderForCogs.shippingBreakdown.whatsappCharges)}
-                                  </span>
-                                </div>
-                              )}
-                              {selectedOrderForCogs.shippingBreakdown.otherCharges > 0 && (
-                                <div className={styles['breakdown-item']}>
-                                  <div className={styles['breakdown-info']}>
-                                    <span className={styles['breakdown-name']}>Other Charges</span>
-                                    <span className={styles['breakdown-type']}>Misc</span>
-                                  </div>
-                                  <span className={styles['breakdown-cost']}>
-                                    ₹{formatIndianNumber(selectedOrderForCogs.shippingBreakdown.otherCharges)}
-                                  </span>
-                                </div>
-                              )}
-                            </>
-                          ) : (
-                            /* Simple total if no breakdown */
+                                <span className={styles['breakdown-cost']}>
+                                  ₹{formatIndianNumber(Math.abs(selectedOrderForCogs.shippingBreakdown.freightCOD))}
+                                </span>
+                              </div>
+                            );
+                          })()}
+                          {selectedOrderForCogs.shippingBreakdown.freightRTO > 0 && (
                             <div className={styles['breakdown-item']}>
                               <div className={styles['breakdown-info']}>
-                                <span className={styles['breakdown-name']}>Shipping Charge</span>
-                                <span className={styles['breakdown-type']}>Shiprocket</span>
+                                <span className={styles['breakdown-name']}>Freight RTO</span>
+                                <span className={styles['breakdown-type']}>Return</span>
                               </div>
                               <span className={styles['breakdown-cost']}>
-                                ₹{formatIndianNumber(selectedOrderForCogs.shippingCharge)}
+                                ₹{formatIndianNumber(selectedOrderForCogs.shippingBreakdown.freightRTO)}
+                              </span>
+                            </div>
+                          )}
+                          {selectedOrderForCogs.shippingBreakdown.whatsappCharges > 0 && (
+                            <div className={styles['breakdown-item']}>
+                              <div className={styles['breakdown-info']}>
+                                <span className={styles['breakdown-name']}>WhatsApp Charges</span>
+                                <span className={styles['breakdown-type']}>Communication</span>
+                              </div>
+                              <span className={styles['breakdown-cost']}>
+                                ₹{formatIndianNumber(selectedOrderForCogs.shippingBreakdown.whatsappCharges)}
+                              </span>
+                            </div>
+                          )}
+                          {selectedOrderForCogs.shippingBreakdown.otherCharges > 0 && (
+                            <div className={styles['breakdown-item']}>
+                              <div className={styles['breakdown-info']}>
+                                <span className={styles['breakdown-name']}>Other Charges</span>
+                                <span className={styles['breakdown-type']}>Misc</span>
+                              </div>
+                              <span className={styles['breakdown-cost']}>
+                                ₹{formatIndianNumber(selectedOrderForCogs.shippingBreakdown.otherCharges)}
                               </span>
                             </div>
                           )}
                         </>
                       ) : (
-                        <p className={styles['no-data']}>No shipping charges available</p>
+                        /* Simple total if no breakdown */
+                        <div className={styles['breakdown-item']}>
+                          <div className={styles['breakdown-info']}>
+                            <span className={styles['breakdown-name']}>Shipping Charge</span>
+                            <span className={styles['breakdown-type']}>Shiprocket</span>
+                          </div>
+                          <span className={styles['breakdown-cost']}>
+                            ₹{formatIndianNumber(selectedOrderForCogs.shippingCharge)}
+                          </span>
+                        </div>
                       )}
-                    </div>
-                  </div>
+                    </>
+                  ) : (
+                    <p className={styles['no-data']}>No shipping charges available</p>
+                  )}
+                </div>
+              </div>
 
               {/* Section 5: Total Costs Summary */}
               <div className={styles['cost-section']}>
