@@ -408,6 +408,10 @@ export function DashboardPage() {
     for (let i = 29; i >= 0; i--) {
       const date = new Date(now);
       date.setDate(date.getDate() - i);
+
+      // Skip data before Jan 28, 2026
+      if (date < new Date('2026-01-28')) continue;
+
       const dateKey = date.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
       const revenue = revenueByDate[dateKey] || 0;
       const adSpend = adSpendByDate[dateKey] || 0;
@@ -605,97 +609,126 @@ export function DashboardPage() {
       return hasLarge ? 'large' : 'small';
     };
 
-    // Calculate average costs per order from delivered AND failed orders
+    // Filter orders to only include "Completed Days" within the last 30 days
+    // A Completed Day is a day where ALL orders have a final status (Delivered, Failed, RTO).
+    // This removes bias from pending orders.
+
+    // 1. Group orders by date
+    const ordersByDate: Record<string, ShopifyOrder[]> = {};
+    const now = new Date();
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    thirtyDaysAgo.setHours(0, 0, 0, 0);
+
+    const cutoffDate = new Date('2026-01-28');
+    // Ensure we don't look back further than Jan 28
+    const effectiveStartDate = cutoffDate > thirtyDaysAgo ? cutoffDate : thirtyDaysAgo;
+
+    orders.forEach((o) => {
+      if (o.cancelledAt) return;
+      const d = getOrderDateKey(o.createdAt);
+      if (!ordersByDate[d]) ordersByDate[d] = [];
+      ordersByDate[d].push(o);
+    });
+
+    // 2. Identify Completed Days and aggregate data
     let totalRevenue = 0;
     let totalCOGS = 0;
     let totalShipping = 0;
     let deliveredCount = 0;
     let failedCount = 0;
+    let completedDaysCount = 0;
 
-    orders.forEach((order) => {
-      if (order.cancelledAt) return;
-
-      const variant = detectVariant(order);
-      const paymentMethod = order.paymentMethod?.toLowerCase() === 'prepaid' ? 'prepaid' : 'cod';
+    // Helper to check final status (duplicated from lower scope, but needed here)
+    const isOrderFinal = (order: ShopifyOrder) => {
       const status = order.deliveryStatus?.toLowerCase() || '';
-
-      const isDelivered = status === 'delivered' ||
-        (paymentMethod === 'prepaid' && !rtoOrderIds.has(order.id));
+      const isDelivered = status === 'delivered';
       const isFailed = rtoOrderIds.has(order.id) ||
         status === 'failure' ||
         status.includes('failed') ||
         status.includes('rto');
+      // Prepaid orders are often assumed delivered if not failed, but for "Completed Day" validaton
+      // we should be strict. However, the existing logic assumes Prepaid = Delivered often.
+      // Let's stick to the strict definition used in profitChart:
+      // isOrderFinalStatus there checks Delivered OR Failed. 
+      // But wait, existing isOrderFinalStatus also returns true for Prepaid.
+      // Let's use the same logic as the profit chart to match "this widget".
+      const isPrepaid = order.paymentMethod?.toLowerCase() === 'prepaid';
+      return isDelivered || isFailed || isPrepaid;
+    };
 
-      // Only count delivered or failed orders for breakeven calculation
-      if (!isDelivered && !isFailed) return;
+    Object.keys(ordersByDate).forEach((dateKey) => {
+      // Check if date is within last 30 days AND after cutoff
+      const dateObj = new Date(dateKey);
+      if (dateObj < effectiveStartDate || dateObj > now) return;
 
-      if (isDelivered) {
-        deliveredCount++;
-        totalRevenue += order.totalPrice || 0;
+      const dayOrders = ordersByDate[dateKey];
+      const allComplete = dayOrders.length > 0 && dayOrders.every(isOrderFinal);
 
-        // Calculate COGS from configuration (delivered = COGS type)
-        const key = `${variant}${paymentMethod === 'prepaid' ? 'Prepaid' : 'COD'}Value` as keyof COGSField;
-        let orderCOGS = 0;
+      if (allComplete) {
+        completedDaysCount++;
+        dayOrders.forEach((order) => {
+          const variant = detectVariant(order);
+          const paymentMethod = order.paymentMethod?.toLowerCase() === 'prepaid' ? 'prepaid' : 'cod';
+          const status = order.deliveryStatus?.toLowerCase() || '';
 
-        const fieldsToUse = cogsFields.filter(f => f.type === 'cogs' || f.type === 'both');
-        fieldsToUse.forEach((field) => {
-          let value = field[key] as number;
-          if (value === undefined || value === null) value = 0;
+          const isDelivered = status === 'delivered' || (paymentMethod === 'prepaid' && !rtoOrderIds.has(order.id));
+          const isFailed = !isDelivered && (rtoOrderIds.has(order.id) || status === 'failure' || status.includes('failed') || status.includes('rto'));
 
-          if (field.calculationType === 'fixed') {
-            orderCOGS += value;
-          } else {
-            const salePrice = order.totalPrice || 0;
-            const pct = field.percentageType || 'excluded';
-            orderCOGS += pct === 'included'
-              ? (value / (100 + value)) * salePrice
-              : (value / 100) * salePrice;
+          // Determine if we should count this order's financials
+          // In "Completed Day", every order is either Delivered (Revenue + COGS + Ship) or Failed (0 Rev + NDR + Ship).
+
+          if (isDelivered) {
+            deliveredCount++;
+            totalRevenue += order.totalPrice || 0;
+
+            // COGS
+            const key = `${variant}${paymentMethod === 'prepaid' ? 'Prepaid' : 'COD'}Value` as keyof COGSField;
+            let orderCOGS = 0;
+            cogsFields.filter(f => f.type === 'cogs' || f.type === 'both').forEach(field => {
+              let value = field[key] as number || 0;
+              if (field.calculationType === 'fixed') {
+                orderCOGS += value;
+              } else {
+                const salePrice = order.totalPrice || 0;
+                const pct = field.percentageType || 'excluded';
+                orderCOGS += pct === 'included' ? (value / (100 + value)) * salePrice : (value / 100) * salePrice;
+              }
+            });
+            totalCOGS += orderCOGS;
+
+          } else if (isFailed) {
+            failedCount++;
+            // NDR Costs
+            const key = `${variant}${paymentMethod === 'prepaid' ? 'Prepaid' : 'COD'}Value` as keyof COGSField;
+            let orderNDR = 0;
+            cogsFields.filter(f => f.type === 'ndr' || f.type === 'both').forEach(field => {
+              let value = field[key] as number || 0;
+              if (field.calculationType === 'fixed') {
+                orderNDR += value;
+              } else {
+                const salePrice = order.totalPrice || 0;
+                const pct = field.percentageType || 'excluded';
+                orderNDR += pct === 'included' ? (value / (100 + value)) * salePrice : (value / 100) * salePrice;
+              }
+            });
+            totalCOGS += orderNDR;
+          }
+
+          if (order.shippingCharge) {
+            totalShipping += order.shippingCharge;
           }
         });
-
-        totalCOGS += orderCOGS;
-      } else if (isFailed) {
-        failedCount++;
-        // Failed orders: no revenue, but have NDR costs
-
-        const key = `${variant}${paymentMethod === 'prepaid' ? 'Prepaid' : 'COD'}Value` as keyof COGSField;
-        let orderNDRCost = 0;
-
-        const fieldsToUse = cogsFields.filter(f => f.type === 'ndr' || f.type === 'both');
-        fieldsToUse.forEach((field) => {
-          let value = field[key] as number;
-          if (value === undefined || value === null) value = 0;
-
-          if (field.calculationType === 'fixed') {
-            orderNDRCost += value;
-          } else {
-            // For NDR, percentage is typically 0 or based on original sale price
-            const salePrice = order.totalPrice || 0;
-            const pct = field.percentageType || 'excluded';
-            orderNDRCost += pct === 'included'
-              ? (value / (100 + value)) * salePrice
-              : (value / 100) * salePrice;
-          }
-        });
-
-        totalCOGS += orderNDRCost;
-      }
-
-      // Add shipping cost for both delivered and failed
-      if (order.shippingCharge) {
-        totalShipping += order.shippingCharge;
       }
     });
 
     const totalOrders = deliveredCount + failedCount;
-    const avgRevenue = totalOrders > 0 ? totalRevenue / totalOrders : 0; // Avg revenue per order (including failed)
+    const avgRevenue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
     const avgCOGS = totalOrders > 0 ? totalCOGS / totalOrders : 0;
     const avgShipping = totalOrders > 0 ? totalShipping / totalOrders : 0;
     const avgTotalCost = avgCOGS + avgShipping;
     const contributionMargin = avgRevenue - avgTotalCost;
 
-    // Breakeven ROAS = AOV / Contribution Margin
-    // Since failed orders reduce avg revenue but add costs, this gives realistic breakeven
     const breakevenROAS = contributionMargin > 0 ? avgRevenue / contributionMargin : 0;
 
     return {
@@ -708,6 +741,7 @@ export function DashboardPage() {
       deliveredCount,
       failedCount,
       totalOrders,
+      completedDaysCount
     };
   })();
 
@@ -744,25 +778,28 @@ export function DashboardPage() {
         status.includes('failed') ||
         status.includes('rto');
 
-      const isDelivered = status === 'delivered' ||
-        (paymentMethod === 'prepaid' && !isFailed); // Prepaid are assumed delivered if not failed/RTO
-
       // Chart 1: Prepaid vs COD
       if (paymentMethod === 'prepaid') prepaidCount++;
       else codCount++;
 
       // Chart 2: Delivered vs Failed vs Granular Statuses
-      if (isDelivered) {
-        deliveredCount++;
-      } else if (isFailed) {
+      // We prioritize EXPLICIT statuses over the "Prepaid = Delivered" assumption.
+      // The assumption should only apply if there is no other specific tracking info.
+      if (isFailed) {
         failedCount++;
+      } else if (status === 'delivered') {
+        deliveredCount++;
+      } else if (status.includes('out for delivery') || status.includes('out_for_delivery')) {
+        outForDeliveryCount++;
+      } else if (status.includes('attempt')) {
+        attemptedDeliveryCount++;
+      } else if (status.includes('transit') || status.includes('shipped') || status.includes('picked') || status.includes('pickup')) {
+        inTransitCount++;
       } else {
-        if (status.includes('out for delivery')) {
-          outForDeliveryCount++;
-        } else if (status.includes('attempt')) {
-          attemptedDeliveryCount++;
-        } else if (status.includes('transit') || status.includes('shipped') || status.includes('picked')) {
-          inTransitCount++;
+        // Fallback for orders with no active/final status (e.g. '', 'confirmed', 'label created')
+        if (paymentMethod === 'prepaid') {
+          // Keep original logic: Prepaid assumed delivered if tracking is silent/confirmed only
+          deliveredCount++;
         } else {
           confirmedCount++;
         }
@@ -770,7 +807,7 @@ export function DashboardPage() {
 
       // Chart 3: COD Delivered vs Failed (Final status only)
       if (paymentMethod === 'cod') {
-        if (isDelivered) codDeliveredCount++;
+        if (status === 'delivered') codDeliveredCount++;
         else if (isFailed) codFailedCount++;
       }
     });
@@ -1163,7 +1200,7 @@ export function DashboardPage() {
           color: 'var(--chart-muted)'
         }}>
           <div style={{ fontWeight: 600, marginBottom: '0.5rem', color: '#1f2937' }}>
-            Breakeven Analysis (based on {breakevenMetrics.totalOrders} orders: {breakevenMetrics.deliveredCount} delivered + {breakevenMetrics.failedCount} failed):
+            Breakeven Analysis (based on {breakevenMetrics.completedDaysCount} completed days in last 30 days):
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem' }}>
             <div>
@@ -1189,7 +1226,7 @@ export function DashboardPage() {
             </div>
           </div>
           <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', fontStyle: 'italic' }}>
-            Formula: Breakeven ROAS = Avg Revenue ÷ Contribution Margin. Failed orders reduce avg revenue and increase avg costs, giving a realistic breakeven target.
+            Formula: Breakeven ROAS = Avg Revenue ÷ Contribution Margin. Based on fully completed days to avoid bias from pending orders.
           </div>
         </div>
       </section>
@@ -1374,7 +1411,7 @@ export function DashboardPage() {
           {/* Chart 2: Delivered vs Failed */}
           <div className={styles.chartWrap} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
             <h3 style={{ fontSize: '1rem', marginBottom: '1rem', color: '#374151' }}>Overall Delivery Status</h3>
-            <ResponsiveContainer width="100%" height={250}>
+            <ResponsiveContainer width="100%" height={320}>
               <PieChart>
                 <Pie
                   data={pieChartsData.deliveryStatus}
@@ -1393,7 +1430,7 @@ export function DashboardPage() {
                 </Pie>
                 <Legend
                   verticalAlign="bottom"
-                  height={36}
+                  height={80}
                   iconType="circle"
                   onClick={handleLegendClick}
                   wrapperStyle={{ cursor: 'pointer' }}
@@ -1424,7 +1461,7 @@ export function DashboardPage() {
           {/* Chart 3: COD Status */}
           <div className={styles.chartWrap} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
             <h3 style={{ fontSize: '1rem', marginBottom: '1rem', color: '#374151' }}>COD Delivery Status</h3>
-            <ResponsiveContainer width="100%" height={250}>
+            <ResponsiveContainer width="100%" height={320}>
               <PieChart>
                 <Pie
                   data={pieChartsData.codStatus}
@@ -1443,7 +1480,7 @@ export function DashboardPage() {
                 </Pie>
                 <Legend
                   verticalAlign="bottom"
-                  height={36}
+                  height={80}
                   iconType="circle"
                   onClick={handleLegendClick}
                   wrapperStyle={{ cursor: 'pointer' }}
