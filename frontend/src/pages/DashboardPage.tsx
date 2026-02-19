@@ -418,10 +418,12 @@ export function DashboardPage() {
     return data;
   })();
 
-  // Profit Chart Data - Show all days from Jan 28, 2026 onwards (last 30 days from that date)
+  // Profit Chart Data - Show Current Month Only
   const profitChartData = (() => {
-    const startDate = new Date('2026-01-28');
     const now = new Date();
+    const startDate = new Date(now.getFullYear(), now.getMonth(), 1); // 1st of current month
+    const endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0); // Last day of current month
+    
     const data: Array<{ 
       date: string; 
       dateKey: string; 
@@ -532,37 +534,40 @@ export function DashboardPage() {
       ordersByDate[d].push(o);
     });
     
-    // Calculate the end date (30 days from start or today, whichever is earlier)
-    const endDate = new Date(startDate);
-    endDate.setDate(endDate.getDate() + 29);
-    const actualEndDate = endDate > now ? now : endDate;
-    
-    // Generate all days from Jan 28 to 30 days later (or today)
     const currentDate = new Date(startDate);
-    while (currentDate <= actualEndDate) {
+    
+    while (currentDate <= endDate) {
       const dateKey = currentDate.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
       const dayOrders = ordersByDate[dateKey] || [];
       const adCostPerOrder = adCostPerOrderByDate[dateKey] || 0;
       const totalAdSpend = adSpendByDate[dateKey] || 0;
       
       let bookedProfit = 0;
-      let yetToBookProfit = 0;
       
-      // Check if day is complete (all orders in final status)
-      const allComplete = dayOrders.length === 0 || dayOrders.every(o => isOrderFinalStatus(o));
-      
-      if (allComplete) {
-        // All orders are delivered/failed - show booked profit
-        dayOrders.forEach(o => {
-          bookedProfit += calcOrderPnl(o, adCostPerOrder);
-        });
-        // Subtract ad spend if no orders
-        if (dayOrders.length === 0 && totalAdSpend > 0) {
-          bookedProfit -= totalAdSpend;
-        }
+      // If date is in future (after today), don't show data
+      // We compare logic using dateKey to avoid time-of-day issues
+      const todayKey = now.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+      const isFuture = dateKey > todayKey;
+
+      if (isFuture) {
+         bookedProfit = null as any;
       } else {
-        // Incomplete day - leave empty (null values won't render bars)
-        bookedProfit = null as any;
+        // Check if day is complete (all orders in final status)
+        const allComplete = dayOrders.length === 0 || dayOrders.every(o => isOrderFinalStatus(o));
+        
+        if (allComplete) {
+          // All orders are delivered/failed - show booked profit
+          dayOrders.forEach(o => {
+            bookedProfit += calcOrderPnl(o, adCostPerOrder);
+          });
+          // Subtract ad spend if no orders
+          if (dayOrders.length === 0 && totalAdSpend > 0) {
+            bookedProfit -= totalAdSpend;
+          }
+        } else {
+          // Incomplete day - leave empty (null values won't render bars)
+          bookedProfit = null as any;
+        }
       }
       
       data.push({
@@ -1075,7 +1080,7 @@ export function DashboardPage() {
         </section>
 
         <section className={styles.section}>
-          <h2 className={styles['section-title']}>Profit & Loss — Last 30 Days</h2>
+          <h2 className={styles['section-title']}>Profit & Loss — {new Date().toLocaleString('default', { month: 'long', year: 'numeric' })}</h2>
           <p className={styles['section-desc']}>
             Shows booked profit for completed days only (all orders delivered/failed). Incomplete days are left empty. Green = profit, Red = loss.
           </p>
@@ -1146,7 +1151,7 @@ export function DashboardPage() {
           </div>
           <div className={styles.chartStats}>
             <div className={styles.chartStatBlock}>
-              <span className={styles.chartStatLabel}>Booked Profit (30 days)</span>
+              <span className={styles.chartStatLabel}>Booked Profit (this month)</span>
               <span 
                 className={styles.chartStatValue} 
                 style={{ 
