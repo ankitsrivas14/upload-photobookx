@@ -887,17 +887,29 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       return !isDelivered && !isFailed && !isPrepaid;
     });
 
-    // Calculate average P/L per delivered order from historical data
-    // Note: Using all available orders for historical calculation
-    const historicalStartDate = new Date('2020-01-01'); // Far past date to include all orders
-    const historicalDeliveredOrders = orders.filter(o => {
-      const orderDate = new Date(o.createdAt);
-      const deliveryStatus = o.deliveryStatus?.toLowerCase() || '';
-      return orderDate >= historicalStartDate &&
-        !o.cancelledAt &&
-        !discardedOrderIds.has(o.id) &&
-        deliveryStatus === 'delivered';
-    });
+    // Calculate average P/L per delivered order using CURRENT month data first
+    // This reflects current ad costs and margins.
+    // Fallback to broader range only if insufficient data.
+
+    let historicalDeliveredOrders = ordersForStats.filter(o =>
+      !o.cancelledAt &&
+      !discardedOrderIds.has(o.id) &&
+      o.deliveryStatus?.toLowerCase() === 'delivered'
+    );
+
+    // If we don't have enough data in current month (e.g. start of month), fallback to last 30 days
+    if (historicalDeliveredOrders.length < 10) {
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+      historicalDeliveredOrders = orders.filter(o => {
+        const orderDate = new Date(o.createdAt);
+        return orderDate >= thirtyDaysAgo &&
+          !o.cancelledAt &&
+          !discardedOrderIds.has(o.id) &&
+          o.deliveryStatus?.toLowerCase() === 'delivered';
+      });
+    }
 
     const totalHistoricalPL = Array.from(orderProfitLoss.entries())
       .filter(([orderId]) => historicalDeliveredOrders.some(o => o.id === orderId))
@@ -907,16 +919,56 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       ? totalHistoricalPL / historicalDeliveredOrders.length
       : 0;
 
+    // Calculate average LOSS per failed order (NDR costs + shipping)
+    // Same logic as for delivered: use current month, fallback to last 30 days
+    let historicalFailedOrders = ordersForStats.filter(o => {
+      const status = o.deliveryStatus?.toLowerCase() || '';
+      const isFailed = rtoOrderIds.has(o.id) || status === 'failure' || status.includes('failed') || status.includes('rto');
+      return !o.cancelledAt && !discardedOrderIds.has(o.id) && isFailed;
+    });
+
+    if (historicalFailedOrders.length < 5) { // Lower threshold for failures as they are fewer
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      historicalFailedOrders = orders.filter(o => {
+        const orderDate = new Date(o.createdAt);
+        const status = o.deliveryStatus?.toLowerCase() || '';
+        const isFailed = rtoOrderIds.has(o.id) || status === 'failure' || status.includes('failed') || status.includes('rto');
+        return orderDate >= thirtyDaysAgo && !o.cancelledAt && !discardedOrderIds.has(o.id) && isFailed;
+      });
+    }
+
+    const totalHistoricalLoss = Array.from(orderProfitLoss.entries())
+      .filter(([orderId]) => historicalFailedOrders.some(o => o.id === orderId))
+      .reduce((sum, [, pl]) => sum + Math.abs(pl), 0); // Sum absolute losses
+
+    const avgLossPerFailedOrder = historicalFailedOrders.length > 0
+      ? totalHistoricalLoss / historicalFailedOrders.length
+      : 0;
+
     // Expected P/L from pending orders (adjusted for NDR rate)
+    // Pending orders here are ONLY those not yet accounted for in currentPL (i.e. COD pending)
+    // Formula: (Expected Successes * Avg Profit) - (Expected Failures * Avg Loss)
     const deliveryRate = 1 - (globalNdrRate / 100);
-    const expectedPendingPL = pendingOrders.length * avgPLPerDeliveredOrder * deliveryRate;
+    const failureRate = globalNdrRate / 100;
 
-    // Linear projection for future orders (from remaining days)
-    const avgPLPerDay = daysElapsed > 0 ? currentPL / daysElapsed : 0;
-    const expectedFuturePL = avgPLPerDay * remainingDays;
+    const expectedRevenue = pendingOrders.length * deliveryRate * avgPLPerDeliveredOrder;
+    const expectedLoss = pendingOrders.length * failureRate * avgLossPerFailedOrder;
 
-    // Total expected month-end P/L = Current P/L + Pending Orders P/L + Future Orders P/L
-    const expectedMonthEndPL = currentPL + expectedPendingPL + expectedFuturePL;
+    const expectedPendingPL = expectedRevenue - expectedLoss;
+
+    // Total expected profit from orders ALREADY placed (Realized + Pending Potential)
+    const totalProfitBooked = currentPL + expectedPendingPL;
+
+    // Simple Projection: Average per day based on what we have booked so far (Realized + Pending)
+    // Formula: (Total Booked / Days Elapsed) * Total Days in Month
+
+    const avgPLPerDay = daysElapsed > 0 ? totalProfitBooked / daysElapsed : 0;
+    const expectedMonthEndPL = avgPLPerDay * totalDaysInMonth;
+
+    // Calculate the 'future' portion just for display/breakdown consistency if needed
+    // Future = Expected Month End - Total Booked Already
+    const expectedFuturePL = expectedMonthEndPL - totalProfitBooked;
 
     return {
       expectedPL: expectedMonthEndPL,
