@@ -30,7 +30,7 @@ export function AdminLayout() {
   const isActive = (href: string) => {
     if (href === '/admin/dashboard') return path === '/admin/dashboard';
     if (href === '/admin/sales-management') return path === '/admin/sales-management';
-    if (href === '/admin/expenses/overview' || href === '/admin/expenses') return path.startsWith('/admin/expenses');
+    if (href === '/admin/expenses/meta-ads' || href === '/admin/expenses') return path.startsWith('/admin/expenses');
     if (href === '/admin/gst-reports') return path.startsWith('/admin/gst-reports');
     if (href === '/admin/tools') return path.startsWith('/admin/tools');
     if (href.startsWith('/admin/')) return path === href || (href !== '/admin' && path.startsWith(href + '/'));
@@ -113,7 +113,7 @@ export function AdminLayout() {
           </Link>
 
           <Link
-            to="/admin/expenses/overview"
+            to="/admin/expenses/meta-ads"
             className={`${styles['nav-item']} ${path.startsWith('/admin/expenses') ? styles.active : ''}`}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -147,16 +147,7 @@ export function AdminLayout() {
             {!sidebarCollapsed && <span>Tools</span>}
           </Link>
 
-          <Link
-            to="/admin/settings"
-            className={`${styles['nav-item']} ${path === '/admin/settings' ? styles.active : ''}`}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="3" />
-              <path d="M12 1v6m0 6v6m8.66-15l-5.2 3m-2.92 5.2l-5.2 3M23 12h-6m-6 0H1m20.66 7l-5.2-3m-2.92-5.2l-5.2-3" />
-            </svg>
-            {!sidebarCollapsed && <span>Settings</span>}
-          </Link>
+
         </nav>
 
         <button

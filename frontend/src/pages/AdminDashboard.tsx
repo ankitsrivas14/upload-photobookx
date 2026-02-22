@@ -29,7 +29,7 @@ interface Product {
   image: string | null;
 }
 
-type ViewType = 'magic-links' | 'products' | 'settings';
+type ViewType = 'magic-links' | 'products';
 
 export function AdminDashboard() {
   const navigate = useNavigate();
@@ -48,12 +48,12 @@ export function AdminDashboard() {
   const [deleteModalToken, setDeleteModalToken] = useState<string | null>(null);
   const [deleteModalOrderNumber, setDeleteModalOrderNumber] = useState<string | null>(null);
   const [deleteModalImages, setDeleteModalImages] = useState<Array<{ id: string; s3Url: string; originalName: string }>>([]);
-  
+
   // Product filters
   const [productSearch, setProductSearch] = useState('');
   const [productStatusFilter, setProductStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [selectedProducts, setSelectedProducts] = useState<Set<number>>(new Set());
-  
+
   // Bulk price update modal
   const [showPriceUpdateModal, setShowPriceUpdateModal] = useState(false);
   const [isUpdatingPrices, setIsUpdatingPrices] = useState(false);
@@ -138,7 +138,7 @@ export function AdminDashboard() {
   // Filter products
   const filteredProducts = products.filter(product => {
     const matchesSearch = product.title.toLowerCase().includes(productSearch.toLowerCase());
-    
+
     let matchesStatus = true;
     if (productStatusFilter === 'active') {
       matchesStatus = product.status === 'active';
@@ -146,7 +146,7 @@ export function AdminDashboard() {
       // Shopify uses 'draft' or other statuses for inactive products
       matchesStatus = product.status !== 'active';
     }
-    
+
     return matchesSearch && matchesStatus;
   });
 
@@ -216,7 +216,7 @@ export function AdminDashboard() {
 
       if (result.success && result.results && result.summary) {
         const { successful, failed, total } = result.summary;
-        
+
         if (successful === total) {
           alert(`✅ Successfully updated prices for ${successful} product${successful !== 1 ? 's' : ''}!`);
         } else {
@@ -231,7 +231,7 @@ export function AdminDashboard() {
 
         // Reload products to reflect changes
         await loadProducts();
-        
+
         // Reset and close modal
         setShowPriceUpdateModal(false);
         setVariant1Price('');
@@ -269,11 +269,11 @@ export function AdminDashboard() {
       if (response.success && response.magicLink) {
         const newLink = response.magicLink;
         setLinks([newLink, ...links]);
-        
-        setOrders(orders.map(o => 
+
+        setOrders(orders.map(o =>
           o.id === order.id ? { ...o, magicLink: newLink } : o
         ));
-        
+
         copyToClipboard(newLink.uploadUrl, newLink.token);
       }
     } catch (err) {
@@ -315,7 +315,7 @@ export function AdminDashboard() {
     setDeleteModalToken(token);
     setDeleteModalOrderNumber(orderNumber);
     setShowDeleteModal(true);
-    
+
     // Fetch images for preview
     try {
       const response = await api.getUploadedImages(token);
@@ -330,7 +330,7 @@ export function AdminDashboard() {
 
   const handleConfirmDelete = async () => {
     if (!deleteModalToken) return;
-    
+
     setDeletingFor(deleteModalToken);
     try {
       const response = await api.deleteOrderImages(deleteModalToken);
@@ -349,7 +349,7 @@ export function AdminDashboard() {
           }
           return o;
         }));
-        
+
         // Update links list
         setLinks(links.map(l => {
           if (l.token === deleteModalToken) {
@@ -361,7 +361,7 @@ export function AdminDashboard() {
           }
           return l;
         }));
-        
+
         alert('Images deleted successfully');
       } else {
         alert(response.error || 'Failed to delete images');
@@ -384,27 +384,27 @@ export function AdminDashboard() {
   }
 
   const stats = [
-    { 
-      label: 'Total Orders', 
-      value: orders.length, 
+    {
+      label: 'Total Orders',
+      value: orders.length,
       icon: '📦',
       color: '#00B8D4'
     },
-    { 
-      label: 'Active Links', 
-      value: links.filter(l => l.isActive).length, 
+    {
+      label: 'Active Links',
+      value: links.filter(l => l.isActive).length,
       icon: '🔗',
       color: '#7c3aed'
     },
-    { 
-      label: 'Total Uploads', 
-      value: links.reduce((sum, l) => sum + l.currentUploads, 0), 
+    {
+      label: 'Total Uploads',
+      value: links.reduce((sum, l) => sum + l.currentUploads, 0),
       icon: '📸',
       color: '#f59e0b'
     },
-    { 
-      label: 'Completed', 
-      value: orders.filter(o => o.magicLink && o.magicLink.currentUploads >= o.magicLink.maxUploads).length, 
+    {
+      label: 'Completed',
+      value: orders.filter(o => o.magicLink && o.magicLink.currentUploads >= o.magicLink.maxUploads).length,
       icon: '✅',
       color: '#10b981'
     },
@@ -418,7 +418,6 @@ export function AdminDashboard() {
             <span className={`${styles['breadcrumb-item']} ${styles.active}`}>
               {currentView === 'magic-links' && 'Magic Links'}
               {currentView === 'products' && 'Products'}
-              {currentView === 'settings' && 'Settings'}
             </span>
           </div>
           <div className={styles['header-right']}>
@@ -428,9 +427,9 @@ export function AdminDashboard() {
             </div>
             <button onClick={handleLogout} className={styles['logout-btn']}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-                <polyline points="16 17 21 12 16 7"/>
-                <line x1="21" y1="12" x2="9" y2="12"/>
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                <polyline points="16 17 21 12 16 7" />
+                <line x1="21" y1="12" x2="9" y2="12" />
               </svg>
               Logout
             </button>
@@ -509,19 +508,19 @@ export function AdminDashboard() {
                               {order.magicLink ? (
                                 <div className={styles['link-cell']}>
                                   <span className={styles['link-url']}>{order.magicLink.uploadUrl}</span>
-                                  <button 
+                                  <button
                                     className={`${styles['icon-btn']} ${styles.copy} ${copiedToken === order.magicLink.token ? styles.copied : ''}`}
                                     onClick={() => copyToClipboard(order.magicLink!.uploadUrl, order.magicLink!.token)}
                                     title="Copy link"
                                   >
                                     {copiedToken === order.magicLink.token ? (
                                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                        <polyline points="20 6 9 17 4 12"/>
+                                        <polyline points="20 6 9 17 4 12" />
                                       </svg>
                                     ) : (
                                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-                                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
                                       </svg>
                                     )}
                                   </button>
@@ -538,7 +537,7 @@ export function AdminDashboard() {
                                   </div>
                                 </div>
                               ) : (
-                                <button 
+                                <button
                                   className={`${styles['action-btn']} ${styles.primary}`}
                                   onClick={() => handleCreateLink(order)}
                                   disabled={creatingFor === order.name}
@@ -550,7 +549,7 @@ export function AdminDashboard() {
                             <td>
                               {order.magicLink && order.magicLink.currentUploads === order.magicLink.maxUploads && !order.magicLink.imagesDeleted ? (
                                 <div style={{ display: 'flex', gap: '8px' }}>
-                                  <button 
+                                  <button
                                     className={`${styles['icon-btn']} ${styles.download}`}
                                     onClick={() => handleDownloadImages(order.magicLink!.token)}
                                     disabled={downloadingFor === order.magicLink!.token || deletingFor === order.magicLink!.token}
@@ -558,18 +557,18 @@ export function AdminDashboard() {
                                   >
                                     {downloadingFor === order.magicLink!.token ? (
                                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={styles.spinner}>
-                                        <circle cx="12" cy="12" r="10" opacity="0.25"/>
-                                        <path d="M4 12a8 8 0 018-8" opacity="0.75"/>
+                                        <circle cx="12" cy="12" r="10" opacity="0.25" />
+                                        <path d="M4 12a8 8 0 018-8" opacity="0.75" />
                                       </svg>
                                     ) : (
                                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                                        <polyline points="7 10 12 15 17 10"/>
-                                        <line x1="12" y1="15" x2="12" y2="3"/>
+                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                        <polyline points="7 10 12 15 17 10" />
+                                        <line x1="12" y1="15" x2="12" y2="3" />
                                       </svg>
                                     )}
                                   </button>
-                                  <button 
+                                  <button
                                     className={`${styles['icon-btn']} ${styles.delete}`}
                                     onClick={() => handleDeleteImagesClick(order.magicLink!.token, order.name)}
                                     disabled={deletingFor === order.magicLink!.token || downloadingFor === order.magicLink!.token}
@@ -577,13 +576,13 @@ export function AdminDashboard() {
                                   >
                                     {deletingFor === order.magicLink!.token ? (
                                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={styles.spinner}>
-                                        <circle cx="12" cy="12" r="10" opacity="0.25"/>
-                                        <path d="M4 12a8 8 0 018-8" opacity="0.75"/>
+                                        <circle cx="12" cy="12" r="10" opacity="0.25" />
+                                        <path d="M4 12a8 8 0 018-8" opacity="0.75" />
                                       </svg>
                                     ) : (
                                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                        <line x1="18" y1="6" x2="6" y2="18"/>
-                                        <line x1="6" y1="6" x2="18" y2="18"/>
+                                        <line x1="18" y1="6" x2="6" y2="18" />
+                                        <line x1="6" y1="6" x2="18" y2="18" />
                                       </svg>
                                     )}
                                   </button>
@@ -621,8 +620,8 @@ export function AdminDashboard() {
                   <div className={styles['filters-bar']}>
                     <div className={styles['filter-search']}>
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <circle cx="11" cy="11" r="8"/>
-                        <path d="m21 21-4.35-4.35"/>
+                        <circle cx="11" cy="11" r="8" />
+                        <path d="m21 21-4.35-4.35" />
                       </svg>
                       <input
                         type="text"
@@ -634,8 +633,8 @@ export function AdminDashboard() {
 
                     <div className={styles['filter-group']}>
                       <label>Status:</label>
-                      <select 
-                        value={productStatusFilter} 
+                      <select
+                        value={productStatusFilter}
                         onChange={(e) => setProductStatusFilter(e.target.value as 'all' | 'active' | 'inactive')}
                       >
                         <option value="all">All</option>
@@ -647,17 +646,17 @@ export function AdminDashboard() {
                     {selectedProducts.size > 0 && (
                       <div className={styles['selection-info']}>
                         <span>{selectedProducts.size} selected</span>
-                        <button 
+                        <button
                           className={styles['bulk-action-btn']}
                           onClick={handleBulkPriceUpdate}
                         >
                           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <line x1="12" y1="1" x2="12" y2="23"/>
-                            <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+                            <line x1="12" y1="1" x2="12" y2="23" />
+                            <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
                           </svg>
                           Update Prices
                         </button>
-                        <button 
+                        <button
                           className={styles['clear-selection-btn']}
                           onClick={() => setSelectedProducts(new Set())}
                         >
@@ -694,8 +693,8 @@ export function AdminDashboard() {
                             <td colSpan={4} className={styles['empty-state']}>
                               <div className={styles['empty-icon']}>📦</div>
                               <div className={styles['empty-text']}>
-                                {productSearch || productStatusFilter !== 'all' 
-                                  ? 'No products match your filters' 
+                                {productSearch || productStatusFilter !== 'all'
+                                  ? 'No products match your filters'
                                   : 'No products found'}
                               </div>
                             </td>
@@ -751,57 +750,7 @@ export function AdminDashboard() {
             </div>
           )}
 
-          {currentView === 'settings' && (
-            <div className={styles['content-section']}>
-              <div className={styles['section-header']}>
-                <h2>Settings</h2>
-                <p>Configure your admin portal preferences</p>
-              </div>
 
-              <div className={styles['settings-grid']}>
-                <div className={styles['settings-card']}>
-                  <div className={styles['settings-card-header']}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-                      <circle cx="8.5" cy="7" r="4"/>
-                      <polyline points="17 11 19 13 23 9"/>
-                    </svg>
-                    <h3>Account</h3>
-                  </div>
-                  <div className={styles['settings-card-body']}>
-                    <div className={styles['setting-item']}>
-                      <label>Name</label>
-                      <input type="text" value={user?.name || ''} disabled />
-                    </div>
-                    <div className={styles['setting-item']}>
-                      <label>Email</label>
-                      <input type="email" value={user?.email || ''} disabled />
-                    </div>
-                  </div>
-                </div>
-
-                <div className={styles['settings-card']}>
-                  <div className={styles['settings-card-header']}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
-                      <circle cx="12" cy="10" r="3"/>
-                    </svg>
-                    <h3>Link Settings</h3>
-                  </div>
-                  <div className={styles['settings-card-body']}>
-                    <div className={styles['setting-item']}>
-                      <label>Default Expiry (days)</label>
-                      <input type="number" value="7" disabled />
-                    </div>
-                    <div className={styles['setting-item']}>
-                      <label>Max File Size (MB)</label>
-                      <input type="number" value="30" disabled />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
         </main>
       </div>
 
@@ -813,27 +762,27 @@ export function AdminDashboard() {
               <h2>Update Prices</h2>
               <button className={styles['modal-close']} onClick={() => setShowPriceUpdateModal(false)}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="18" y1="6" x2="6" y2="18"/>
-                  <line x1="6" y1="6" x2="18" y2="18"/>
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
                 </svg>
               </button>
             </div>
 
             <div className={styles['modal-body']}>
               <div className={styles['price-update-tabs']}>
-                <button 
+                <button
                   className={`${styles['tab-btn']} ${priceUpdateType === 'set' ? styles.active : ''}`}
                   onClick={() => setPriceUpdateType('set')}
                 >
                   Set Price
                 </button>
-                <button 
+                <button
                   className={`${styles['tab-btn']} ${priceUpdateType === 'increase' ? styles.active : ''}`}
                   onClick={() => setPriceUpdateType('increase')}
                 >
                   + Increase
                 </button>
-                <button 
+                <button
                   className={`${styles['tab-btn']} ${priceUpdateType === 'decrease' ? styles.active : ''}`}
                   onClick={() => setPriceUpdateType('decrease')}
                 >
@@ -962,18 +911,18 @@ export function AdminDashboard() {
             </div>
 
             <div className={styles['modal-footer']}>
-              <button 
+              <button
                 className={`${styles['modal-btn']} ${styles.cancel}`}
                 onClick={() => setShowPriceUpdateModal(false)}
               >
                 Cancel
               </button>
-              <button 
+              <button
                 className={`${styles['modal-btn']} ${styles.confirm}`}
                 onClick={applyPriceUpdate}
                 disabled={
                   isUpdatingPrices ||
-                  (priceUpdateType === 'set' 
+                  (priceUpdateType === 'set'
                     ? !variant1Price && !variant2Price && !variant1CompareAtPrice && !variant2CompareAtPrice
                     : !priceChangePercent && !priceChangeAmount)
                 }
@@ -1000,8 +949,8 @@ export function AdminDashboard() {
               <h2>Delete Images</h2>
               <button className={styles['modal-close']} onClick={handleCloseDeleteModal}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="18" y1="6" x2="6" y2="18"/>
-                  <line x1="6" y1="6" x2="18" y2="18"/>
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
                 </svg>
               </button>
             </div>
@@ -1024,7 +973,7 @@ export function AdminDashboard() {
               <div className={styles['order-details-section']}>
                 <div className={styles['order-details-header']}>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                    <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                   </svg>
                   <h3>Order Details</h3>
                 </div>
@@ -1032,16 +981,16 @@ export function AdminDashboard() {
                   Order Number: <strong>{deleteModalOrderNumber}</strong>
                 </div>
               </div>
-              
+
               {/* Images Preview Section */}
               {deleteModalImages.length > 0 && (
                 <div className={styles['images-preview-section']}>
                   <div className={styles['images-preview-header']}>
                     <div className={styles['images-preview-title']}>
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-                        <circle cx="8.5" cy="8.5" r="1.5"/>
-                        <polyline points="21 15 16 10 5 21"/>
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                        <circle cx="8.5" cy="8.5" r="1.5" />
+                        <polyline points="21 15 16 10 5 21" />
                       </svg>
                       <h3>Preview Images</h3>
                     </div>
@@ -1059,7 +1008,7 @@ export function AdminDashboard() {
                   {deleteModalImages.length >= 5 && (
                     <div className={styles['more-images-badge']}>
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: '16px', height: '16px' }}>
-                        <path d="M12 5v14M5 12h14"/>
+                        <path d="M12 5v14M5 12h14" />
                       </svg>
                       More images will also be deleted
                     </div>
@@ -1069,14 +1018,14 @@ export function AdminDashboard() {
             </div>
 
             <div className={styles['modal-footer']}>
-              <button 
+              <button
                 className={`${styles['modal-btn']} ${styles.cancel}`}
                 onClick={handleCloseDeleteModal}
                 disabled={deletingFor !== null}
               >
                 Cancel
               </button>
-              <button 
+              <button
                 className={`${styles['modal-btn']} ${styles.danger}`}
                 onClick={handleConfirmDelete}
                 disabled={deletingFor !== null}

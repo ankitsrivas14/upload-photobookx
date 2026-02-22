@@ -3,8 +3,6 @@ import { useState, useEffect } from 'react';
 import { api } from '../services/api';
 import type { AdminUser } from '../services/api';
 import { MetaAdsPage } from './MetaAdsPage';
-import { ExpensesOverview } from './ExpensesOverview';
-import { SalesPage } from './SalesPage';
 import { COGSPage } from './COGSPage';
 import styles from './ExpensesPage.module.css';
 
@@ -15,9 +13,9 @@ export function ExpensesPage() {
   const [isLoading, setIsLoading] = useState(true);
 
   const currentPath = location.pathname;
-  const isOverview = currentPath === '/admin/expenses' || currentPath === '/admin/expenses/' || currentPath === '/admin/expenses/overview';
+  const isOverview = currentPath === '/admin/expenses' || currentPath === '/admin/expenses/';
   const isMetaAds = currentPath === '/admin/expenses/meta-ads';
-  const isSales = currentPath === '/admin/expenses/sales';
+
   const isCOGS = currentPath === '/admin/expenses/cogs';
 
   useEffect(() => {
@@ -27,7 +25,7 @@ export function ExpensesPage() {
 
   useEffect(() => {
     if (isOverview) {
-      navigate('/admin/expenses/overview', { replace: true });
+      navigate('/admin/expenses/meta-ads', { replace: true });
     }
   }, [isOverview, navigate]);
 
@@ -63,68 +61,58 @@ export function ExpensesPage() {
   }
 
   return (
-      <div className={styles['main-wrapper']}>
-        <header className={styles['dashboard-header']}>
-          <div className={styles['header-breadcrumb']}>
-            <Link to="/admin/expenses/overview" className={styles['breadcrumb-item']}>Expenses</Link>
-            {isMetaAds && (
-              <>
-                <span className={styles['breadcrumb-separator']}>/</span>
-                <span className={`${styles['breadcrumb-item']} ${styles.active}`}>Meta Ads</span>
-              </>
-            )}
+    <div className={styles['main-wrapper']}>
+      <header className={styles['dashboard-header']}>
+        <div className={styles['header-breadcrumb']}>
+          <Link to="/admin/expenses/meta-ads" className={styles['breadcrumb-item']}>Expenses</Link>
+          {isMetaAds && (
+            <>
+              <span className={styles['breadcrumb-separator']}>/</span>
+              <span className={`${styles['breadcrumb-item']} ${styles.active}`}>Meta Ads</span>
+            </>
+          )}
+        </div>
+        <div className={styles['header-right']}>
+          <div className={styles['user-menu']}>
+            <div className={styles['user-avatar']}>{user?.name?.charAt(0) || 'A'}</div>
+            <span className={styles['user-name']}>{user?.name}</span>
           </div>
-          <div className={styles['header-right']}>
-            <div className={styles['user-menu']}>
-              <div className={styles['user-avatar']}>{user?.name?.charAt(0) || 'A'}</div>
-              <span className={styles['user-name']}>{user?.name}</span>
-            </div>
-            <button onClick={handleLogout} className={styles['logout-btn']}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-                <polyline points="16 17 21 12 16 7"/>
-                <line x1="21" y1="12" x2="9" y2="12"/>
-              </svg>
-              Logout
-            </button>
-          </div>
-        </header>
+          <button onClick={handleLogout} className={styles['logout-btn']}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+              <polyline points="16 17 21 12 16 7" />
+              <line x1="21" y1="12" x2="9" y2="12" />
+            </svg>
+            Logout
+          </button>
+        </div>
+      </header>
 
-        <main className={styles['dashboard-main']}>
-          <div className={styles['expenses-nav']}>
-            <Link 
-              to="/admin/expenses/overview"
-              className={`${styles['expenses-nav-item']} ${isOverview ? styles.active : ''}`}
-            >
-              Overview
-            </Link>
-            <Link 
-              to="/admin/expenses/meta-ads"
-              className={`${styles['expenses-nav-item']} ${isMetaAds ? styles.active : ''}`}
-            >
-              Meta Ads
-            </Link>
-            <Link 
-              to="/admin/expenses/sales"
-              className={`${styles['expenses-nav-item']} ${isSales ? styles.active : ''}`}
-            >
-              Sales
-            </Link>
-            <Link 
-              to="/admin/expenses/cogs"
-              className={`${styles['expenses-nav-item']} ${isCOGS ? styles.active : ''}`}
-            >
-              COGS
-            </Link>
-          </div>
+      <main className={styles['dashboard-main']}>
+        <div className={styles['expenses-nav']}>
 
-          <Routes>
-            <Route path="overview" element={<ExpensesOverview />} />
-            <Route path="meta-ads" element={<MetaAdsPage />} />
-            <Route path="sales" element={<SalesPage />} />
-            <Route path="cogs" element={<COGSPage />} />
-          </Routes>
-        </main>
-      </div>
+          <Link
+            to="/admin/expenses/meta-ads"
+            className={`${styles['expenses-nav-item']} ${isMetaAds ? styles.active : ''}`}
+          >
+            Meta Ads
+          </Link>
+
+          <Link
+            to="/admin/expenses/cogs"
+            className={`${styles['expenses-nav-item']} ${isCOGS ? styles.active : ''}`}
+          >
+            COGS
+          </Link>
+        </div>
+
+        <Routes>
+
+          <Route path="meta-ads" element={<MetaAdsPage />} />
+
+          <Route path="cogs" element={<COGSPage />} />
+        </Routes>
+      </main>
+    </div>
   );
 }
