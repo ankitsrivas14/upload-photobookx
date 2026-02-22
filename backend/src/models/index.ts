@@ -8,3 +8,5 @@ export { default as RTOOrder, IRTOOrder } from './RTOOrder';
 export { COGSConfiguration } from './COGSConfiguration';
 export { DailyAdSpend } from './DailyAdSpend';
 export { default as ShopifyOrderCache, IShopifyOrderCache } from './ShopifyOrderCache';
+export { BankCategory, IBankCategory } from './BankCategory';
+export { BankTransaction, IBankTransaction } from './BankTransaction';

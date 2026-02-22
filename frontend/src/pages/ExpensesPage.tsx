@@ -4,6 +4,7 @@ import { api } from '../services/api';
 import type { AdminUser } from '../services/api';
 import { MetaAdsPage } from './MetaAdsPage';
 import { COGSPage } from './COGSPage';
+import { BankAccountPage } from './BankAccountPage';
 import styles from './ExpensesPage.module.css';
 
 export function ExpensesPage() {
@@ -17,6 +18,7 @@ export function ExpensesPage() {
   const isMetaAds = currentPath === '/admin/expenses/meta-ads';
 
   const isCOGS = currentPath === '/admin/expenses/cogs';
+  const isBankAccount = currentPath === '/admin/expenses/bank-account';
 
   useEffect(() => {
     loadUser();
@@ -71,6 +73,12 @@ export function ExpensesPage() {
               <span className={`${styles['breadcrumb-item']} ${styles.active}`}>Meta Ads</span>
             </>
           )}
+          {isBankAccount && (
+            <>
+              <span className={styles['breadcrumb-separator']}>/</span>
+              <span className={`${styles['breadcrumb-item']} ${styles.active}`}>Bank Account</span>
+            </>
+          )}
         </div>
         <div className={styles['header-right']}>
           <div className={styles['user-menu']}>
@@ -104,6 +112,12 @@ export function ExpensesPage() {
           >
             COGS
           </Link>
+          <Link
+            to="/admin/expenses/bank-account"
+            className={`${styles['expenses-nav-item']} ${isBankAccount ? styles.active : ''}`}
+          >
+            Bank Account
+          </Link>
         </div>
 
         <Routes>
@@ -111,6 +125,7 @@ export function ExpensesPage() {
           <Route path="meta-ads" element={<MetaAdsPage />} />
 
           <Route path="cogs" element={<COGSPage />} />
+          <Route path="bank-account" element={<BankAccountPage />} />
         </Routes>
       </main>
     </div>

@@ -148,7 +148,7 @@ class ApiService {
 
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const token = this.getToken();
-    
+
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
       ...options.headers,
@@ -240,7 +240,7 @@ class ApiService {
     // Get filename from Content-Disposition header
     const contentDisposition = response.headers.get('Content-Disposition');
     let filename = 'order_images.zip'; // fallback
-    
+
     if (contentDisposition) {
       // Try to extract filename from Content-Disposition header
       // Handles: filename="file.zip" or filename=file.zip
@@ -252,7 +252,7 @@ class ApiService {
 
     // Get the blob
     const blob = await response.blob();
-    
+
     // Create download link
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -334,7 +334,7 @@ class ApiService {
     const params = new URLSearchParams();
     if (startDate) params.append('start_date', startDate);
     if (endDate) params.append('end_date', endDate);
-    
+
     return this.request<{ success: boolean; transactions?: any[]; count?: number; error?: string }>(
       `/api/admin/magic-links/shiprocket/wallet-transactions?${params.toString()}`
     );
@@ -394,25 +394,27 @@ class ApiService {
     );
   }
 
-  async getProducts(): Promise<{ success: boolean; products?: Array<{
-    id: number;
-    title: string;
-    vendor: string;
-    productType: string;
-    status: string;
-    createdAt: string;
-    updatedAt: string;
-    variants: Array<{
+  async getProducts(): Promise<{
+    success: boolean; products?: Array<{
       id: number;
       title: string;
-      price: string;
-      sku: string;
-      inventoryQuantity: number;
-      weight: number;
-      weightUnit: string;
-    }>;
-    image: string | null;
-  }>; error?: string }> {
+      vendor: string;
+      productType: string;
+      status: string;
+      createdAt: string;
+      updatedAt: string;
+      variants: Array<{
+        id: number;
+        title: string;
+        price: string;
+        sku: string;
+        inventoryQuantity: number;
+        weight: number;
+        weightUnit: string;
+      }>;
+      image: string | null;
+    }>; error?: string
+  }> {
     return this.request('/api/admin/magic-links/shopify/products');
   }
 
@@ -659,7 +661,49 @@ class ApiService {
     return response.json();
   }
 
+  // Bank Account
+  async getBankCategories(): Promise<{ success: boolean; categories: string[]; error?: string }> {
+    return this.request('/api/admin/bank-account/categories');
+  }
+
+  async createBankCategory(name: string): Promise<{ success: boolean; category: string; error?: string }> {
+    return this.request('/api/admin/bank-account/categories', {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    });
+  }
+
+  async updateBankCategory(oldName: string, newName: string): Promise<{ success: boolean; category: string; error?: string }> {
+    return this.request(`/api/admin/bank-account/categories/${encodeURIComponent(oldName)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ newName }),
+    });
+  }
+
+  async deleteBankCategory(name: string): Promise<{ success: boolean; message?: string; error?: string }> {
+    return this.request(`/api/admin/bank-account/categories/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getBankTransactions(): Promise<{ success: boolean; transactions: any[]; error?: string }> {
+    return this.request('/api/admin/bank-account/transactions');
+  }
+
+  async saveBankTransactions(transactions: any[]): Promise<{ success: boolean; transactions: any[]; error?: string }> {
+    return this.request('/api/admin/bank-account/transactions/bulk', {
+      method: 'POST',
+      body: JSON.stringify({ transactions }),
+    });
+  }
+
+  async deleteBankTransaction(id: string): Promise<{ success: boolean; error?: string }> {
+    return this.request(`/api/admin/bank-account/transactions/${id}`, {
+      method: 'DELETE',
+    });
+  }
 }
+
 
 export const api = new ApiService();
 export type { AdminUser, MagicLinkInfo, UploadInfo, ShopifyOrder };
