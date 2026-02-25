@@ -91,6 +91,9 @@ interface ShopifyOrder {
   maxUploads: number;
   totalPrice?: number;
   shippingCharge?: number; // Shipping charge paid to Shiprocket
+  pickupDate?: string | null;
+  deliveredDate?: string | null;
+  firstAttemptDate?: string | null;
   cancelledAt?: string | null;
   lineItems?: Array<{
     title: string;

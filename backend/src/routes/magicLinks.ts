@@ -289,6 +289,9 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
           totalPrice: order.current_total_price ? parseFloat(order.current_total_price) : undefined,
           shippingCharge: shippingChargesMap.get(order.name)?.shippingCharge || 0,
           shippingBreakdown: shippingChargesMap.get(order.name)?.breakdown || null,
+          pickupDate: shippingChargesMap.get(order.name)?.pickupDate || null,
+          deliveredDate: shippingChargesMap.get(order.name)?.deliveredDate || null,
+          firstAttemptDate: shippingChargesMap.get(order.name)?.firstAttemptDate || null,
           cancelledAt: order.cancelled_at,
           lineItems: order.line_items?.map(item => ({
             title: item.title,

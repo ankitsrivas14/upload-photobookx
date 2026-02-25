@@ -25,6 +25,9 @@ interface ShopifyOrder {
   totalPrice?: number;
   shippingCharge?: number;
   shippingBreakdown?: ShippingChargeBreakdown;
+  pickupDate?: string | null;
+  deliveredDate?: string | null;
+  firstAttemptDate?: string | null;
   cancelledAt?: string | null;
   lineItems?: Array<{
     title: string;
@@ -1941,11 +1944,9 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
                   />
                 </th>
                 <th>Order</th>
-                <th>Customer Tags</th>
                 <th>Items</th>
                 <th>Tags</th>
                 <th>P/L</th>
-                <th>Date</th>
                 <th className={styles['actions-header']}>Details</th>
               </tr>
             </thead>

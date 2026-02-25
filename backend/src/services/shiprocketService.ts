@@ -23,6 +23,9 @@ interface ShiprocketOrder {
       applied_weight_amount_rto?: string | number;
     };
   };
+  picked_up_date?: string;
+  delivered_date?: string;
+  first_out_for_delivery_date?: string;
 }
 
 interface WalletTransaction {
@@ -56,6 +59,9 @@ interface ShiprocketShipment {
   total_charge?: number;
   charged_weight?: string;
   cost?: number | string;
+  pickup_date?: string;
+  pickup_scheduled_date?: string;
+  pickup_actual_date?: string;
 }
 
 /**
@@ -353,7 +359,7 @@ class ShiprocketService {
     try {
       // Check if we already have shipping charge for this order
       const existing = await ShippingCharge.findOne({ orderNumber });
-      if (existing) {
+      if (existing && existing.pickupDate) {
         return existing.shippingCharge;
       }
 
@@ -425,22 +431,34 @@ class ShiprocketService {
         return null;
       }
 
-      // Store in database with full breakdown
-      const saved = await ShippingCharge.create({
-        orderNumber,
-        shippingCharge: totalShippingCost,
-        freightForward,
-        freightCOD,
-        freightRTO,
-        whatsappCharges,
-        otherCharges,
-        shiprocketOrderId: shiprocketOrder.id,
-        awbCode,
-        courierName: shipment.courier_name || shipment.courier,
-        weight: parseFloat(shipment.weight) || undefined,
-        status: shipment.status?.toString(),
-        fetchedAt: new Date(),
-      });
+      // Update or store in database with full breakdown
+      await ShippingCharge.findOneAndUpdate(
+        { orderNumber },
+        {
+          shippingCharge: totalShippingCost,
+          freightForward,
+          freightCOD,
+          freightRTO,
+          whatsappCharges,
+          otherCharges,
+          shiprocketOrderId: shiprocketOrder.id,
+          awbCode,
+          courierName: shipment.courier_name || shipment.courier,
+          weight: parseFloat(shipment.weight) || undefined,
+          status: shipment.status?.toString(),
+          pickupDate: this.isValidDate(shiprocketOrder.picked_up_date)
+            ? shiprocketOrder.picked_up_date
+            : (this.isValidDate(shipment.pickup_actual_date)
+              ? shipment.pickup_actual_date
+              : (this.isStatusPickedUp(shipment.status?.toString()) && this.isValidDate(shipment.pickup_date)
+                ? shipment.pickup_date
+                : undefined)),
+          deliveredDate: this.parseShiprocketDate(shiprocketOrder.delivered_date),
+          firstAttemptDate: this.parseShiprocketDate(shiprocketOrder.first_out_for_delivery_date),
+          fetchedAt: new Date(),
+        },
+        { upsert: true }
+      );
 
       return totalShippingCost;
     } catch (error) {
@@ -488,11 +506,21 @@ class ShiprocketService {
 
       await Promise.all(batch.map(async (orderNumber) => {
         try {
-          // Check if already exists in DB
+          // Check if already exists in DB and has reached a terminal state
           const existing = await ShippingCharge.findOne({ orderNumber });
           if (existing) {
-            skipped++;
-            return;
+            const hasDelivered = !!existing.deliveredDate;
+            const statusStr = existing.status?.toString().toLowerCase() || '';
+
+            // Terminal statuses:
+            // 7: Delivered, 12: Lost, 13: Canceled, 15: RTO Delivered, 16: RTO Acknowledged
+            const terminalStatuses = ['7', '12', '13', '15', '16', 'delivered', 'canceled', 'cancelled', 'rto delivered'];
+            const isTerminal = hasDelivered || terminalStatuses.includes(statusStr);
+
+            if (isTerminal) {
+              skipped++;
+              return;
+            }
           }
 
           // Get from pre-fetched map
@@ -561,21 +589,39 @@ class ShiprocketService {
 
           // Only store if > 0
           if (totalShippingCost > 0) {
-            await ShippingCharge.create({
-              orderNumber,
-              shippingCharge: totalShippingCost,
-              freightForward,
-              freightCOD,
-              freightRTO,
-              whatsappCharges,
-              otherCharges,
-              shiprocketOrderId: shiprocketOrder.id,
-              awbCode,
-              courierName: shipment.courier_name || shipment.courier,
-              weight: parseFloat(shipment.weight) || undefined,
-              status: shipment.status?.toString(),
-              fetchedAt: new Date(),
-            });
+            const detectedPickupDate = this.isValidDate(shiprocketOrder.picked_up_date)
+              ? shiprocketOrder.picked_up_date
+              : (this.isValidDate(shipment.pickup_actual_date)
+                ? shipment.pickup_actual_date
+                : (this.isStatusPickedUp(shipment.status?.toString()) && this.isValidDate(shipment.pickup_date)
+                  ? shipment.pickup_date
+                  : undefined));
+
+            if (detectedPickupDate) {
+              console.log(`[Shiprocket] Found pickup date for ${orderNumber}: ${detectedPickupDate}`);
+            }
+
+            await ShippingCharge.findOneAndUpdate(
+              { orderNumber },
+              {
+                shippingCharge: totalShippingCost,
+                freightForward,
+                freightCOD,
+                freightRTO,
+                whatsappCharges,
+                otherCharges,
+                shiprocketOrderId: shiprocketOrder.id,
+                awbCode,
+                courierName: shipment.courier_name || shipment.courier,
+                weight: parseFloat(shipment.weight) || undefined,
+                status: shipment.status?.toString(),
+                pickupDate: detectedPickupDate,
+                deliveredDate: this.parseShiprocketDate(shiprocketOrder.delivered_date),
+                firstAttemptDate: this.parseShiprocketDate(shiprocketOrder.first_out_for_delivery_date),
+                fetchedAt: new Date(),
+              },
+              { upsert: true }
+            );
             fetched++;
           }
         } catch (error) {
@@ -610,11 +656,66 @@ class ShiprocketService {
           freightRTO: charge.freightRTO || 0,
           whatsappCharges: charge.whatsappCharges || 0,
           otherCharges: charge.otherCharges || 0,
-        }
+        },
+        pickupDate: charge.pickupDate,
+        deliveredDate: charge.deliveredDate,
+        firstAttemptDate: charge.firstAttemptDate
       });
     });
 
     return shippingChargesMap;
+  }
+  /**
+   * Check if the shipment status indicates that pickup has likely occurred
+   */
+  private isStatusPickedUp(statusStr: string | undefined): boolean {
+    if (!statusStr) return false;
+    const status = statusStr.toLowerCase();
+
+    // Statuses that mean pickup HAS NOT HAPPENED yet
+    const awaitingPickup = [
+      'confirmed',
+      'awb assigned',
+      'ready to ship',
+      'label generated',
+      'pickup scheduled',
+      'pickup queued',
+      'manifest generated',
+      '1', '2', '3', '4' // Common early status codes
+    ];
+
+    return !awaitingPickup.some(s => status.includes(s));
+  }
+
+  /**
+   * Validate if a date string is actually a valid date and not junk like "0000-00-00"
+   */
+  private isValidDate(dateStr: string | undefined): boolean {
+    if (!dateStr) return false;
+    if (dateStr.startsWith('0000-00-00')) return false;
+    const date = new Date(dateStr);
+    return !isNaN(date.getTime());
+  }
+
+  /**
+   * Parse shiprocket dates which might be DD-MM-YYYY HH:mm:ss or YYYY-MM-DD HH:mm:ss
+   */
+  private parseShiprocketDate(dateStr: string | undefined): string | undefined {
+    if (!dateStr) return undefined;
+    if (dateStr.startsWith('0000-00-00')) return undefined;
+    // Check if format is DD-MM-YYYY
+    const parts = dateStr.split(' ');
+    if (parts.length > 0 && parts[0].includes('-')) {
+      const dateParts = parts[0].split('-');
+      // If year is the last part (DD-MM-YYYY)
+      if (dateParts[2] && dateParts[2].length === 4) {
+        const isoStr = `${dateParts[2]}-${dateParts[1]}-${dateParts[0]}${parts[1] ? ' ' + parts[1] : ''}`;
+        const date = new Date(isoStr);
+        return isNaN(date.getTime()) ? undefined : isoStr;
+      }
+    }
+    const date = new Date(dateStr);
+    return isNaN(date.getTime()) ? undefined : dateStr;
   }
 }
 

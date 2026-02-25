@@ -833,6 +833,123 @@ export function DashboardPage() {
     };
   })();
 
+  // Shipment Speed Stats (Last 30 days, not before Jan 28, 2026)
+  const shipmentSpeedStats = (() => {
+    const now = new Date();
+    const startDate = new Date('2026-01-28');
+    const thirtyDaysAgo = new Date(now);
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const effectiveStartDate = startDate > thirtyDaysAgo ? startDate : thirtyDaysAgo;
+
+    let totalDispatchHours = 0;
+    let dispatchCount = 0;
+
+    let totalTransitToAttemptDays = 0;
+    let transitToAttemptCount = 0;
+
+    let totalTransitToDeliveryDays = 0;
+    let transitToDeliveryCount = 0;
+
+    let maxDispatchHours = -1;
+    let worstDispatchOrder = '';
+    let maxTransitToAttemptDays = -1;
+    let worstTransitToAttemptOrder = '';
+    let maxTransitToDeliveryDays = -1;
+    let worstTransitToDeliveryOrder = '';
+
+    const msToHours = 1000 * 60 * 60;
+    const msToDays = 1000 * 60 * 60 * 24;
+
+    orders.forEach((order) => {
+      if (order.cancelledAt) return;
+
+      const createdAt = new Date(order.createdAt);
+      if (createdAt < effectiveStartDate) return;
+
+      const hasPickup = order.pickupDate && !isNaN(new Date(order.pickupDate).getTime());
+      const hasAttempt = order.firstAttemptDate && !isNaN(new Date(order.firstAttemptDate).getTime());
+      const hasDelivery = order.deliveredDate && !isNaN(new Date(order.deliveredDate).getTime());
+
+      let pickupTime = 0;
+      if (hasPickup) {
+        pickupTime = new Date(order.pickupDate as string).getTime();
+        // Calculate Dispatch Time (Creation to Pickup)
+        const dispatchHours = (pickupTime - createdAt.getTime()) / msToHours;
+        // Basic sanity check to avoid outliers parsing weird dates
+        if (dispatchHours >= 0 && dispatchHours < 720) {
+          totalDispatchHours += dispatchHours;
+          dispatchCount++;
+          if (dispatchHours > maxDispatchHours) {
+            maxDispatchHours = dispatchHours;
+            worstDispatchOrder = order.name;
+          }
+        }
+      }
+
+      if (hasPickup) {
+        if (hasAttempt) {
+          const attemptTime = new Date(order.firstAttemptDate as string).getTime();
+          const transitDays = (attemptTime - pickupTime) / msToDays;
+          if (transitDays >= 0 && transitDays < 60) {
+            totalTransitToAttemptDays += transitDays;
+            transitToAttemptCount++;
+            if (transitDays > maxTransitToAttemptDays) {
+              maxTransitToAttemptDays = transitDays;
+              worstTransitToAttemptOrder = order.name;
+            }
+          }
+        }
+
+        if (hasDelivery) {
+          const deliveryTime = new Date(order.deliveredDate as string).getTime();
+          const transitDays = (deliveryTime - pickupTime) / msToDays;
+          if (transitDays >= 0 && transitDays < 60) {
+            totalTransitToDeliveryDays += transitDays;
+            transitToDeliveryCount++;
+            if (transitDays > maxTransitToDeliveryDays) {
+              maxTransitToDeliveryDays = transitDays;
+              worstTransitToDeliveryOrder = order.name;
+            }
+          }
+        }
+      }
+    });
+
+    const avgDispatchHours = dispatchCount > 0 ? (totalDispatchHours / dispatchCount) : null;
+    let dispatchLabel = '-';
+    if (avgDispatchHours !== null) {
+      if (avgDispatchHours > 24) {
+        dispatchLabel = `${(avgDispatchHours / 24).toFixed(1)} days`;
+      } else {
+        dispatchLabel = `${avgDispatchHours.toFixed(1)} hrs`;
+      }
+    }
+
+    let worstDispatchLabel = null;
+    if (maxDispatchHours >= 0) {
+      worstDispatchLabel = maxDispatchHours > 24
+        ? `${(maxDispatchHours / 24).toFixed(1)} days`
+        : `${Math.round(maxDispatchHours)} hrs`;
+    }
+
+    return {
+      avgDispatchHours,
+      dispatchLabel,
+      worstDispatchOrder,
+      worstDispatchLabel,
+      worstTransitToAttemptOrder,
+      maxTransitToAttemptDays: maxTransitToAttemptDays >= 0 ? maxTransitToAttemptDays.toFixed(1) : null,
+      worstTransitToDeliveryOrder,
+      maxTransitToDeliveryDays: maxTransitToDeliveryDays >= 0 ? maxTransitToDeliveryDays.toFixed(1) : null,
+      avgTransitToAttemptDays: transitToAttemptCount > 0 ? (totalTransitToAttemptDays / transitToAttemptCount).toFixed(1) : '-',
+      avgTransitToDeliveryDays: transitToDeliveryCount > 0 ? (totalTransitToDeliveryDays / transitToDeliveryCount).toFixed(1) : '-',
+      dispatchCount,
+      transitToAttemptCount,
+      transitToDeliveryCount
+    };
+  })();
+
+
   const handleTileHover = (e: React.MouseEvent, dateKey: string | null, dateLabel: string, pnl: number | null) => {
     if (!dateKey) {
       setTooltip(null);
@@ -1506,6 +1623,62 @@ export function DashboardPage() {
                 </text>
               </PieChart>
             </ResponsiveContainer>
+          </div>
+        </div>
+      </section>
+
+      <section className={styles.section}>
+        <h2 className={styles['section-title']}>Shipment Speed — Last 30 Days</h2>
+        <p className={styles['section-desc']}>
+          Analyze your fulfillment speed to identify bottlenecks and improve customer experience.
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginTop: '1.5rem' }}>
+          <div className={styles.chartStatBlock} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', padding: '1.25rem', borderRadius: '8px' }}>
+            <span className={styles.chartStatLabel}>Avg Time to Dispatch</span>
+            <span className={styles.chartStatValue} style={{ fontSize: '1.5rem', fontWeight: 600, color: '#0f172a' }}>
+              {shipmentSpeedStats.dispatchLabel}
+            </span>
+            <span style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '8px', display: 'block' }}>
+              From Order Placed to Courier Pickup<br />
+              (Based on {shipmentSpeedStats.dispatchCount} orders)
+            </span>
+            {shipmentSpeedStats.worstDispatchOrder && (
+              <span style={{ fontSize: '0.7rem', color: '#ef4444', marginTop: '8px', display: 'block', borderTop: '1px solid #e2e8f0', paddingTop: '8px' }}>
+                <strong>Worst Order:</strong> {shipmentSpeedStats.worstDispatchOrder} ({shipmentSpeedStats.worstDispatchLabel})
+              </span>
+            )}
+          </div>
+
+          <div className={styles.chartStatBlock} style={{ background: '#fdf4ff', border: '1px solid #fae8ff', padding: '1.25rem', borderRadius: '8px' }}>
+            <span className={styles.chartStatLabel}>Avg Transit to First Attempt</span>
+            <span className={styles.chartStatValue} style={{ fontSize: '1.5rem', fontWeight: 600, color: '#c026d3' }}>
+              {shipmentSpeedStats.avgTransitToAttemptDays} days
+            </span>
+            <span style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '8px', display: 'block' }}>
+              From Pickup to First Delivery Attempt<br />
+              (Based on {shipmentSpeedStats.transitToAttemptCount} orders)
+            </span>
+            {shipmentSpeedStats.worstTransitToAttemptOrder && (
+              <span style={{ fontSize: '0.7rem', color: '#ef4444', marginTop: '8px', display: 'block', borderTop: '1px solid #fae8ff', paddingTop: '8px' }}>
+                <strong>Worst Order:</strong> {shipmentSpeedStats.worstTransitToAttemptOrder} ({shipmentSpeedStats.maxTransitToAttemptDays} days)
+              </span>
+            )}
+          </div>
+
+          <div className={styles.chartStatBlock} style={{ background: '#ecfdf5', border: '1px solid #d1fae5', padding: '1.25rem', borderRadius: '8px' }}>
+            <span className={styles.chartStatLabel}>Avg Transit to Delivery</span>
+            <span className={styles.chartStatValue} style={{ fontSize: '1.5rem', fontWeight: 600, color: '#059669' }}>
+              {shipmentSpeedStats.avgTransitToDeliveryDays} days
+            </span>
+            <span style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '8px', display: 'block' }}>
+              From Pickup to Successful Delivery<br />
+              (Based on {shipmentSpeedStats.transitToDeliveryCount} orders)
+            </span>
+            {shipmentSpeedStats.worstTransitToDeliveryOrder && (
+              <span style={{ fontSize: '0.7rem', color: '#ef4444', marginTop: '8px', display: 'block', borderTop: '1px solid #d1fae5', paddingTop: '8px' }}>
+                <strong>Worst Order:</strong> {shipmentSpeedStats.worstTransitToDeliveryOrder} ({shipmentSpeedStats.maxTransitToDeliveryDays} days)
+              </span>
+            )}
           </div>
         </div>
       </section>

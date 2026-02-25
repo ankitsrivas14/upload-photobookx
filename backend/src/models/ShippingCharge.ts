@@ -3,19 +3,22 @@ import mongoose, { Schema, Document } from 'mongoose';
 export interface IShippingCharge extends Document {
   orderNumber: string; // Shopify order number (e.g., "PB1159S")
   shippingCharge: number; // TOTAL amount paid to Shiprocket (in INR)
-  
+
   // Detailed breakdown of charges
   freightForward: number; // Forward shipping charge
   freightCOD: number; // COD handling charge (positive if applied, negative if reversed)
   freightRTO: number; // RTO/return shipping charge
   whatsappCharges: number; // WhatsApp communication charges
   otherCharges: number; // Any other charges
-  
+
   shiprocketOrderId?: number; // Shiprocket's internal order ID
   awbCode?: string; // AWB tracking code
   courierName?: string; // Courier company name
   weight?: number; // Package weight in kg
   status?: string; // Shipment status (e.g., "Delivered", "In Transit")
+  pickupDate?: string; // Date when order was picked up
+  deliveredDate?: string; // Date when order was delivered
+  firstAttemptDate?: string; // Date of first delivery attempt
   fetchedAt: Date; // When this was fetched from Shiprocket
   updatedAt: Date;
 }
@@ -64,6 +67,15 @@ const ShippingChargeSchema = new Schema<IShippingCharge>({
     type: Number,
   },
   status: {
+    type: String,
+  },
+  pickupDate: {
+    type: String,
+  },
+  deliveredDate: {
+    type: String,
+  },
+  firstAttemptDate: {
     type: String,
   },
   fetchedAt: {

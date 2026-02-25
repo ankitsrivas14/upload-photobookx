@@ -31,6 +31,9 @@ interface ShopifyOrder {
   totalPrice?: number;
   shippingCharge?: number;
   shippingBreakdown?: ShippingChargeBreakdown;
+  pickupDate?: string | null;
+  deliveredDate?: string | null;
+  firstAttemptDate?: string | null;
   cancelledAt?: string | null;
   lineItems?: Array<{
     title: string;
@@ -97,9 +100,7 @@ export const OrderRow: React.FC<OrderRowProps> = ({
           <span className={`${styles['payment-dot']} ${styles[order.paymentMethod?.toLowerCase() || 'prepaid']}`}></span>
           <span className={styles['order-number']}>{order.name}</span>
         </div>
-      </td>
-      <td className={styles['customer-tags-cell']}>
-        {order.customerTags || '—'}
+
       </td>
       <td className={styles['line-items']}>
         {order.lineItems && order.lineItems.length > 0 ? (
@@ -162,14 +163,6 @@ export const OrderRow: React.FC<OrderRowProps> = ({
             </span>
           );
         })()}
-      </td>
-      <td className={styles['order-date']}>
-        {new Date(order.createdAt).toLocaleDateString('en-IN', {
-          year: 'numeric',
-          month: 'short',
-          day: 'numeric',
-          timeZone: 'Asia/Kolkata',
-        })}
       </td>
       <td className={styles['actions-cell']}>
         <div className={styles['action-buttons']}>
