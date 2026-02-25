@@ -10,6 +10,7 @@ import salesRoutes from './routes/sales';
 import cogsRoutes from './routes/cogs';
 import deliveryDatesRoutes from './routes/deliveryDates';
 import bankAccountRoutes from './routes/bankAccount';
+import { automatedTaggingService } from './services/automatedTaggingService';
 
 
 const app = express();
@@ -71,4 +72,7 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 app.listen(config.port, () => {
   console.log(`🚀 Server running on http://localhost:${config.port}`);
   console.log(`📦 Environment: ${config.nodeEnv}`);
+
+  // Start automated background jobs
+  automatedTaggingService.start();
 });
