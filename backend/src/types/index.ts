@@ -88,6 +88,13 @@ export interface ShopifyCustomer {
   tags?: string;
 }
 
+export interface ShopifyAddress {
+  city?: string;
+  province?: string;
+  country?: string;
+  zip?: string;
+}
+
 export interface ShopifyOrder {
   id: number;
   name: string;
@@ -104,6 +111,7 @@ export interface ShopifyOrder {
   cancelled_at?: string | null;
   financial_status?: string;
   customer?: ShopifyCustomer;
+  shipping_address?: ShopifyAddress;
 }
 
 export interface ShopifyOrdersResponse {

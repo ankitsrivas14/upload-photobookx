@@ -292,6 +292,10 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
           pickupDate: shippingChargesMap.get(order.name)?.pickupDate || null,
           deliveredDate: shippingChargesMap.get(order.name)?.deliveredDate || null,
           firstAttemptDate: shippingChargesMap.get(order.name)?.firstAttemptDate || null,
+          courierName: shippingChargesMap.get(order.name)?.courierName || null,
+          city: shippingChargesMap.get(order.name)?.customerCity || null,
+          customerName: shippingChargesMap.get(order.name)?.customerName || null,
+          customerState: shippingChargesMap.get(order.name)?.customerState || null,
           cancelledAt: order.cancelled_at,
           lineItems: order.line_items?.map(item => ({
             title: item.title,

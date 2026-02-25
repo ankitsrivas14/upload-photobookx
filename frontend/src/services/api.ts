@@ -92,6 +92,7 @@ interface ShopifyOrder {
   totalPrice?: number;
   shippingCharge?: number; // Shipping charge paid to Shiprocket
   pickupDate?: string | null;
+  courierName?: string | null;
   deliveredDate?: string | null;
   firstAttemptDate?: string | null;
   cancelledAt?: string | null;
@@ -102,6 +103,9 @@ interface ShopifyOrder {
   }>;
   customerTags?: string | null;
   customerId?: number | null;
+  city?: string | null;
+  customerName?: string | null;
+  customerState?: string | null;
 }
 
 interface OrdersResponse {

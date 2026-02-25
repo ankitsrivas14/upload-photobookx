@@ -31,7 +31,8 @@ export function AdminLayout() {
     if (href === '/admin/dashboard') return path === '/admin/dashboard';
     if (href === '/admin/sales-management') return path === '/admin/sales-management';
     if (href === '/admin/expenses/meta-ads' || href === '/admin/expenses') return path.startsWith('/admin/expenses');
-    if (href === '/admin/gst-reports') return path.startsWith('/admin/gst-reports');
+    if (href === '/admin/magic-links') return path.startsWith('/admin/magic-links');
+    if (href === '/admin/analysis') return path.startsWith('/admin/analysis');
     if (href === '/admin/tools') return path.startsWith('/admin/tools');
     if (href.startsWith('/admin/')) return path === href || (href !== '/admin' && path.startsWith(href + '/'));
     return path === href;
@@ -64,39 +65,14 @@ export function AdminLayout() {
           </Link>
 
           <Link
-            to="/admin/orders"
-            className={`${styles['nav-item']} ${path === '/admin/orders' ? styles.active : ''}`}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M20 7h-9" />
-              <path d="M14 17H5" />
-              <circle cx="17" cy="17" r="3" />
-              <circle cx="7" cy="7" r="3" />
-            </svg>
-            {!sidebarCollapsed && <span>Orders & Links</span>}
-          </Link>
-
-          <Link
             to="/admin/magic-links"
-            className={`${styles['nav-item']} ${path === '/admin/magic-links' ? styles.active : ''}`}
+            className={`${styles['nav-item']} ${isActive('/admin/magic-links') ? styles.active : ''}`}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
               <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
             </svg>
             {!sidebarCollapsed && <span>Magic Links</span>}
-          </Link>
-
-          <Link
-            to="/admin/products"
-            className={`${styles['nav-item']} ${path === '/admin/products' ? styles.active : ''}`}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="3" y="3" width="18" height="18" rx="2" />
-              <path d="M3 9h18" />
-              <path d="M9 21V9" />
-            </svg>
-            {!sidebarCollapsed && <span>Products</span>}
           </Link>
 
           <Link
@@ -114,7 +90,7 @@ export function AdminLayout() {
 
           <Link
             to="/admin/expenses/meta-ads"
-            className={`${styles['nav-item']} ${path.startsWith('/admin/expenses') ? styles.active : ''}`}
+            className={`${styles['nav-item']} ${isActive('/admin/expenses/meta-ads') ? styles.active : ''}`}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <line x1="12" y1="1" x2="12" y2="23" />
@@ -124,22 +100,20 @@ export function AdminLayout() {
           </Link>
 
           <Link
-            to="/admin/gst-reports"
-            className={`${styles['nav-item']} ${path.startsWith('/admin/gst-reports') ? styles.active : ''}`}
+            to="/admin/analysis"
+            className={`${styles['nav-item']} ${isActive('/admin/analysis') ? styles.active : ''}`}
           >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-              <polyline points="14 2 14 8 20 8" />
-              <line x1="16" y1="13" x2="8" y2="13" />
-              <line x1="16" y1="17" x2="8" y2="17" />
-              <polyline points="10 9 9 9 8 9" />
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="20" x2="18" y2="10" />
+              <line x1="12" y1="20" x2="12" y2="4" />
+              <line x1="6" y1="20" x2="6" y2="14" />
             </svg>
-            {!sidebarCollapsed && <span>GST Reports</span>}
+            {!sidebarCollapsed && <span>Analysis</span>}
           </Link>
 
           <Link
             to="/admin/tools"
-            className={`${styles['nav-item']} ${path.startsWith('/admin/tools') ? styles.active : ''}`}
+            className={`${styles['nav-item']} ${isActive('/admin/tools') ? styles.active : ''}`}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />

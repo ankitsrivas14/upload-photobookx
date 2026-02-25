@@ -23,6 +23,9 @@ interface ShiprocketOrder {
       applied_weight_amount_rto?: string | number;
     };
   };
+  customer_name?: string;
+  customer_city?: string;
+  customer_state?: string;
   picked_up_date?: string;
   delivered_date?: string;
   first_out_for_delivery_date?: string;
@@ -426,10 +429,10 @@ class ShiprocketService {
       // COD will be reversed in frontend for RTO COD orders
       const totalShippingCost = freightForward + freightCOD + freightRTO + whatsappCharges + otherCharges;
 
-      // Don't store if total charge is 0
-      if (totalShippingCost === 0) {
-        return null;
-      }
+      // We now store even if total charge is 0 to save customer city/state data
+      // if (totalShippingCost === 0) {
+      //   return null;
+      // }
 
       // Update or store in database with full breakdown
       await ShippingCharge.findOneAndUpdate(
@@ -455,6 +458,9 @@ class ShiprocketService {
                 : undefined)),
           deliveredDate: this.parseShiprocketDate(shiprocketOrder.delivered_date),
           firstAttemptDate: this.parseShiprocketDate(shiprocketOrder.first_out_for_delivery_date),
+          customerName: shiprocketOrder.customer_name,
+          customerCity: shiprocketOrder.customer_city,
+          customerState: shiprocketOrder.customer_state,
           fetchedAt: new Date(),
         },
         { upsert: true }
@@ -587,43 +593,46 @@ class ShiprocketService {
           // Note: COD will be reversed in frontend for RTO orders
           const totalShippingCost = freightForward + freightCOD + freightRTO + whatsappCharges + otherCharges;
 
-          // Only store if > 0
-          if (totalShippingCost > 0) {
-            const detectedPickupDate = this.isValidDate(shiprocketOrder.picked_up_date)
-              ? shiprocketOrder.picked_up_date
-              : (this.isValidDate(shipment.pickup_actual_date)
-                ? shipment.pickup_actual_date
-                : (this.isStatusPickedUp(shipment.status?.toString()) && this.isValidDate(shipment.pickup_date)
-                  ? shipment.pickup_date
-                  : undefined));
+          // Store everything to capture address demographic details early
+          // if (totalShippingCost > 0) {
+          const detectedPickupDate = this.isValidDate(shiprocketOrder.picked_up_date)
+            ? shiprocketOrder.picked_up_date
+            : (this.isValidDate(shipment.pickup_actual_date)
+              ? shipment.pickup_actual_date
+              : (this.isStatusPickedUp(shipment.status?.toString()) && this.isValidDate(shipment.pickup_date)
+                ? shipment.pickup_date
+                : undefined));
 
-            if (detectedPickupDate) {
-              console.log(`[Shiprocket] Found pickup date for ${orderNumber}: ${detectedPickupDate}`);
-            }
-
-            await ShippingCharge.findOneAndUpdate(
-              { orderNumber },
-              {
-                shippingCharge: totalShippingCost,
-                freightForward,
-                freightCOD,
-                freightRTO,
-                whatsappCharges,
-                otherCharges,
-                shiprocketOrderId: shiprocketOrder.id,
-                awbCode,
-                courierName: shipment.courier_name || shipment.courier,
-                weight: parseFloat(shipment.weight) || undefined,
-                status: shipment.status?.toString(),
-                pickupDate: detectedPickupDate,
-                deliveredDate: this.parseShiprocketDate(shiprocketOrder.delivered_date),
-                firstAttemptDate: this.parseShiprocketDate(shiprocketOrder.first_out_for_delivery_date),
-                fetchedAt: new Date(),
-              },
-              { upsert: true }
-            );
-            fetched++;
+          if (detectedPickupDate) {
+            console.log(`[Shiprocket] Found pickup date for ${orderNumber}: ${detectedPickupDate}`);
           }
+
+          await ShippingCharge.findOneAndUpdate(
+            { orderNumber },
+            {
+              shippingCharge: totalShippingCost,
+              freightForward,
+              freightCOD,
+              freightRTO,
+              whatsappCharges,
+              otherCharges,
+              shiprocketOrderId: shiprocketOrder.id,
+              awbCode,
+              courierName: shipment.courier_name || shipment.courier,
+              weight: parseFloat(shipment.weight) || undefined,
+              status: shipment.status?.toString(),
+              pickupDate: detectedPickupDate,
+              deliveredDate: this.parseShiprocketDate(shiprocketOrder.delivered_date),
+              firstAttemptDate: this.parseShiprocketDate(shiprocketOrder.first_out_for_delivery_date),
+              customerName: shiprocketOrder.customer_name,
+              customerCity: shiprocketOrder.customer_city,
+              customerState: shiprocketOrder.customer_state,
+              fetchedAt: new Date(),
+            },
+            { upsert: true }
+          );
+          fetched++;
+          // }
         } catch (error) {
           console.error(`[Shiprocket] Error processing ${orderNumber}:`, error);
         }
@@ -659,7 +668,11 @@ class ShiprocketService {
         },
         pickupDate: charge.pickupDate,
         deliveredDate: charge.deliveredDate,
-        firstAttemptDate: charge.firstAttemptDate
+        firstAttemptDate: charge.firstAttemptDate,
+        courierName: charge.courierName,
+        customerName: charge.customerName,
+        customerCity: charge.customerCity,
+        customerState: charge.customerState,
       });
     });
 

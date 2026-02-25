@@ -19,6 +19,11 @@ export interface IShippingCharge extends Document {
   pickupDate?: string; // Date when order was picked up
   deliveredDate?: string; // Date when order was delivered
   firstAttemptDate?: string; // Date of first delivery attempt
+
+  customerName?: string; // Extracted from Shiprocket
+  customerCity?: string; // Extracted from Shiprocket
+  customerState?: string; // Extracted from Shiprocket
+
   fetchedAt: Date; // When this was fetched from Shiprocket
   updatedAt: Date;
 }
@@ -78,6 +83,17 @@ const ShippingChargeSchema = new Schema<IShippingCharge>({
   firstAttemptDate: {
     type: String,
   },
+
+  customerName: {
+    type: String,
+  },
+  customerCity: {
+    type: String,
+  },
+  customerState: {
+    type: String,
+  },
+
   fetchedAt: {
     type: Date,
     required: true,
