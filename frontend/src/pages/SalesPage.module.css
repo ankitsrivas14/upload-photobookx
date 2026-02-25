@@ -487,6 +487,14 @@
   background: #faf5ff;
 }
 
+.bulk-menu-item.mark-no-cod {
+  color: #475569;
+}
+
+.bulk-menu-item.mark-no-cod:hover {
+  background: #f8fafc;
+}
+
 .menu-divider {
   height: 1px;
   background: #e2e8f0;
@@ -562,6 +570,14 @@
   color: #64748b;
   text-transform: uppercase;
   letter-spacing: 0.025em;
+  vertical-align: middle;
+}
+
+.dropdown-content {
+  background: white !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05) !important;
+  z-index: 10000;
 }
 
 .orders-table td {
@@ -681,6 +697,16 @@
 
 .order-name {
   vertical-align: middle;
+}
+
+.customer-tags-cell {
+  color: #475569;
+  font-size: 0.75rem;
+  font-weight: 500;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .order-name-wrapper {

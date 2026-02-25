@@ -31,6 +31,8 @@ interface ShopifyOrder {
     quantity: number;
     variantTitle?: string;
   }>;
+  customerTags?: string | null;
+  customerId?: number | null;
 }
 
 interface COGSField {
@@ -1358,6 +1360,67 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
     }
   };
 
+  const handleAddCustomerTag = async (customerId: number, tag: string) => {
+    if (window.confirm(`Add "${tag}" tag to customer?`)) {
+      try {
+        const response = await api.addCustomerTag(customerId, tag);
+        if (response.success) {
+          await api.clearOrdersCache();
+          await loadData();
+          alert('Tag added successfully');
+        } else {
+          alert(`Error: ${response.error || 'Failed to add tag'}`);
+        }
+      } catch (error) {
+        console.error('Error adding customer tag:', error);
+        alert('Failed to add tag');
+      }
+    }
+  };
+
+  const handleBulkAddNoCOD = async () => {
+    if (selectedOrders.size === 0) return;
+
+    // Get unique customer IDs from selected orders
+    const selectedOrderIds = Array.from(selectedOrders);
+    const customerIds = Array.from(new Set(
+      selectedOrderIds
+        .map(id => orders.find(o => o.id === id)?.customerId)
+        .filter((id): id is number => !!id)
+    ));
+
+    if (customerIds.length === 0) {
+      alert('Selected orders do not have associated customer IDs');
+      return;
+    }
+
+    if (!window.confirm(`Add "no-cod" tag to ${customerIds.length} customer(s)?`)) return;
+
+    setIsProcessing(true);
+    try {
+      const response = await api.bulkAddCustomerTags(customerIds, 'no-cod');
+      if (response.success) {
+        await api.clearOrdersCache();
+        await loadData();
+        setSelectedOrders(new Set());
+        setSelectAll(false);
+        setShowBulkMenu(false);
+        if (response.summary) {
+          alert(`Successfully updated ${response.summary.successful} customers. Failed: ${response.summary.failed}.`);
+        } else {
+          alert('Customers updated successfully');
+        }
+      } else {
+        alert(`Error: ${response.error || 'Failed to update customers'}`);
+      }
+    } catch (err) {
+      console.error('Failed to add bulk customer tags:', err);
+      alert('An error occurred during bulk operation');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const calculateCogsBreakdown = (
     fields: COGSField[],
     salePrice: number,
@@ -1598,6 +1661,17 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
                             <path d="M6 6l12 12" />
                           </svg>
                           Unmark RTO
+                        </button>
+                        <div className={styles['menu-divider']}></div>
+                        <button
+                          className={`${styles['bulk-menu-item']} ${styles['mark-no-cod']}`}
+                          onClick={handleBulkAddNoCOD}
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
+                            <line x1="7" y1="7" x2="7.01" y2="7" />
+                          </svg>
+                          Mark as no-cod
                         </button>
                         <div className={styles['menu-divider']}></div>
                         <button
@@ -1867,6 +1941,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
                   />
                 </th>
                 <th>Order</th>
+                <th>Customer Tags</th>
                 <th>Items</th>
                 <th>Tags</th>
                 <th>P/L</th>
@@ -1889,489 +1964,496 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
               avgPnlPerFinalOrder={avgPnlPerFinalOrder}
               globalNdrRate={globalNdrRate}
               onUpdateDeliveryStatus={handleUpdateDeliveryStatus}
+              onAddCustomerTag={handleAddCustomerTag}
             />
           </table>
         </div>
       </div>
 
       {/* Pending Products Drawer */}
-      {showPendingDrawer && (
-        <div className={styles['drawer-overlay']} onClick={() => setShowPendingDrawer(false)}>
-          <div className={styles['drawer']} onClick={(e) => e.stopPropagation()}>
-            <div className={styles['drawer-header']}>
-              <h3>Pending Products to Fulfill</h3>
-              <button
-                className={styles['drawer-close']}
-                onClick={() => setShowPendingDrawer(false)}
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
-            </div>
-
-            <div className={styles['drawer-filters']}>
-              <div className={styles['drawer-filters-row']}>
-                <span className={styles['drawer-filters-label']}>Payment:</span>
+      {
+        showPendingDrawer && (
+          <div className={styles['drawer-overlay']} onClick={() => setShowPendingDrawer(false)}>
+            <div className={styles['drawer']} onClick={(e) => e.stopPropagation()}>
+              <div className={styles['drawer-header']}>
+                <h3>Pending Products to Fulfill</h3>
                 <button
-                  onClick={() => setPendingFilterCOD(!pendingFilterCOD)}
-                  className={`${styles['drawer-filter-chip']} ${pendingFilterCOD ? styles.active : ''}`}
+                  className={styles['drawer-close']}
+                  onClick={() => setShowPendingDrawer(false)}
                 >
-                  COD
-                </button>
-                <button
-                  onClick={() => setPendingFilterPaid(!pendingFilterPaid)}
-                  className={`${styles['drawer-filter-chip']} ${pendingFilterPaid ? styles.active : ''}`}
-                >
-                  Paid
-                </button>
-              </div>
-
-              <div className={styles['drawer-filters-row']}>
-                <span className={styles['drawer-filters-label']}>Delayed:</span>
-                <div className={styles['dropdown-container']}>
-                  <button
-                    onClick={() => setShowDelayDropdown(!showDelayDropdown)}
-                    className={`${styles['dropdown-trigger']} ${pendingFilterDelayDays.size > 0 ? styles.active : ''}`}
-                  >
-                    {pendingFilterDelayDays.size > 0
-                      ? `${pendingFilterDelayDays.size} selected`
-                      : 'Select delay days'}
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <polyline points="6 9 12 15 18 9" />
-                    </svg>
-                  </button>
-
-                  {showDelayDropdown && (
-                    <div className={styles['dropdown-menu']}>
-                      {getAvailableDelayDays().map(days => (
-                        <label key={days} className={styles['dropdown-item']}>
-                          <input
-                            type="checkbox"
-                            checked={pendingFilterDelayDays.has(days)}
-                            onChange={(e) => {
-                              const newSet = new Set(pendingFilterDelayDays);
-                              if (e.target.checked) {
-                                newSet.add(days);
-                              } else {
-                                newSet.delete(days);
-                              }
-                              setPendingFilterDelayDays(newSet);
-                            }}
-                          />
-                          <span>{days === 0 ? 'No Delay' : `${days} day${days > 1 ? 's' : ''} delay`}</span>
-                        </label>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {(pendingFilterCOD || pendingFilterPaid || pendingFilterDelayDays.size > 0) && (
-                <button
-                  onClick={() => {
-                    setPendingFilterCOD(false);
-                    setPendingFilterPaid(false);
-                    setPendingFilterDelayDays(new Set());
-                  }}
-                  className={styles['drawer-clear-filters']}
-                >
-                  Clear All
-                </button>
-              )}
-            </div>
-
-            <div className={styles['drawer-body']}>
-              {getPendingProducts().length === 0 ? (
-                <div className={styles['drawer-empty']}>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <polyline points="20 6 9 17 4 12" />
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
                   </svg>
-                  <p>No pending products</p>
-                  <span>All orders are fulfilled!</span>
+                </button>
+              </div>
+
+              <div className={styles['drawer-filters']}>
+                <div className={styles['drawer-filters-row']}>
+                  <span className={styles['drawer-filters-label']}>Payment:</span>
+                  <button
+                    onClick={() => setPendingFilterCOD(!pendingFilterCOD)}
+                    className={`${styles['drawer-filter-chip']} ${pendingFilterCOD ? styles.active : ''}`}
+                  >
+                    COD
+                  </button>
+                  <button
+                    onClick={() => setPendingFilterPaid(!pendingFilterPaid)}
+                    className={`${styles['drawer-filter-chip']} ${pendingFilterPaid ? styles.active : ''}`}
+                  >
+                    Paid
+                  </button>
                 </div>
-              ) : (
-                <div className={styles['pending-products-list']}>
-                  {getPendingProducts().map((product, idx) => (
-                    <div key={idx} className={styles['pending-product-item']}>
-                      <div className={styles['product-info']}>
-                        <div className={styles['product-title']}>{product.title}</div>
-                        {product.variantTitle && (
-                          <div className={styles['product-variant']}>{product.variantTitle}</div>
-                        )}
-                        <div className={styles['product-orders']}>
-                          Orders: {product.orderNumbers.join(', ')}
+
+                <div className={styles['drawer-filters-row']}>
+                  <span className={styles['drawer-filters-label']}>Delayed:</span>
+                  <div className={styles['dropdown-container']}>
+                    <button
+                      onClick={() => setShowDelayDropdown(!showDelayDropdown)}
+                      className={`${styles['dropdown-trigger']} ${pendingFilterDelayDays.size > 0 ? styles.active : ''}`}
+                    >
+                      {pendingFilterDelayDays.size > 0
+                        ? `${pendingFilterDelayDays.size} selected`
+                        : 'Select delay days'}
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="6 9 12 15 18 9" />
+                      </svg>
+                    </button>
+
+                    {showDelayDropdown && (
+                      <div className={styles['dropdown-menu']}>
+                        {getAvailableDelayDays().map(days => (
+                          <label key={days} className={styles['dropdown-item']}>
+                            <input
+                              type="checkbox"
+                              checked={pendingFilterDelayDays.has(days)}
+                              onChange={(e) => {
+                                const newSet = new Set(pendingFilterDelayDays);
+                                if (e.target.checked) {
+                                  newSet.add(days);
+                                } else {
+                                  newSet.delete(days);
+                                }
+                                setPendingFilterDelayDays(newSet);
+                              }}
+                            />
+                            <span>{days === 0 ? 'No Delay' : `${days} day${days > 1 ? 's' : ''} delay`}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {(pendingFilterCOD || pendingFilterPaid || pendingFilterDelayDays.size > 0) && (
+                  <button
+                    onClick={() => {
+                      setPendingFilterCOD(false);
+                      setPendingFilterPaid(false);
+                      setPendingFilterDelayDays(new Set());
+                    }}
+                    className={styles['drawer-clear-filters']}
+                  >
+                    Clear All
+                  </button>
+                )}
+              </div>
+
+              <div className={styles['drawer-body']}>
+                {getPendingProducts().length === 0 ? (
+                  <div className={styles['drawer-empty']}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                    <p>No pending products</p>
+                    <span>All orders are fulfilled!</span>
+                  </div>
+                ) : (
+                  <div className={styles['pending-products-list']}>
+                    {getPendingProducts().map((product, idx) => (
+                      <div key={idx} className={styles['pending-product-item']}>
+                        <div className={styles['product-info']}>
+                          <div className={styles['product-title']}>{product.title}</div>
+                          {product.variantTitle && (
+                            <div className={styles['product-variant']}>{product.variantTitle}</div>
+                          )}
+                          <div className={styles['product-orders']}>
+                            Orders: {product.orderNumbers.join(', ')}
+                          </div>
+                        </div>
+                        <div className={styles['product-count']}>
+                          <span className={styles['count-badge']}>{product.count}</span>
                         </div>
                       </div>
-                      <div className={styles['product-count']}>
-                        <span className={styles['count-badge']}>{product.count}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )
+      }
 
       {/* COGS Calculator Modal */}
-      {showCogsModal && selectedOrderForCogs && (
-        <div className={styles['modal-overlay']} onClick={() => setShowCogsModal(false)}>
-          <div className={styles['modal-content']} onClick={(e) => e.stopPropagation()}>
-            <div className={styles['modal-header']}>
-              <h3>Profit/Loss Calculator</h3>
-              <button
-                className={styles['modal-close']}
-                onClick={() => setShowCogsModal(false)}
-              >
-                ×
-              </button>
-            </div>
-
-            <div className={styles['modal-body']}>
-              {/* Section 1: Order Details */}
-              <div className={styles['cost-section']}>
-                <h3 className={styles['section-title']}>Order Details</h3>
-                <div className={styles['order-info']}>
-                  <div className={styles['info-row']}>
-                    <span className={styles['info-label']}>Order:</span>
-                    <span className={styles['info-value']}>{selectedOrderForCogs.name}</span>
-                  </div>
-                  <div className={styles['info-row']}>
-                    <span className={styles['info-label']}>Sale Price:</span>
-                    <span className={styles['info-value']}>
-                      ₹{formatIndianNumber(selectedOrderForCogs.totalPrice || 0)}
-                    </span>
-                  </div>
-                  <div className={styles['info-row']}>
-                    <span className={styles['info-label']}>Variant:</span>
-                    <span className={styles['info-value']}>
-                      {selectedVariant === 'small' ? 'Small Book' : 'Large Book'}
-                    </span>
-                  </div>
-                  <div className={styles['info-row']}>
-                    <span className={styles['info-label']}>Config Type:</span>
-                    <span className={styles['info-value']}>
-                      {isOrderDelivered(selectedOrderForCogs) ? 'COGS' : 'NDR'}
-                    </span>
-                  </div>
-                </div>
+      {
+        showCogsModal && selectedOrderForCogs && (
+          <div className={styles['modal-overlay']} onClick={() => setShowCogsModal(false)}>
+            <div className={styles['modal-content']} onClick={(e) => e.stopPropagation()}>
+              <div className={styles['modal-header']}>
+                <h3>Profit/Loss Calculator</h3>
+                <button
+                  className={styles['modal-close']}
+                  onClick={() => setShowCogsModal(false)}
+                >
+                  ×
+                </button>
               </div>
 
-              {/* Section 2: COGS Config Charges */}
-              <div className={styles['cost-section']}>
-                <h3 className={styles['section-title']}>COGS Configuration</h3>
-                <div className={styles['breakdown-list']}>
-                  {cogsBreakdown.length === 0 ? (
-                    <p className={styles['no-data']}>No COGS configuration available</p>
-                  ) : (
-                    cogsBreakdown
-                      .filter(item => item.fieldName !== 'Ad cost (Meta)') // Exclude Ad Cost, shown separately
-                      .map((item, idx) => (
-                        <div key={idx} className={styles['breakdown-item']}>
-                          <div className={styles['breakdown-info']}>
-                            <span className={styles['breakdown-name']}>{item.fieldName}</span>
-                            <span className={styles['breakdown-type']}>
-                              {item.calculationType === 'percentage'
-                                ? `${formatIndianNumber(item.value, 1)}%`
-                                : `₹${formatIndianNumber(item.value)}`}
+              <div className={styles['modal-body']}>
+                {/* Section 1: Order Details */}
+                <div className={styles['cost-section']}>
+                  <h3 className={styles['section-title']}>Order Details</h3>
+                  <div className={styles['order-info']}>
+                    <div className={styles['info-row']}>
+                      <span className={styles['info-label']}>Order:</span>
+                      <span className={styles['info-value']}>{selectedOrderForCogs.name}</span>
+                    </div>
+                    <div className={styles['info-row']}>
+                      <span className={styles['info-label']}>Sale Price:</span>
+                      <span className={styles['info-value']}>
+                        ₹{formatIndianNumber(selectedOrderForCogs.totalPrice || 0)}
+                      </span>
+                    </div>
+                    <div className={styles['info-row']}>
+                      <span className={styles['info-label']}>Variant:</span>
+                      <span className={styles['info-value']}>
+                        {selectedVariant === 'small' ? 'Small Book' : 'Large Book'}
+                      </span>
+                    </div>
+                    <div className={styles['info-row']}>
+                      <span className={styles['info-label']}>Config Type:</span>
+                      <span className={styles['info-value']}>
+                        {isOrderDelivered(selectedOrderForCogs) ? 'COGS' : 'NDR'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Section 2: COGS Config Charges */}
+                <div className={styles['cost-section']}>
+                  <h3 className={styles['section-title']}>COGS Configuration</h3>
+                  <div className={styles['breakdown-list']}>
+                    {cogsBreakdown.length === 0 ? (
+                      <p className={styles['no-data']}>No COGS configuration available</p>
+                    ) : (
+                      cogsBreakdown
+                        .filter(item => item.fieldName !== 'Ad cost (Meta)') // Exclude Ad Cost, shown separately
+                        .map((item, idx) => (
+                          <div key={idx} className={styles['breakdown-item']}>
+                            <div className={styles['breakdown-info']}>
+                              <span className={styles['breakdown-name']}>{item.fieldName}</span>
+                              <span className={styles['breakdown-type']}>
+                                {item.calculationType === 'percentage'
+                                  ? `${formatIndianNumber(item.value, 1)}%`
+                                  : `₹${formatIndianNumber(item.value)}`}
+                              </span>
+                            </div>
+                            <span className={styles['breakdown-cost']}>
+                              ₹{formatIndianNumber(item.calculatedCost)}
                             </span>
                           </div>
-                          <span className={styles['breakdown-cost']}>
-                            ₹{formatIndianNumber(item.calculatedCost)}
-                          </span>
-                        </div>
-                      ))
-                  )}
-                </div>
-              </div>
-
-              {/* Section 3: Ad Cost */}
-              <div className={styles['cost-section']}>
-                <h3 className={styles['section-title']}>Advertisement Cost</h3>
-                <div className={styles['breakdown-list']}>
-                  <div className={styles['breakdown-item']}>
-                    <div className={styles['breakdown-info']}>
-                      <span className={styles['breakdown-name']}>Ad Cost (Meta)</span>
-                      <span className={styles['breakdown-type']}>Per Order</span>
-                    </div>
-                    <span className={styles['breakdown-cost']}>
-                      ₹{formatIndianNumber(adCostPerOrderByDate[getOrderDateKey(selectedOrderForCogs.createdAt)] ?? 0)}
-                    </span>
+                        ))
+                    )}
                   </div>
                 </div>
-              </div>
 
-              {/* Section 4: Shipping Charges */}
-              <div className={styles['cost-section']}>
-                <h3 className={styles['section-title']}>Shipping Charges</h3>
-                <div className={styles['breakdown-list']}>
-                  {selectedOrderForCogs.shippingCharge && selectedOrderForCogs.shippingCharge > 0 ? (
-                    <>
-                      {selectedOrderForCogs.shippingBreakdown ? (
-                        <>
-                          {/* Detailed breakdown if available */}
-                          {selectedOrderForCogs.shippingBreakdown.freightForward > 0 && (
-                            <div className={styles['breakdown-item']}>
-                              <div className={styles['breakdown-info']}>
-                                <span className={styles['breakdown-name']}>Base Freight</span>
-                                <span className={styles['breakdown-type']}>Shiprocket</span>
-                              </div>
-                              <span className={styles['breakdown-cost']}>
-                                ₹{formatIndianNumber(selectedOrderForCogs.shippingBreakdown.freightForward)}
-                              </span>
-                            </div>
-                          )}
-                          {selectedOrderForCogs.shippingBreakdown.freightCOD !== 0 && (() => {
-                            // COD is only reversed when: order is RTO AND payment method is COD
-                            // Check for RTO: in RTO list, status contains RTO/failed, OR has RTO charges
-                            const isRTO = rtoOrderIds.has(selectedOrderForCogs.id) ||
-                              selectedOrderForCogs.deliveryStatus?.toLowerCase().includes('rto') ||
-                              selectedOrderForCogs.deliveryStatus?.toLowerCase().includes('failed') ||
-                              (selectedOrderForCogs.shippingBreakdown.freightRTO || 0) > 0; // Has RTO charges
-                            const isCODPayment = selectedOrderForCogs.paymentMethod?.toLowerCase() === 'cod';
-                            const shouldReverse = isRTO && isCODPayment && selectedOrderForCogs.shippingBreakdown.freightCOD > 0;
+                {/* Section 3: Ad Cost */}
+                <div className={styles['cost-section']}>
+                  <h3 className={styles['section-title']}>Advertisement Cost</h3>
+                  <div className={styles['breakdown-list']}>
+                    <div className={styles['breakdown-item']}>
+                      <div className={styles['breakdown-info']}>
+                        <span className={styles['breakdown-name']}>Ad Cost (Meta)</span>
+                        <span className={styles['breakdown-type']}>Per Order</span>
+                      </div>
+                      <span className={styles['breakdown-cost']}>
+                        ₹{formatIndianNumber(adCostPerOrderByDate[getOrderDateKey(selectedOrderForCogs.createdAt)] ?? 0)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
 
-                            // For RTO orders, show both charge and reversal
-                            if (shouldReverse) {
-                              return (
-                                <>
-                                  {/* Initial COD charge */}
-                                  <div className={styles['breakdown-item']}>
-                                    <div className={styles['breakdown-info']}>
-                                      <span className={styles['breakdown-name']}>Freight COD</span>
-                                      <span className={styles['breakdown-type']}>Applied</span>
-                                    </div>
-                                    <span className={styles['breakdown-cost']}>
-                                      ₹{formatIndianNumber(Math.abs(selectedOrderForCogs.shippingBreakdown.freightCOD))}
-                                    </span>
-                                  </div>
-                                  {/* COD reversal */}
-                                  <div className={styles['breakdown-item']}>
-                                    <div className={styles['breakdown-info']}>
-                                      <span className={styles['breakdown-name']}>Freight COD Reversal</span>
-                                      <span className={styles['breakdown-type']}>RTO Refund</span>
-                                    </div>
-                                    <span className={styles['breakdown-cost']} style={{ color: '#10b981' }}>
-                                      -₹{formatIndianNumber(Math.abs(selectedOrderForCogs.shippingBreakdown.freightCOD))}
-                                    </span>
-                                  </div>
-                                </>
-                              );
-                            }
-
-                            // For non-RTO orders, show single line
-                            return (
+                {/* Section 4: Shipping Charges */}
+                <div className={styles['cost-section']}>
+                  <h3 className={styles['section-title']}>Shipping Charges</h3>
+                  <div className={styles['breakdown-list']}>
+                    {selectedOrderForCogs.shippingCharge && selectedOrderForCogs.shippingCharge > 0 ? (
+                      <>
+                        {selectedOrderForCogs.shippingBreakdown ? (
+                          <>
+                            {/* Detailed breakdown if available */}
+                            {selectedOrderForCogs.shippingBreakdown.freightForward > 0 && (
                               <div className={styles['breakdown-item']}>
                                 <div className={styles['breakdown-info']}>
-                                  <span className={styles['breakdown-name']}>Freight COD</span>
-                                  <span className={styles['breakdown-type']}>Applied</span>
+                                  <span className={styles['breakdown-name']}>Base Freight</span>
+                                  <span className={styles['breakdown-type']}>Shiprocket</span>
                                 </div>
                                 <span className={styles['breakdown-cost']}>
-                                  ₹{formatIndianNumber(Math.abs(selectedOrderForCogs.shippingBreakdown.freightCOD))}
+                                  ₹{formatIndianNumber(selectedOrderForCogs.shippingBreakdown.freightForward)}
                                 </span>
                               </div>
-                            );
-                          })()}
-                          {selectedOrderForCogs.shippingBreakdown.freightRTO > 0 && (
-                            <div className={styles['breakdown-item']}>
-                              <div className={styles['breakdown-info']}>
-                                <span className={styles['breakdown-name']}>Freight RTO</span>
-                                <span className={styles['breakdown-type']}>Return</span>
+                            )}
+                            {selectedOrderForCogs.shippingBreakdown.freightCOD !== 0 && (() => {
+                              // COD is only reversed when: order is RTO AND payment method is COD
+                              // Check for RTO: in RTO list, status contains RTO/failed, OR has RTO charges
+                              const isRTO = rtoOrderIds.has(selectedOrderForCogs.id) ||
+                                selectedOrderForCogs.deliveryStatus?.toLowerCase().includes('rto') ||
+                                selectedOrderForCogs.deliveryStatus?.toLowerCase().includes('failed') ||
+                                (selectedOrderForCogs.shippingBreakdown.freightRTO || 0) > 0; // Has RTO charges
+                              const isCODPayment = selectedOrderForCogs.paymentMethod?.toLowerCase() === 'cod';
+                              const shouldReverse = isRTO && isCODPayment && selectedOrderForCogs.shippingBreakdown.freightCOD > 0;
+
+                              // For RTO orders, show both charge and reversal
+                              if (shouldReverse) {
+                                return (
+                                  <>
+                                    {/* Initial COD charge */}
+                                    <div className={styles['breakdown-item']}>
+                                      <div className={styles['breakdown-info']}>
+                                        <span className={styles['breakdown-name']}>Freight COD</span>
+                                        <span className={styles['breakdown-type']}>Applied</span>
+                                      </div>
+                                      <span className={styles['breakdown-cost']}>
+                                        ₹{formatIndianNumber(Math.abs(selectedOrderForCogs.shippingBreakdown.freightCOD))}
+                                      </span>
+                                    </div>
+                                    {/* COD reversal */}
+                                    <div className={styles['breakdown-item']}>
+                                      <div className={styles['breakdown-info']}>
+                                        <span className={styles['breakdown-name']}>Freight COD Reversal</span>
+                                        <span className={styles['breakdown-type']}>RTO Refund</span>
+                                      </div>
+                                      <span className={styles['breakdown-cost']} style={{ color: '#10b981' }}>
+                                        -₹{formatIndianNumber(Math.abs(selectedOrderForCogs.shippingBreakdown.freightCOD))}
+                                      </span>
+                                    </div>
+                                  </>
+                                );
+                              }
+
+                              // For non-RTO orders, show single line
+                              return (
+                                <div className={styles['breakdown-item']}>
+                                  <div className={styles['breakdown-info']}>
+                                    <span className={styles['breakdown-name']}>Freight COD</span>
+                                    <span className={styles['breakdown-type']}>Applied</span>
+                                  </div>
+                                  <span className={styles['breakdown-cost']}>
+                                    ₹{formatIndianNumber(Math.abs(selectedOrderForCogs.shippingBreakdown.freightCOD))}
+                                  </span>
+                                </div>
+                              );
+                            })()}
+                            {selectedOrderForCogs.shippingBreakdown.freightRTO > 0 && (
+                              <div className={styles['breakdown-item']}>
+                                <div className={styles['breakdown-info']}>
+                                  <span className={styles['breakdown-name']}>Freight RTO</span>
+                                  <span className={styles['breakdown-type']}>Return</span>
+                                </div>
+                                <span className={styles['breakdown-cost']}>
+                                  ₹{formatIndianNumber(selectedOrderForCogs.shippingBreakdown.freightRTO)}
+                                </span>
                               </div>
-                              <span className={styles['breakdown-cost']}>
-                                ₹{formatIndianNumber(selectedOrderForCogs.shippingBreakdown.freightRTO)}
-                              </span>
-                            </div>
-                          )}
-                          {selectedOrderForCogs.shippingBreakdown.whatsappCharges > 0 && (
-                            <div className={styles['breakdown-item']}>
-                              <div className={styles['breakdown-info']}>
-                                <span className={styles['breakdown-name']}>WhatsApp Charges</span>
-                                <span className={styles['breakdown-type']}>Communication</span>
+                            )}
+                            {selectedOrderForCogs.shippingBreakdown.whatsappCharges > 0 && (
+                              <div className={styles['breakdown-item']}>
+                                <div className={styles['breakdown-info']}>
+                                  <span className={styles['breakdown-name']}>WhatsApp Charges</span>
+                                  <span className={styles['breakdown-type']}>Communication</span>
+                                </div>
+                                <span className={styles['breakdown-cost']}>
+                                  ₹{formatIndianNumber(selectedOrderForCogs.shippingBreakdown.whatsappCharges)}
+                                </span>
                               </div>
-                              <span className={styles['breakdown-cost']}>
-                                ₹{formatIndianNumber(selectedOrderForCogs.shippingBreakdown.whatsappCharges)}
-                              </span>
-                            </div>
-                          )}
-                          {selectedOrderForCogs.shippingBreakdown.otherCharges > 0 && (
-                            <div className={styles['breakdown-item']}>
-                              <div className={styles['breakdown-info']}>
-                                <span className={styles['breakdown-name']}>Other Charges</span>
-                                <span className={styles['breakdown-type']}>Misc</span>
+                            )}
+                            {selectedOrderForCogs.shippingBreakdown.otherCharges > 0 && (
+                              <div className={styles['breakdown-item']}>
+                                <div className={styles['breakdown-info']}>
+                                  <span className={styles['breakdown-name']}>Other Charges</span>
+                                  <span className={styles['breakdown-type']}>Misc</span>
+                                </div>
+                                <span className={styles['breakdown-cost']}>
+                                  ₹{formatIndianNumber(selectedOrderForCogs.shippingBreakdown.otherCharges)}
+                                </span>
                               </div>
-                              <span className={styles['breakdown-cost']}>
-                                ₹{formatIndianNumber(selectedOrderForCogs.shippingBreakdown.otherCharges)}
-                              </span>
+                            )}
+                          </>
+                        ) : (
+                          /* Simple total if no breakdown */
+                          <div className={styles['breakdown-item']}>
+                            <div className={styles['breakdown-info']}>
+                              <span className={styles['breakdown-name']}>Shipping Charge</span>
+                              <span className={styles['breakdown-type']}>Shiprocket</span>
                             </div>
-                          )}
-                        </>
-                      ) : (
-                        /* Simple total if no breakdown */
-                        <div className={styles['breakdown-item']}>
-                          <div className={styles['breakdown-info']}>
-                            <span className={styles['breakdown-name']}>Shipping Charge</span>
-                            <span className={styles['breakdown-type']}>Shiprocket</span>
+                            <span className={styles['breakdown-cost']}>
+                              ₹{formatIndianNumber(selectedOrderForCogs.shippingCharge)}
+                            </span>
                           </div>
-                          <span className={styles['breakdown-cost']}>
-                            ₹{formatIndianNumber(selectedOrderForCogs.shippingCharge)}
-                          </span>
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    <p className={styles['no-data']}>No shipping charges available</p>
-                  )}
-                </div>
-              </div>
-
-              {/* Section 5: Total Costs Summary */}
-              <div className={styles['cost-section']}>
-                <h3 className={styles['section-title']}>Cost Summary</h3>
-                <div className={styles['breakdown-list']}>
-                  <div className={styles['breakdown-item']}>
-                    <div className={styles['breakdown-info']}>
-                      <span className={styles['breakdown-name']}>Total COGS</span>
-                      <span className={styles['breakdown-type']}>From Configuration</span>
-                    </div>
-                    <span className={styles['breakdown-cost']}>
-                      ₹{formatIndianNumber(calculateTotalCogs())}
-                    </span>
-                  </div>
-                  <div className={styles['breakdown-item']}>
-                    <div className={styles['breakdown-info']}>
-                      <span className={styles['breakdown-name']}>Ad Cost</span>
-                      <span className={styles['breakdown-type']}>Meta Ads</span>
-                    </div>
-                    <span className={styles['breakdown-cost']}>
-                      ₹{formatIndianNumber(adCostPerOrderByDate[getOrderDateKey(selectedOrderForCogs.createdAt)] ?? 0)}
-                    </span>
-                  </div>
-                  <div className={styles['breakdown-item']}>
-                    <div className={styles['breakdown-info']}>
-                      <span className={styles['breakdown-name']}>Shipping Charge</span>
-                      <span className={styles['breakdown-type']}>Shiprocket</span>
-                    </div>
-                    <span className={styles['breakdown-cost']}>
-                      ₹{formatIndianNumber(calculateActualShippingCharge(selectedOrderForCogs))}
-                    </span>
-                  </div>
-                  <div className={styles['breakdown-item']} style={{ borderTop: '2px solid #cbd5e1', paddingTop: '1rem', marginTop: '0.5rem' }}>
-                    <div className={styles['breakdown-info']}>
-                      <span className={styles['breakdown-name']} style={{ fontSize: '1.125rem', fontWeight: '700' }}>Total Costs</span>
-                      <span className={styles['breakdown-type']}>Sum of All Costs</span>
-                    </div>
-                    <span className={styles['breakdown-cost']} style={{ fontSize: '1.125rem' }}>
-                      ₹{formatIndianNumber(calculateTotalCogs() + (adCostPerOrderByDate[getOrderDateKey(selectedOrderForCogs.createdAt)] ?? 0) + calculateActualShippingCharge(selectedOrderForCogs))}
-                    </span>
+                        )}
+                      </>
+                    ) : (
+                      <p className={styles['no-data']}>No shipping charges available</p>
+                    )}
                   </div>
                 </div>
-              </div>
 
-              {/* Section 6: Net Profit/Loss */}
-              <div className={styles['cost-section']}>
-                <h3 className={styles['section-title']}>Net Result</h3>
-                <div className={styles['cogs-summary']}>
-                  <div className={styles['summary-row']}>
-                    <span className={styles['summary-label']}>Sale Price:</span>
-                    <span className={styles['summary-value']}>
-                      ₹{formatIndianNumber(selectedOrderForCogs.totalPrice || 0)}
-                    </span>
+                {/* Section 5: Total Costs Summary */}
+                <div className={styles['cost-section']}>
+                  <h3 className={styles['section-title']}>Cost Summary</h3>
+                  <div className={styles['breakdown-list']}>
+                    <div className={styles['breakdown-item']}>
+                      <div className={styles['breakdown-info']}>
+                        <span className={styles['breakdown-name']}>Total COGS</span>
+                        <span className={styles['breakdown-type']}>From Configuration</span>
+                      </div>
+                      <span className={styles['breakdown-cost']}>
+                        ₹{formatIndianNumber(calculateTotalCogs())}
+                      </span>
+                    </div>
+                    <div className={styles['breakdown-item']}>
+                      <div className={styles['breakdown-info']}>
+                        <span className={styles['breakdown-name']}>Ad Cost</span>
+                        <span className={styles['breakdown-type']}>Meta Ads</span>
+                      </div>
+                      <span className={styles['breakdown-cost']}>
+                        ₹{formatIndianNumber(adCostPerOrderByDate[getOrderDateKey(selectedOrderForCogs.createdAt)] ?? 0)}
+                      </span>
+                    </div>
+                    <div className={styles['breakdown-item']}>
+                      <div className={styles['breakdown-info']}>
+                        <span className={styles['breakdown-name']}>Shipping Charge</span>
+                        <span className={styles['breakdown-type']}>Shiprocket</span>
+                      </div>
+                      <span className={styles['breakdown-cost']}>
+                        ₹{formatIndianNumber(calculateActualShippingCharge(selectedOrderForCogs))}
+                      </span>
+                    </div>
+                    <div className={styles['breakdown-item']} style={{ borderTop: '2px solid #cbd5e1', paddingTop: '1rem', marginTop: '0.5rem' }}>
+                      <div className={styles['breakdown-info']}>
+                        <span className={styles['breakdown-name']} style={{ fontSize: '1.125rem', fontWeight: '700' }}>Total Costs</span>
+                        <span className={styles['breakdown-type']}>Sum of All Costs</span>
+                      </div>
+                      <span className={styles['breakdown-cost']} style={{ fontSize: '1.125rem' }}>
+                        ₹{formatIndianNumber(calculateTotalCogs() + (adCostPerOrderByDate[getOrderDateKey(selectedOrderForCogs.createdAt)] ?? 0) + calculateActualShippingCharge(selectedOrderForCogs))}
+                      </span>
+                    </div>
                   </div>
-                  <div className={styles['summary-row']}>
-                    <span className={styles['summary-label']}>Total Costs:</span>
-                    <span className={styles['summary-value']}>
-                      ₹{formatIndianNumber(calculateTotalCogs() + (adCostPerOrderByDate[getOrderDateKey(selectedOrderForCogs.createdAt)] ?? 0) + calculateActualShippingCharge(selectedOrderForCogs))}
-                    </span>
-                  </div>
-                  <div className={`${styles['summary-row']} ${styles['profit-row']}`}>
-                    {(() => {
-                      const totalCosts = calculateTotalCogs() + (adCostPerOrderByDate[getOrderDateKey(selectedOrderForCogs.createdAt)] ?? 0) + calculateActualShippingCharge(selectedOrderForCogs);
-                      const profit = (selectedOrderForCogs.totalPrice || 0) - totalCosts;
-                      return (
-                        <>
-                          <span className={styles['summary-label']}>
-                            {profit >= 0 ? 'Profit' : 'Loss'}:
-                          </span>
-                          <span className={`${styles['summary-value']} ${profit >= 0 ? styles.profit : styles.loss}`}>
-                            {profit >= 0 ? '+' : ''}₹{formatIndianNumber(Math.abs(profit))}
-                          </span>
-                        </>
-                      );
-                    })()}
+                </div>
+
+                {/* Section 6: Net Profit/Loss */}
+                <div className={styles['cost-section']}>
+                  <h3 className={styles['section-title']}>Net Result</h3>
+                  <div className={styles['cogs-summary']}>
+                    <div className={styles['summary-row']}>
+                      <span className={styles['summary-label']}>Sale Price:</span>
+                      <span className={styles['summary-value']}>
+                        ₹{formatIndianNumber(selectedOrderForCogs.totalPrice || 0)}
+                      </span>
+                    </div>
+                    <div className={styles['summary-row']}>
+                      <span className={styles['summary-label']}>Total Costs:</span>
+                      <span className={styles['summary-value']}>
+                        ₹{formatIndianNumber(calculateTotalCogs() + (adCostPerOrderByDate[getOrderDateKey(selectedOrderForCogs.createdAt)] ?? 0) + calculateActualShippingCharge(selectedOrderForCogs))}
+                      </span>
+                    </div>
+                    <div className={`${styles['summary-row']} ${styles['profit-row']}`}>
+                      {(() => {
+                        const totalCosts = calculateTotalCogs() + (adCostPerOrderByDate[getOrderDateKey(selectedOrderForCogs.createdAt)] ?? 0) + calculateActualShippingCharge(selectedOrderForCogs);
+                        const profit = (selectedOrderForCogs.totalPrice || 0) - totalCosts;
+                        return (
+                          <>
+                            <span className={styles['summary-label']}>
+                              {profit >= 0 ? 'Profit' : 'Loss'}:
+                            </span>
+                            <span className={`${styles['summary-value']} ${profit >= 0 ? styles.profit : styles.loss}`}>
+                              {profit >= 0 ? '+' : ''}₹{formatIndianNumber(Math.abs(profit))}
+                            </span>
+                          </>
+                        );
+                      })()}
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )
+      }
 
       {/* Delivery Status Update Modal */}
-      {showDeliveryStatusModal && selectedOrderForStatus && (
-        <div className={styles['modal-overlay']} onClick={() => !updatingStatus && setShowDeliveryStatusModal(false)}>
-          <div className={styles['modal-content']} style={{ width: '500px', maxWidth: '90vw', height: 'auto' }} onClick={(e) => e.stopPropagation()}>
-            <div className={styles['modal-header']}>
-              <h3>Mark Delivery Status</h3>
-              <button
-                onClick={() => !updatingStatus && setShowDeliveryStatusModal(false)}
-                className={styles['modal-close']}
-                disabled={updatingStatus}
-              >
-                ×
-              </button>
-            </div>
-            <div className={styles['modal-body']} style={{ padding: '2rem' }}>
-              <p style={{ marginBottom: '1.5rem', color: '#64748b' }}>
-                Update delivery status for order <strong>{selectedOrderForStatus.name}</strong>
-              </p>
-              <div style={{ display: 'flex', gap: '1rem' }}>
+      {
+        showDeliveryStatusModal && selectedOrderForStatus && (
+          <div className={styles['modal-overlay']} onClick={() => !updatingStatus && setShowDeliveryStatusModal(false)}>
+            <div className={styles['modal-content']} style={{ width: '500px', maxWidth: '90vw', height: 'auto' }} onClick={(e) => e.stopPropagation()}>
+              <div className={styles['modal-header']}>
+                <h3>Mark Delivery Status</h3>
                 <button
-                  onClick={() => handleMarkDeliveryStatus('Delivered')}
+                  onClick={() => !updatingStatus && setShowDeliveryStatusModal(false)}
+                  className={styles['modal-close']}
                   disabled={updatingStatus}
-                  style={{
-                    flex: 1,
-                    padding: '1rem',
-                    background: '#10b981',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '8px',
-                    fontSize: '1rem',
-                    fontWeight: 600,
-                    cursor: updatingStatus ? 'not-allowed' : 'pointer',
-                    opacity: updatingStatus ? 0.6 : 1,
-                    transition: 'all 0.2s',
-                  }}
                 >
-                  {updatingStatus ? 'Updating...' : 'Mark as Delivered'}
+                  ×
                 </button>
-                <button
-                  onClick={() => handleMarkDeliveryStatus('Failed')}
-                  disabled={updatingStatus}
-                  style={{
-                    flex: 1,
-                    padding: '1rem',
-                    background: '#ef4444',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '8px',
-                    fontSize: '1rem',
-                    fontWeight: 600,
-                    cursor: updatingStatus ? 'not-allowed' : 'pointer',
-                    opacity: updatingStatus ? 0.6 : 1,
-                    transition: 'all 0.2s',
-                  }}
-                >
-                  {updatingStatus ? 'Updating...' : 'Mark as Failed'}
-                </button>
+              </div>
+              <div className={styles['modal-body']} style={{ padding: '2rem' }}>
+                <p style={{ marginBottom: '1.5rem', color: '#64748b' }}>
+                  Update delivery status for order <strong>{selectedOrderForStatus.name}</strong>
+                </p>
+                <div style={{ display: 'flex', gap: '1rem' }}>
+                  <button
+                    onClick={() => handleMarkDeliveryStatus('Delivered')}
+                    disabled={updatingStatus}
+                    style={{
+                      flex: 1,
+                      padding: '1rem',
+                      background: '#10b981',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '8px',
+                      fontSize: '1rem',
+                      fontWeight: 600,
+                      cursor: updatingStatus ? 'not-allowed' : 'pointer',
+                      opacity: updatingStatus ? 0.6 : 1,
+                      transition: 'all 0.2s',
+                    }}
+                  >
+                    {updatingStatus ? 'Updating...' : 'Mark as Delivered'}
+                  </button>
+                  <button
+                    onClick={() => handleMarkDeliveryStatus('Failed')}
+                    disabled={updatingStatus}
+                    style={{
+                      flex: 1,
+                      padding: '1rem',
+                      background: '#ef4444',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '8px',
+                      fontSize: '1rem',
+                      fontWeight: 600,
+                      cursor: updatingStatus ? 'not-allowed' : 'pointer',
+                      opacity: updatingStatus ? 0.6 : 1,
+                      transition: 'all 0.2s',
+                    }}
+                  >
+                    {updatingStatus ? 'Updating...' : 'Mark as Failed'}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
-    </div>
+        )
+      }
+    </div >
   );
 }

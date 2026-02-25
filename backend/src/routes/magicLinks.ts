@@ -24,9 +24,9 @@ router.get('/', requireAdmin, async (req: AuthenticatedRequest, res: Response) =
     const limitParam = req.query.limit;
     const page = parseInt(typeof pageParam === 'string' ? pageParam : '1', 10) || 1;
     const limit = parseInt(typeof limitParam === 'string' ? limitParam : '20', 10) || 20;
-    
+
     const { links, total } = await magicLinkService.getAllLinks(page, limit);
-    
+
     res.json({
       success: true,
       links: links.map(link => ({
@@ -74,7 +74,7 @@ router.post('/', requireAdmin, async (req: AuthenticatedRequest, res: Response) 
     // Get order from Shopify to determine max uploads from variant
     let orderId: string | undefined;
     let maxUploads = 25; // Default fallback
-    
+
     try {
       const order = await shopifyService.findOrderByNumber(orderNumber);
       if (order) {
@@ -195,26 +195,26 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
   try {
     const limitParam = req.query.limit;
     const limit = parseInt(typeof limitParam === 'string' ? limitParam : '50', 10) || 50;
-    
+
     // Check if we want all orders or just printed photos orders
     const allOrders = req.query.all === 'true';
     const createdAtMin = typeof req.query.created_at_min === 'string' ? req.query.created_at_min : undefined;
-    
-    const orders = allOrders 
+
+    const orders = allOrders
       ? await shopifyService.getAllOrders(limit, createdAtMin)
       : await shopifyService.getRecentOrders(limit);
-    
+
     // Fetch delivery dates from database for all orders
     const orderNumbers = orders.map(o => o.name);
     const deliveryDates = await OrderDeliveryDate.find({
       orderNumber: { $in: orderNumbers }
     });
-    
+
     // Create a map for quick lookup
     const deliveryDateMap = new Map(
       deliveryDates.map(dd => [dd.orderNumber, dd.deliveredAt])
     );
-    
+
     // Fetch shipping charges from database only (no auto-fetch)
     let shippingChargesMap = new Map<string, any>();
     try {
@@ -222,14 +222,14 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
     } catch (error) {
       console.error('[API] Error fetching shipping charges:', error);
     }
-    
+
     res.json({
       success: true,
       orders: orders.map(order => {
         // Get delivery status from multiple sources
         let deliveryStatus = null;
         let deliveredAt = null; // Track when the order was delivered
-        
+
         let trackingUrl = null;
         // First, check fulfillments for shipment status
         if (order.fulfillments && order.fulfillments.length > 0) {
@@ -237,26 +237,26 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
           const latestFulfillment = order.fulfillments[order.fulfillments.length - 1];
           deliveryStatus = latestFulfillment.shipment_status;
           trackingUrl = latestFulfillment.tracking_url || null;
-          
+
           // If this fulfillment shows delivered, use its updated_at as delivery date
           if (latestFulfillment.shipment_status?.toLowerCase() === 'delivered') {
             deliveredAt = (latestFulfillment as any).updated_at || null;
           }
         }
-        
+
         // If no delivery status from fulfillments, check order-level fulfillment_status
         if (!deliveryStatus && order.fulfillment_status) {
           deliveryStatus = order.fulfillment_status;
         }
-        
+
         // Determine payment method (Prepaid or COD)
         let paymentMethod = 'Prepaid'; // Default to prepaid
-        
+
         // Check gateway field
         const gateway = order.gateway?.toLowerCase() || '';
         const paymentGateways = order.payment_gateway_names?.map(g => g.toLowerCase()) || [];
         const tags = order.tags?.toLowerCase() || '';
-        
+
         // Check if it's COD
         if (
           gateway.includes('cash on delivery') ||
@@ -266,7 +266,7 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
         ) {
           paymentMethod = 'COD';
         }
-        
+
         // If no deliveredAt from Shopify, check database for CSV-imported date
         if (!deliveredAt) {
           const csvDate = deliveryDateMap.get(order.name);
@@ -274,7 +274,7 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
             deliveredAt = csvDate.toISOString();
           }
         }
-        
+
         return {
           id: order.id,
           name: order.name,
@@ -295,12 +295,79 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
             quantity: item.quantity,
             variantTitle: item.variant_title,
           })),
+          customerTags: order.customer?.tags || null,
+          customerId: order.customer?.id || null,
         };
       }),
     });
   } catch (error) {
     console.error('Error fetching orders:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch orders' });
+  }
+});
+
+/**
+ * POST /api/admin/shopify/customers/:customerId/tags
+ * Add a tag to a customer
+ */
+router.post('/shopify/customers/:customerId/tags', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const customerIdParam = req.params.customerId;
+    const customerIdStr = Array.isArray(customerIdParam) ? customerIdParam[0] : (customerIdParam as string);
+    const customerId = parseInt(customerIdStr, 10);
+    const { tag } = req.body;
+
+    if (!tag) {
+      return res.status(400).json({ success: false, error: 'Tag is required' });
+    }
+
+    const result = await shopifyService.addCustomerTag(customerId, tag);
+    res.json(result);
+  } catch (error) {
+    console.error('Error adding customer tag:', error);
+    res.status(500).json({ success: false, error: 'Failed to add customer tag' });
+  }
+});
+
+/**
+ * POST /api/admin/shopify/customers/bulk-tags
+ * Add a tag to multiple customers
+ */
+router.post('/shopify/customers/bulk-tags', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { customerIds, tag } = req.body;
+
+    if (!customerIds || !Array.isArray(customerIds) || customerIds.length === 0) {
+      return res.status(400).json({ success: false, error: 'customerIds array is required' });
+    }
+
+    if (!tag) {
+      return res.status(400).json({ success: false, error: 'Tag is required' });
+    }
+
+    const results = [];
+    for (const customerId of customerIds) {
+      try {
+        const result = await shopifyService.addCustomerTag(customerId, tag);
+        results.push({ customerId, success: result.success, error: result.error });
+      } catch (err: any) {
+        results.push({ customerId, success: false, error: err.message });
+      }
+    }
+
+    const successful = results.filter(r => r.success).length;
+    res.json({
+      success: true,
+      summary: {
+        total: results.length,
+        successful,
+        failed: results.length - successful
+      },
+      results
+    });
+  } catch (error) {
+    console.error('Error adding bulk customer tags:', error);
+    res.status(500).json({ success: false, error: 'Failed to add bulk customer tags' });
   }
 });
 
@@ -425,8 +492,8 @@ router.get('/shopify/products', requireAdmin, async (_req: AuthenticatedRequest,
  */
 router.get('/shopify/products/:productId', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const productId = Array.isArray(req.params.productId) 
-      ? req.params.productId[0] 
+    const productId = Array.isArray(req.params.productId)
+      ? req.params.productId[0]
       : req.params.productId;
     const product = await shopifyService.getProduct(productId);
 
@@ -546,10 +613,10 @@ router.put('/shopify/products/bulk-update-prices', requireAdmin, async (req: Aut
 router.get('/:token/download-images', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const token = req.params.token as string;
-    
+
     // Validate the magic link
     const magicLink = await magicLinkService.findByToken(token);
-    
+
     if (!magicLink) {
       res.status(404).json({ success: false, error: 'Magic link not found' });
       return;
@@ -600,7 +667,7 @@ router.get('/:token/download-images', requireAdmin, async (req: AuthenticatedReq
     for (const image of images) {
       try {
         console.log(`Fetching image: ${image.originalName} from S3 key: ${image.s3Key}`);
-        
+
         // Fetch image from S3
         const s3Response = await s3Client.send(new GetObjectCommand({
           Bucket: config.aws.s3Bucket,
@@ -611,15 +678,15 @@ router.get('/:token/download-images', requireAdmin, async (req: AuthenticatedReq
           // Convert stream to buffer
           const stream = s3Response.Body as NodeJS.ReadableStream;
           const chunks: Buffer[] = [];
-          
+
           for await (const chunk of stream) {
             chunks.push(Buffer.from(chunk));
           }
-          
+
           const buffer = Buffer.concat(chunks);
-          
+
           console.log(`Adding ${image.originalName} to archive (${buffer.length} bytes)`);
-          
+
           // Add buffer to archive with original name
           archive.append(buffer, { name: image.originalName });
           successCount++;
@@ -638,7 +705,7 @@ router.get('/:token/download-images', requireAdmin, async (req: AuthenticatedReq
 
     // Finalize the archive
     await archive.finalize();
-    
+
     console.log('Archive finalized');
   } catch (error) {
     console.error('Error downloading images:', error);
@@ -655,10 +722,10 @@ router.get('/:token/download-images', requireAdmin, async (req: AuthenticatedReq
 router.delete('/:token/delete-images', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const token = req.params.token as string;
-    
+
     // Validate the magic link
     const magicLink = await magicLinkService.findByToken(token);
-    
+
     if (!magicLink) {
       res.status(404).json({ success: false, error: 'Magic link not found' });
       return;
@@ -696,9 +763,9 @@ router.delete('/:token/delete-images', requireAdmin, async (req: AuthenticatedRe
           Bucket: config.aws.s3Bucket,
           Key: image.s3Key,
         });
-        
+
         await s3Client.send(deleteCommand);
-        
+
         console.log(`✓ Deleted from S3: ${image.s3Key}`);
         deletedCount++;
       } catch (s3Error) {
@@ -750,22 +817,22 @@ router.delete('/:token/delete-images', requireAdmin, async (req: AuthenticatedRe
 router.post('/shiprocket/fetch-shipping-charge', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { orderNumber, refetch } = req.body;
-    
+
     if (!orderNumber) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'orderNumber is required' 
+      return res.status(400).json({
+        success: false,
+        error: 'orderNumber is required'
       });
     }
-    
+
     // If refetch is true, delete existing cache first
     if (refetch) {
       const ShippingCharge = (await import('../models/ShippingCharge')).default;
       await ShippingCharge.deleteOne({ orderNumber });
     }
-    
+
     const shippingCharge = await shiprocketService.fetchShippingChargeForOrder(orderNumber);
-    
+
     if (shippingCharge === null) {
       return res.json({
         success: true,
@@ -774,11 +841,11 @@ router.post('/shiprocket/fetch-shipping-charge', requireAdmin, async (req: Authe
         message: 'Order not found in Shiprocket or not yet shipped',
       });
     }
-    
+
     // Get the saved record to return breakdown
     const ShippingCharge = (await import('../models/ShippingCharge')).default;
     const saved = await ShippingCharge.findOne({ orderNumber });
-    
+
     res.json({
       success: true,
       shippingCharge,
@@ -793,9 +860,9 @@ router.post('/shiprocket/fetch-shipping-charge', requireAdmin, async (req: Authe
     });
   } catch (error) {
     console.error('Error fetching shipping charge:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: 'Failed to fetch shipping charge' 
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch shipping charge'
     });
   }
 });
@@ -813,9 +880,9 @@ router.post('/shiprocket/clear-cache', requireAdmin, async (_req: AuthenticatedR
     });
   } catch (error) {
     console.error('[API] Error clearing shipping charges cache:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: 'Failed to clear shipping charges cache' 
+    res.status(500).json({
+      success: false,
+      error: 'Failed to clear shipping charges cache'
     });
   }
 });
@@ -827,11 +894,11 @@ router.post('/shiprocket/clear-cache', requireAdmin, async (_req: AuthenticatedR
 router.post('/shiprocket/sync-shipping-charges', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { orderNumbers } = req.body;
-    
+
     if (!Array.isArray(orderNumbers)) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'orderNumbers must be an array' 
+      return res.status(400).json({
+        success: false,
+        error: 'orderNumbers must be an array'
       });
     }
 
@@ -846,9 +913,9 @@ router.post('/shiprocket/sync-shipping-charges', requireAdmin, async (req: Authe
     });
   } catch (error) {
     console.error('[API] Error syncing shipping charges:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: 'Failed to sync shipping charges' 
+    res.status(500).json({
+      success: false,
+      error: 'Failed to sync shipping charges'
     });
   }
 });
@@ -862,7 +929,7 @@ router.get('/shiprocket/wallet-transactions', requireAdmin, async (req: Authenti
   try {
     const startDate = typeof req.query.start_date === 'string' ? req.query.start_date : undefined;
     const endDate = typeof req.query.end_date === 'string' ? req.query.end_date : undefined;
-    
+
     const transactions = await shiprocketService.getAllWalletTransactions(startDate, endDate);
 
     res.json({
@@ -872,9 +939,9 @@ router.get('/shiprocket/wallet-transactions', requireAdmin, async (req: Authenti
     });
   } catch (error) {
     console.error('[API] Error fetching wallet transactions:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: 'Failed to fetch wallet transactions' 
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch wallet transactions'
     });
   }
 });

@@ -27,7 +27,7 @@ class ShopifyService {
   private async makeRequest<T>(endpoint: string, options?: { method?: string; body?: any }): Promise<T> {
     const url = `${this.getBaseUrl()}${endpoint}`;
     const method = options?.method || 'GET';
-    
+
     const fetchOptions: RequestInit = {
       method,
       headers: {
@@ -55,7 +55,7 @@ class ShopifyService {
    */
   private async makeRequestWithHeaders<T>(endpoint: string): Promise<{ data: T; linkHeader: string | null }> {
     const url = `${this.getBaseUrl()}${endpoint}`;
-    
+
     const fetchOptions: RequestInit = {
       method: 'GET',
       headers: {
@@ -86,7 +86,7 @@ class ShopifyService {
 
     // Link header can have multiple links separated by comma
     const links = linkHeader.split(',');
-    
+
     for (const link of links) {
       // Check if this is the "next" link
       if (link.includes('rel="next"') || link.includes("rel='next'") || link.includes('rel=next')) {
@@ -118,23 +118,23 @@ class ShopifyService {
    */
   getMaxUploadsForOrder(order: ShopifyOrder): number {
     if (!order.line_items) return 25; // Default
-    
+
     const printedPhotosItem = order.line_items.find(
       item => item.product_id === this.printedPhotosProductId
     );
-    
+
     if (!printedPhotosItem || !printedPhotosItem.variant_title) {
       return 25; // Default if no variant found
     }
-    
+
     // Parse the variant title (e.g., "12", "15", "20", "25")
     const maxUploads = parseInt(printedPhotosItem.variant_title, 10);
-    
+
     // Validate it's a valid number, otherwise default to 25
     if (isNaN(maxUploads) || maxUploads <= 0) {
       return 25;
     }
-    
+
     // Multiply by quantity in case they ordered multiple
     return maxUploads * printedPhotosItem.quantity;
   }
@@ -144,26 +144,26 @@ class ShopifyService {
    */
   async findOrderByNumber(orderNumber: string): Promise<ShopifyOrder | null> {
     const cleanOrderNumber = orderNumber.replace(/^#/, '').trim();
-    
+
     try {
       // Search by order name
       const data = await this.makeRequest<ShopifyOrdersResponse>(
         `/orders.json?name=${encodeURIComponent(cleanOrderNumber)}&status=any`
       );
-      
+
       if (data.orders && data.orders.length > 0) {
         return data.orders[0];
       }
-      
+
       // Try with # prefix
       const dataWithHash = await this.makeRequest<ShopifyOrdersResponse>(
         `/orders.json?name=${encodeURIComponent('#' + cleanOrderNumber)}&status=any`
       );
-      
+
       if (dataWithHash.orders && dataWithHash.orders.length > 0) {
         return dataWithHash.orders[0];
       }
-      
+
       return null;
     } catch (error) {
       console.error('Error finding order:', error);
@@ -177,12 +177,12 @@ class ShopifyService {
   private async getCachedOrders(cacheKey: string): Promise<ShopifyOrder[] | null> {
     try {
       const cached = await ShopifyOrderCache.findOne({ cacheKey });
-      
+
       if (cached) {
         console.log(`Cache hit for ${cacheKey}, cached at ${cached.cachedAt}`);
         return cached.orders;
       }
-      
+
       console.log(`Cache miss for ${cacheKey}`);
       return null;
     } catch (error) {
@@ -199,7 +199,7 @@ class ShopifyService {
       const now = new Date();
       // Set expiresAt to 100 years in the future (effectively infinite)
       const expiresAt = new Date(now.getTime() + (100 * 365 * 24 * 60 * 60 * 1000));
-      
+
       await ShopifyOrderCache.findOneAndUpdate(
         { cacheKey },
         {
@@ -209,7 +209,7 @@ class ShopifyService {
         },
         { upsert: true, new: true }
       );
-      
+
     } catch (error) {
       console.error('Error updating cache:', error);
       // Don't throw - caching is not critical
@@ -251,34 +251,34 @@ class ShopifyService {
   async getOrdersWithPrintedPhotos(limit: number = 50): Promise<ShopifyOrder[]> {
     try {
       const cacheKey = `printed_photos_${limit}`;
-      
+
       // Try to get from cache first
       const cachedOrders = await this.getCachedOrders(cacheKey);
       if (cachedOrders) {
         return cachedOrders;
       }
-      
+
       // Cache miss - fetch from Shopify
       console.log('Fetching orders from Shopify API...');
-      
+
       // Fetch more orders than needed since we'll filter them
       const fetchLimit = Math.min(limit * 3, 250); // Shopify max is 250
-      
+
       const data = await this.makeRequest<ShopifyOrdersResponse>(
         `/orders.json?status=any&limit=${fetchLimit}`
       );
-      
+
       const allOrders = data.orders || [];
-      
+
       // Filter to only orders containing the printed photos product
       const filteredOrders = allOrders.filter(order => this.orderContainsPrintedPhotos(order));
-      
+
       // Return up to the requested limit
       const result = filteredOrders.slice(0, limit);
-      
+
       // Update cache
       await this.updateCache(cacheKey, result);
-      
+
       return result;
     } catch (error) {
       console.error('Error fetching orders:', error);
@@ -301,22 +301,22 @@ class ShopifyService {
   async getAllOrders(limit: number = 50, createdAtMin?: string): Promise<ShopifyOrder[]> {
     try {
       const cacheKey = createdAtMin ? `all_orders_${limit}_${createdAtMin}` : `all_orders_${limit}`;
-      
+
       // Try to get from cache first
       const cachedOrders = await this.getCachedOrders(cacheKey);
       if (cachedOrders) {
         console.log(`Using cached orders: ${cachedOrders.length}`);
         return cachedOrders;
       }
-      
+
       // Cache miss - fetch from Shopify with pagination using Link header
       console.log(`Fetching up to ${limit} orders from Shopify API${createdAtMin ? ` since ${createdAtMin}` : ''}...`);
-      
+
       const allOrders: ShopifyOrder[] = [];
       const perPage = 250; // Shopify max per request
       let page = 1;
       let pageInfo: string | null = null;
-      
+
       // Build initial request URL with filters
       // IMPORTANT: Filters (created_at_min) must be in the FIRST request only
       // Subsequent requests with page_info cannot include other params
@@ -324,16 +324,16 @@ class ShopifyService {
         status: 'any',
         limit: perPage.toString(),
       });
-      
+
       if (createdAtMin) {
         // Shopify expects ISO 8601 format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS
         initialParams.append('created_at_min', createdAtMin);
       }
-      
+
       // Fetch pages using cursor-based pagination with Link header
       while (allOrders.length < limit) {
         let url: string;
-        
+
         if (page === 1) {
           // First request: use filters
           url = `/orders.json?${initialParams.toString()}`;
@@ -348,58 +348,58 @@ class ShopifyService {
           console.log('No page_info found, reached end');
           break;
         }
-        
+
         const { data, linkHeader } = await this.makeRequestWithHeaders<ShopifyOrdersResponse>(url);
         const orders = data.orders || [];
-        
+
         console.log(`Fetched page ${page}: ${orders.length} orders (total so far: ${allOrders.length + orders.length})`);
-        
+
         if (orders.length === 0) {
           break; // No more orders
         }
-        
+
         allOrders.push(...orders);
-        
+
         // Parse page_info for next page from Link header
         pageInfo = this.parseNextPageInfo(linkHeader);
-        
+
         if (pageInfo) {
           console.log(`Found next page_info token: ${pageInfo.substring(0, 20)}...`);
         } else {
           console.log('No next page_info found in Link header, reached end');
           break;
         }
-        
+
         // If we got less than requested, we've reached the end
         if (orders.length < perPage) {
           console.log('Reached end of orders (got less than limit)');
           break;
         }
-        
+
         // If we've collected enough orders, stop
         if (allOrders.length >= limit) {
           console.log(`Collected ${allOrders.length} orders, reached requested limit`);
           break;
         }
-        
+
         page++;
-        
+
         // Safety: max 10 pages (2500 orders)
         if (page > 10) {
           console.log('Reached max pages limit (10)');
           break;
         }
       }
-      
+
       console.log(`Total fetched: ${allOrders.length} orders`);
-      
+
       // Debug: Log date range of orders
       if (allOrders.length > 0) {
         const dates = allOrders.map(o => new Date(o.created_at).toISOString().split('T')[0]);
         const uniqueDates = [...new Set(dates)].sort();
         console.log(`Order dates range: ${uniqueDates[0]} to ${uniqueDates[uniqueDates.length - 1]}`);
         console.log(`Total unique dates: ${uniqueDates.length}`);
-        
+
         // Count orders per date
         const dateCounts: Record<string, number> = {};
         dates.forEach(d => {
@@ -407,10 +407,10 @@ class ShopifyService {
         });
         console.log('Orders per date:', JSON.stringify(dateCounts, null, 2));
       }
-      
+
       // Update cache
       await this.updateCache(cacheKey, allOrders);
-      
+
       return allOrders;
     } catch (error) {
       console.error('Error fetching all orders:', error);
@@ -426,7 +426,7 @@ class ShopifyService {
       const data = await this.makeRequest<{ products: any[] }>(
         `/products.json?limit=${limit}`
       );
-      
+
       return data.products || [];
     } catch (error) {
       console.error('Error fetching products:', error);
@@ -442,7 +442,7 @@ class ShopifyService {
       const data = await this.makeRequest<{ product: any }>(
         `/products/${productId}.json`
       );
-      
+
       return data.product || null;
     } catch (error) {
       console.error('Error fetching product:', error);
@@ -461,7 +461,7 @@ class ShopifyService {
     try {
       // First get the product to get current variant data
       const product = await this.getProduct(productId);
-      
+
       if (!product) {
         throw new Error('Product not found');
       }
@@ -526,7 +526,7 @@ class ShopifyService {
     try {
       // Find the order first
       const order = await this.findOrderByNumber(orderNumber);
-      
+
       if (!order) {
         return {
           success: false,
@@ -555,7 +555,7 @@ class ShopifyService {
         );
 
         const fulfillmentOrders = fulfillmentOrdersResponse.fulfillment_orders;
-        
+
         if (!fulfillmentOrders || fulfillmentOrders.length === 0) {
           return {
             success: false,
@@ -606,7 +606,7 @@ class ShopifyService {
       // Step 2: Create a fulfillment event to mark as delivered or failed
       // This is what actually updates the delivery status in Shopify!
       const eventStatus = status === 'Delivered' ? 'delivered' : 'failure';
-      
+
       const eventData = {
         event: {
           status: eventStatus,
@@ -623,7 +623,7 @@ class ShopifyService {
       );
 
       console.log(`[Shopify] Created fulfillment event '${eventStatus}' for order ${orderNumber}`);
-      
+
       // Step 3: Also update note_attributes for backward compatibility
       const deliveryStatus = status.toLowerCase();
       const updateData = {
@@ -648,7 +648,7 @@ class ShopifyService {
           body: updateData,
         }
       );
-      
+
       // Clear orders cache so the change is reflected
       await this.clearOrdersCache();
 
@@ -682,7 +682,7 @@ class ShopifyService {
     for (const productId of productIds) {
       try {
         const product = await this.getProduct(String(productId));
-        
+
         if (!product || !product.variants || product.variants.length === 0) {
           results.push({
             productId,
@@ -721,8 +721,8 @@ class ShopifyService {
 
           for (const variant of product.variants) {
             let newPrice: number = parseFloat(variant.price || '0');
-            let newCompareAtPrice: number | null = variant.compare_at_price 
-              ? parseFloat(variant.compare_at_price) 
+            let newCompareAtPrice: number | null = variant.compare_at_price
+              ? parseFloat(variant.compare_at_price)
               : null;
 
             if (updates.priceChangePercent) {
@@ -782,6 +782,55 @@ class ShopifyService {
     }
 
     return results;
+  }
+
+  /**
+   * Add a tag to a Shopify customer
+   */
+  async addCustomerTag(customerId: number, tag: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      // First get current customer data to get existing tags
+      const data = await this.makeRequest<{ customer: any }>(
+        `/customers/${customerId}.json`
+      );
+
+      const customer = data.customer;
+      if (!customer) {
+        return {
+          success: false,
+          error: 'Customer not found',
+        };
+      }
+
+      const existingTags = customer.tags || '';
+      const tagsArray = existingTags.split(',').map((t: string) => t.trim()).filter((t: string) => t !== '');
+
+      if (!tagsArray.includes(tag)) {
+        tagsArray.push(tag);
+        const newTags = tagsArray.join(', ');
+
+        await this.makeRequest<{ customer: any }>(
+          `/customers/${customerId}.json`,
+          {
+            method: 'PUT',
+            body: {
+              customer: {
+                id: customerId,
+                tags: newTags
+              }
+            }
+          }
+        );
+      }
+
+      return { success: true };
+    } catch (error: any) {
+      console.error('[Shopify] Error adding customer tag:', error.message || error);
+      return {
+        success: false,
+        error: error.message || 'Failed to add customer tag',
+      };
+    }
   }
 }
 

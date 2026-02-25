@@ -1,11 +1,12 @@
 import React from 'react';
-import { MoreVertical, CheckCircle } from 'lucide-react';
+import { MoreVertical, CheckCircle, Tag } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { cn } from '@/lib/utils';
 import styles from '../SalesPage.module.css';
 
 interface ShippingChargeBreakdown {
@@ -36,6 +37,8 @@ interface ShopifyOrder {
     quantity: number;
     variantTitle?: string;
   }>;
+  customerTags?: string | null;
+  customerId?: number | null;
 }
 
 interface OrderRowProps {
@@ -48,6 +51,7 @@ interface OrderRowProps {
   getDeliveryStatusBadge: (status: string | null | undefined) => { text: string; className: string };
   handleOpenCogsModal: (order: ShopifyOrder) => void;
   onUpdateDeliveryStatus?: (orderId: number, orderName: string) => void;
+  onAddCustomerTag?: (customerId: number, tag: string) => void;
 }
 
 export const OrderRow: React.FC<OrderRowProps> = ({
@@ -60,10 +64,18 @@ export const OrderRow: React.FC<OrderRowProps> = ({
   getDeliveryStatusBadge,
   handleOpenCogsModal,
   onUpdateDeliveryStatus,
+  onAddCustomerTag,
 }) => {
   const handleMarkDeliveryStatus = () => {
     if (onUpdateDeliveryStatus) {
       onUpdateDeliveryStatus(order.id, order.name);
+    }
+  };
+  const handleMarkNoCOD = () => {
+    if (onAddCustomerTag && order.customerId) {
+      onAddCustomerTag(order.customerId, 'no-cod');
+    } else if (!order.customerId) {
+      alert('Customer ID not found for this order');
     }
   };
 
@@ -85,6 +97,9 @@ export const OrderRow: React.FC<OrderRowProps> = ({
           <span className={`${styles['payment-dot']} ${styles[order.paymentMethod?.toLowerCase() || 'prepaid']}`}></span>
           <span className={styles['order-number']}>{order.name}</span>
         </div>
+      </td>
+      <td className={styles['customer-tags-cell']}>
+        {order.customerTags || '—'}
       </td>
       <td className={styles['line-items']}>
         {order.lineItems && order.lineItems.length > 0 ? (
@@ -153,6 +168,7 @@ export const OrderRow: React.FC<OrderRowProps> = ({
           year: 'numeric',
           month: 'short',
           day: 'numeric',
+          timeZone: 'Asia/Kolkata',
         })}
       </td>
       <td className={styles['actions-cell']}>
@@ -191,10 +207,14 @@ export const OrderRow: React.FC<OrderRowProps> = ({
                 <MoreVertical style={{ width: '18px', height: '18px' }} />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="font-sans">
+            <DropdownMenuContent align="end" className={cn("font-sans", styles['dropdown-content'])}>
               <DropdownMenuItem onClick={handleMarkDeliveryStatus} className={styles['action-dropdown-item']}>
                 <CheckCircle />
                 <span>Mark Delivery Status</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleMarkNoCOD} className={styles['action-dropdown-item']}>
+                <Tag />
+                <span>Mark as no-cod</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

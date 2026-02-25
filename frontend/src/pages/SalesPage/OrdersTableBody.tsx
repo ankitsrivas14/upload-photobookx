@@ -30,6 +30,8 @@ interface ShopifyOrder {
     quantity: number;
     variantTitle?: string;
   }>;
+  customerTags?: string | null;
+  customerId?: number | null;
 }
 
 interface OrdersTableBodyProps {
@@ -52,6 +54,7 @@ interface OrdersTableBodyProps {
   avgPnlPerFinalOrder: number;
   globalNdrRate: number;
   onUpdateDeliveryStatus?: (orderId: number, orderName: string) => void;
+  onAddCustomerTag?: (customerId: number, tag: string) => void;
 }
 
 export const OrdersTableBody: React.FC<OrdersTableBodyProps> = ({
@@ -69,6 +72,7 @@ export const OrdersTableBody: React.FC<OrdersTableBodyProps> = ({
   avgPnlPerFinalOrder,
   globalNdrRate,
   onUpdateDeliveryStatus,
+  onAddCustomerTag,
 }) => {
   if (hasStatusFilter) {
     // Filtered view: flat list, no day headers
@@ -76,7 +80,7 @@ export const OrdersTableBody: React.FC<OrdersTableBodyProps> = ({
       return (
         <tbody>
           <tr>
-            <td colSpan={7} className={styles['empty-state']}>
+            <td colSpan={8} className={styles['empty-state']}>
               <div className={styles['empty-icon']}>📦</div>
               <div className={styles['empty-text']}>No orders found</div>
             </td>
@@ -99,6 +103,7 @@ export const OrdersTableBody: React.FC<OrdersTableBodyProps> = ({
             getDeliveryStatusBadge={getDeliveryStatusBadge}
             handleOpenCogsModal={handleOpenCogsModal}
             onUpdateDeliveryStatus={onUpdateDeliveryStatus}
+            onAddCustomerTag={onAddCustomerTag}
           />
         ))}
       </tbody>
@@ -110,7 +115,7 @@ export const OrdersTableBody: React.FC<OrdersTableBodyProps> = ({
     return (
       <tbody>
         <tr>
-          <td colSpan={7} className={styles['empty-state']}>
+          <td colSpan={8} className={styles['empty-state']}>
             <div className={styles['empty-icon']}>📦</div>
             <div className={styles['empty-text']}>No orders found</div>
           </td>
@@ -123,7 +128,7 @@ export const OrdersTableBody: React.FC<OrdersTableBodyProps> = ({
     <tbody>
       {ordersGroupedByDate.map(({ dateKey, dateLabel, orders, adSpend }) => {
         const dayRevenue = orders.reduce((s, o) => s + (o.totalPrice || 0), 0);
-        
+
         const isOrderFinalStatus = (o: ShopifyOrder) => {
           const deliveryStatus = o.deliveryStatus?.toLowerCase() || '';
           const isDelivered = deliveryStatus === 'delivered';
@@ -133,14 +138,14 @@ export const OrdersTableBody: React.FC<OrdersTableBodyProps> = ({
             deliveryStatus.includes('rto');
           return isDelivered || isFailed;
         };
-        
+
         const isOrderCountedInDayPnl = (o: ShopifyOrder) =>
           isOrderFinalStatus(o) || (o.paymentMethod?.toLowerCase() === 'prepaid');
-        
+
         const dayPnL = orders.length > 0
           ? orders.reduce((s, o) => s + (isOrderCountedInDayPnl(o) ? (orderProfitLoss.get(o.id) ?? 0) : 0), 0)
           : -adSpend;
-        
+
         const pendingCount = orders.filter((o) => !isOrderCountedInDayPnl(o)).length;
         const estimatedDayPnl = dayPnL + pendingCount * avgPnlPerFinalOrder;
         const expectedNdr = orders.length > 0 ? Math.ceil(orders.length * globalNdrRate / 100) : 0;
@@ -148,7 +153,7 @@ export const OrdersTableBody: React.FC<OrdersTableBodyProps> = ({
         return (
           <React.Fragment key={`day-${dateKey}`}>
             <tr className={styles['day-header-row']}>
-              <td colSpan={7} className={styles['day-header-cell']}>
+              <td colSpan={8} className={styles['day-header-cell']}>
                 <div className={styles['day-header-inner']}>
                   <span className={styles['day-header-date']}>{dateLabel}</span>
                   <span className={styles['day-header-ad-spend']}>
@@ -185,6 +190,7 @@ export const OrdersTableBody: React.FC<OrdersTableBodyProps> = ({
                 getDeliveryStatusBadge={getDeliveryStatusBadge}
                 handleOpenCogsModal={handleOpenCogsModal}
                 onUpdateDeliveryStatus={onUpdateDeliveryStatus}
+                onAddCustomerTag={onAddCustomerTag}
               />
             ))}
           </React.Fragment>

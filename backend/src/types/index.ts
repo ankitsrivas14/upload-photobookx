@@ -80,6 +80,14 @@ export interface ShopifyFulfillment {
   updated_at?: string;
 }
 
+export interface ShopifyCustomer {
+  id: number;
+  email?: string;
+  first_name?: string;
+  last_name?: string;
+  tags?: string;
+}
+
 export interface ShopifyOrder {
   id: number;
   name: string;
@@ -95,6 +103,7 @@ export interface ShopifyOrder {
   current_total_price?: string;
   cancelled_at?: string | null;
   financial_status?: string;
+  customer?: ShopifyCustomer;
 }
 
 export interface ShopifyOrdersResponse {

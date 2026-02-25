@@ -97,6 +97,8 @@ interface ShopifyOrder {
     quantity: number;
     variantTitle?: string;
   }>;
+  customerTags?: string | null;
+  customerId?: number | null;
 }
 
 interface OrdersResponse {
@@ -326,6 +328,31 @@ class ApiService {
       {
         method: 'POST',
         body: JSON.stringify({ orderNumber, status }),
+      }
+    );
+  }
+
+  async bulkAddCustomerTags(customerIds: number[], tag: string): Promise<{
+    success: boolean;
+    summary?: { total: number; successful: number; failed: number };
+    error?: string;
+  }> {
+    return this.request<{
+      success: boolean;
+      summary?: { total: number; successful: number; failed: number };
+      error?: string;
+    }>('/api/admin/magic-links/shopify/customers/bulk-tags', {
+      method: 'POST',
+      body: JSON.stringify({ customerIds, tag }),
+    });
+  }
+
+  async addCustomerTag(customerId: number, tag: string): Promise<{ success: boolean; message?: string; error?: string }> {
+    return this.request<{ success: boolean; message?: string; error?: string }>(
+      `/api/admin/magic-links/shopify/customers/${customerId}/tags`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ tag }),
       }
     );
   }
