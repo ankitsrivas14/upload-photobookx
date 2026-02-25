@@ -8,6 +8,7 @@ export interface IBankTransaction extends Document {
     deposit: number;
     balance: number;
     category: string;
+    tags: string[];
     createdBy: Types.ObjectId;
     createdAt: Date;
     updatedAt: Date;
@@ -45,6 +46,12 @@ const BankTransactionSchema = new Schema<IBankTransaction>(
             required: true,
             trim: true,
         },
+        tags: [
+            {
+                type: String,
+                trim: true,
+            },
+        ],
         createdBy: {
             type: Schema.Types.ObjectId,
             ref: 'SuperUser',

@@ -1,27 +1,26 @@
 import mongoose, { Schema, Document, Types } from 'mongoose';
 
-export interface IBankCategory extends Document {
-    name: string;
-    tags: string[];
+export interface IBankNarrationRule extends Document {
+    keyword: string;
+    nickname: string;
     createdBy: Types.ObjectId;
     createdAt: Date;
     updatedAt: Date;
 }
 
-const BankCategorySchema = new Schema<IBankCategory>(
+const BankNarrationRuleSchema = new Schema<IBankNarrationRule>(
     {
-        name: {
+        keyword: {
             type: String,
             required: true,
             unique: true,
             trim: true,
         },
-        tags: [
-            {
-                type: String,
-                trim: true,
-            },
-        ],
+        nickname: {
+            type: String,
+            required: true,
+            trim: true,
+        },
         createdBy: {
             type: Schema.Types.ObjectId,
             ref: 'SuperUser',
@@ -33,4 +32,4 @@ const BankCategorySchema = new Schema<IBankCategory>(
     }
 );
 
-export const BankCategory = mongoose.model<IBankCategory>('BankCategory', BankCategorySchema);
+export const BankNarrationRule = mongoose.model<IBankNarrationRule>('BankNarrationRule', BankNarrationRuleSchema);

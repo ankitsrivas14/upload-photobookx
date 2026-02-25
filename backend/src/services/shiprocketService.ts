@@ -43,7 +43,9 @@ interface WalletTransactionResponse {
 interface ShiprocketShipment {
   id: number;
   awb_code: string;
+  awb?: string;
   courier_name: string;
+  courier?: string;
   status: string;
   weight: string;
   freight_charge?: number; // Shipping charge paid
@@ -53,6 +55,7 @@ interface ShiprocketShipment {
   shipping_charges?: number;
   total_charge?: number;
   charged_weight?: string;
+  cost?: number | string;
 }
 
 /**
@@ -92,11 +95,11 @@ class ShiprocketService {
         throw new Error(`Shiprocket Auth Error: ${response.status} - ${error}`);
       }
 
-      const data: ShiprocketAuthResponse = await response.json();
-      
+      const data = await response.json() as ShiprocketAuthResponse;
+
       this.token = data.token;
       this.tokenExpiry = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000);
-      
+
       return this.token;
     } catch (error) {
       console.error('Shiprocket authentication failed:', error);
@@ -120,7 +123,7 @@ class ShiprocketService {
    */
   private async makeRequest<T>(endpoint: string, options?: RequestInit): Promise<T> {
     const token = await this.getToken();
-    
+
     const response = await fetch(`${this.baseUrl}${endpoint}`, {
       ...options,
       headers: {
@@ -148,13 +151,13 @@ class ShiprocketService {
       let page = 1;
       const perPage = 100;
       const maxPages = 20; // Max 2000 transactions (recent ones)
-      
+
       console.log(`[Shiprocket] Fetching recent wallet transactions (no date filter - endpoint limitation)`);
-      
+
       while (page <= maxPages) {
         // Try without date filters as the endpoint might not support them
         const queryParams = `page=${page}&per_page=${perPage}`;
-        
+
         const response = await this.makeRequest<WalletTransactionResponse>(
           `/wallet/transactions?${queryParams}`
         );
@@ -164,33 +167,33 @@ class ShiprocketService {
         }
 
         allTransactions.push(...response.data);
-        
+
         // If we got less than perPage, we've reached the end
         if (response.data.length < perPage) {
           break;
         }
-        
+
         page++;
       }
 
       console.log(`[Shiprocket] Fetched ${allTransactions.length} wallet transactions`);
-      
+
       // Filter by date range on the client side if dates provided
       if (startDate || endDate) {
         const filtered = allTransactions.filter(txn => {
           const txnDate = txn.created_at ? new Date(txn.created_at).toISOString().split('T')[0] : null;
           if (!txnDate) return false;
-          
+
           if (startDate && txnDate < startDate) return false;
           if (endDate && txnDate > endDate) return false;
-          
+
           return true;
         });
-        
+
         console.log(`[Shiprocket] Filtered to ${filtered.length} transactions between ${startDate || 'start'} and ${endDate || 'end'}`);
         return filtered;
       }
-      
+
       return allTransactions;
     } catch (error: any) {
       // 404 means endpoint doesn't exist or no access
@@ -218,8 +221,8 @@ class ShiprocketService {
 
       if (response.data && response.data.length > 0) {
         // Filter transactions related to this order/AWB
-        return response.data.filter(txn => 
-          txn.order_id === orderNumber || 
+        return response.data.filter(txn =>
+          txn.order_id === orderNumber ||
           txn.awb === awbCode ||
           txn.description?.includes(orderNumber) ||
           txn.description?.includes(awbCode)
@@ -244,15 +247,15 @@ class ShiprocketService {
    */
   async getAllRecentOrdersMap(maxOrders: number = 500): Promise<Map<string, ShiprocketOrder>> {
     const orderMap = new Map<string, ShiprocketOrder>();
-    
+
     try {
       let page = 1;
       const perPage = 50;
       const maxPages = Math.ceil(maxOrders / perPage);
       let totalFetched = 0;
-      
+
       console.log(`[Shiprocket] Fetching up to ${maxOrders} recent orders in bulk...`);
-      
+
       while (page <= maxPages && totalFetched < maxOrders) {
         const response = await this.makeRequest<ShiprocketOrderResponse>(
           `/orders?page=${page}&per_page=${perPage}`
@@ -275,12 +278,12 @@ class ShiprocketService {
           }
           totalFetched++;
         }
-        
+
         // If we got less than perPage orders, we've reached the end
         if (response.data.length < perPage) {
           break;
         }
-        
+
         page++;
       }
 
@@ -300,13 +303,13 @@ class ShiprocketService {
     try {
       // Normalize the order number (remove # prefix if present)
       const normalizedOrderId = channelOrderId.replace(/^#/, '');
-      
+
       // Shiprocket's channel_order_id filter doesn't work properly!
       // Fetch recent orders and search through them manually
       let page = 1;
       const perPage = 50;
       const maxPages = 10; // Search through max 500 orders
-      
+
       while (page <= maxPages) {
         const response = await this.makeRequest<ShiprocketOrderResponse>(
           `/orders?page=${page}&per_page=${perPage}`
@@ -319,20 +322,20 @@ class ShiprocketService {
         // Search through this page for matching order
         for (const order of response.data) {
           const orderChannelId = order.channel_order_id;
-          
+
           // Check if this order matches (with or without # prefix)
-          if (orderChannelId === normalizedOrderId || 
-              orderChannelId === `#${normalizedOrderId}` ||
-              orderChannelId === channelOrderId) {
+          if (orderChannelId === normalizedOrderId ||
+            orderChannelId === `#${normalizedOrderId}` ||
+            orderChannelId === channelOrderId) {
             return order;
           }
         }
-        
+
         // If we got less than perPage orders, we've reached the end
         if (response.data.length < perPage) {
           break;
         }
-        
+
         page++;
       }
 
@@ -356,30 +359,30 @@ class ShiprocketService {
 
       // Fetch from Shiprocket
       const shiprocketOrder = await this.getOrderByChannelOrderId(orderNumber);
-      
+
       if (!shiprocketOrder || !shiprocketOrder.shipments || shiprocketOrder.shipments.length === 0) {
         return null;
       }
 
       const shipment = shiprocketOrder.shipments[0];
       const awbCode = shipment.awb_code || shipment.awb || '';
-      
+
       // Try to get detailed charge breakdown from wallet transactions
       let freightForward = 0;
       let freightCOD = 0;
       let freightRTO = 0;
       let whatsappCharges = 0;
       let otherCharges = 0;
-      
+
       // Fetch wallet transactions for this order
       const transactions = await this.getWalletTransactionsForOrder(awbCode, orderNumber);
-      
+
       if (transactions.length > 0) {
         // Parse transactions to extract charges
         transactions.forEach(txn => {
           const amount = Math.abs(txn.amount); // Use absolute value
           const type = txn.type?.toLowerCase() || '';
-          
+
           if (type.includes('freight forward')) {
             freightForward += amount;
           } else if (type.includes('freight cod')) {
@@ -399,19 +402,19 @@ class ShiprocketService {
           const charges = shiprocketOrder.awb_data.charges;
           const totalFreight = parseFloat(charges.freight_charges as any) || 0;
           const codComponent = parseFloat(charges.cod_charges as any) || 0;
-          
+
           // freight_charges INCLUDES COD, so extract base freight
           freightForward = totalFreight - codComponent;
           freightCOD = codComponent;
           freightRTO = parseFloat(charges.applied_weight_amount_rto as any) || 0;
         }
-        
+
         // Last fallback: use shipment.cost
         if (freightForward === 0 && shipment.cost) {
           freightForward = parseFloat(shipment.cost as any) || 0;
         }
       }
-      
+
       // Calculate total shipping cost
       // Base Freight + COD + RTO + WhatsApp + Other
       // COD will be reversed in frontend for RTO COD orders
@@ -471,18 +474,18 @@ class ShiprocketService {
    */
   async bulkFetchShippingCharges(orderNumbers: string[]): Promise<{ fetched: number; skipped: number }> {
     console.log(`[Shiprocket] Starting bulk fetch for ${orderNumbers.length} orders`);
-    
+
     // Step 1: Fetch all recent Shiprocket orders in bulk
     const shiprocketOrdersMap = await this.getAllRecentOrdersMap(1000);
-    
+
     // Step 2: Process orders in batches of 5 (parallel processing with wallet transactions)
     const batchSize = 5; // Smaller batches since we're calling wallet API
     let fetched = 0;
     let skipped = 0;
-    
+
     for (let i = 0; i < orderNumbers.length; i += batchSize) {
       const batch = orderNumbers.slice(i, i + batchSize);
-      
+
       await Promise.all(batch.map(async (orderNumber) => {
         try {
           // Check if already exists in DB
@@ -491,32 +494,32 @@ class ShiprocketService {
             skipped++;
             return;
           }
-          
+
           // Get from pre-fetched map
           const shiprocketOrder = shiprocketOrdersMap.get(orderNumber);
           if (!shiprocketOrder || !shiprocketOrder.shipments || shiprocketOrder.shipments.length === 0) {
             return;
           }
-          
+
           const shipment = shiprocketOrder.shipments[0];
           const awbCode = shipment.awb_code || shipment.awb || '';
-          
+
           let freightForward = 0;
           let freightCOD = 0;
           let freightRTO = 0;
           let whatsappCharges = 0;
           let otherCharges = 0;
-          
+
           // Try wallet transactions if AWB exists (shipped orders)
           if (awbCode) {
             const transactions = await this.getWalletTransactionsForOrder(awbCode, orderNumber);
-            
+
             if (transactions.length > 0) {
               // Parse transactions for detailed breakdown
               transactions.forEach(txn => {
                 const amount = Math.abs(txn.amount);
                 const type = txn.type?.toLowerCase() || '';
-                
+
                 if (type.includes('freight forward')) {
                   freightForward += amount;
                 } else if (type.includes('freight cod')) {
@@ -531,31 +534,31 @@ class ShiprocketService {
               });
             }
           }
-          
+
           // Fallback to AWB charges if no wallet transactions
           if (freightForward === 0 && freightCOD === 0 && freightRTO === 0) {
             if (shiprocketOrder.awb_data?.charges) {
               const charges = shiprocketOrder.awb_data.charges;
               const totalFreight = parseFloat(charges.freight_charges as any) || 0;
               const codComponent = parseFloat(charges.cod_charges as any) || 0;
-              
+
               // freight_charges INCLUDES COD, so we need to extract base freight
               // Base Freight = Total Freight - COD Component
               freightForward = totalFreight - codComponent;
               freightCOD = codComponent;
               freightRTO = parseFloat(charges.applied_weight_amount_rto as any) || 0;
             }
-            
+
             // Last fallback: shipment.cost
             if (freightForward === 0 && shipment.cost) {
               freightForward = parseFloat(shipment.cost as any) || 0;
             }
           }
-          
+
           // Calculate total: Base Freight + COD + RTO + Other
           // Note: COD will be reversed in frontend for RTO orders
           const totalShippingCost = freightForward + freightCOD + freightRTO + whatsappCharges + otherCharges;
-          
+
           // Only store if > 0
           if (totalShippingCost > 0) {
             await ShippingCharge.create({
@@ -579,11 +582,11 @@ class ShiprocketService {
           console.error(`[Shiprocket] Error processing ${orderNumber}:`, error);
         }
       }));
-      
+
       // Log progress every batch
       console.log(`[Shiprocket] Progress: ${Math.min(i + batchSize, orderNumbers.length)}/${orderNumbers.length} orders processed`);
     }
-    
+
     console.log(`[Shiprocket] Bulk fetch complete: ${fetched} fetched, ${skipped} skipped`);
     return { fetched, skipped };
   }

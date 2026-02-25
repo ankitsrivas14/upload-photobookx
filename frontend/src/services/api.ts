@@ -662,7 +662,7 @@ class ApiService {
   }
 
   // Bank Account
-  async getBankCategories(): Promise<{ success: boolean; categories: string[]; error?: string }> {
+  async getBankCategories(): Promise<{ success: boolean; categories: { name: string; tags: string[] }[]; error?: string }> {
     return this.request('/api/admin/bank-account/categories');
   }
 
@@ -686,6 +686,13 @@ class ApiService {
     });
   }
 
+  async updateCategoryTags(name: string, tags: string[]): Promise<{ success: boolean; tags: string[]; error?: string }> {
+    return this.request(`/api/admin/bank-account/categories/${encodeURIComponent(name)}/tags`, {
+      method: 'PATCH',
+      body: JSON.stringify({ tags }),
+    });
+  }
+
   async getBankTransactions(): Promise<{ success: boolean; transactions: any[]; error?: string }> {
     return this.request('/api/admin/bank-account/transactions');
   }
@@ -699,6 +706,37 @@ class ApiService {
 
   async deleteBankTransaction(id: string): Promise<{ success: boolean; error?: string }> {
     return this.request(`/api/admin/bank-account/transactions/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async updateTransactionTags(ids: string[], tags: string[]): Promise<{ success: boolean; error?: string }> {
+    return this.request('/api/admin/bank-account/transactions/bulk/tags', {
+      method: 'PATCH',
+      body: JSON.stringify({ ids, tags }),
+    });
+  }
+
+  async updateBankTransactionCategory(id: string, category: string): Promise<{ success: boolean; transaction?: any; error?: string }> {
+    return this.request(`/api/admin/bank-account/transactions/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ category }),
+    });
+  }
+
+  async getNarrationRules(): Promise<{ success: boolean; rules: any[]; error?: string }> {
+    return this.request('/api/admin/bank-account/narration-rules');
+  }
+
+  async createNarrationRule(keyword: string, nickname: string): Promise<{ success: boolean; rule?: any; error?: string }> {
+    return this.request('/api/admin/bank-account/narration-rules', {
+      method: 'POST',
+      body: JSON.stringify({ keyword, nickname }),
+    });
+  }
+
+  async deleteNarrationRule(id: string): Promise<{ success: boolean; error?: string }> {
+    return this.request(`/api/admin/bank-account/narration-rules/${id}`, {
       method: 'DELETE',
     });
   }

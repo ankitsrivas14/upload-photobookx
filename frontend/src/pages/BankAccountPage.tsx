@@ -13,6 +13,12 @@ interface Transaction {
     balance: number;
     isSelected: boolean;
     category?: string;
+    tags?: string[];
+}
+
+interface BankCategory {
+    name: string;
+    tags: string[];
 }
 
 export function BankAccountPage() {
@@ -20,7 +26,7 @@ export function BankAccountPage() {
     const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [period, setPeriod] = useState<string>('');
     const [categorizedTransactions, setCategorizedTransactions] = useState<Transaction[]>([]);
-    const [categories, setCategories] = useState<string[]>([]);
+    const [categories, setCategories] = useState<BankCategory[]>([]);
     const [showCategoryMenu, setShowCategoryMenu] = useState(false);
     const [newCategoryName, setNewCategoryName] = useState('');
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -69,6 +75,74 @@ export function BankAccountPage() {
     const [ignoredCount, setIgnoredCount] = useState(0);
     const [editingCategory, setEditingCategory] = useState<string | null>(null);
     const [editCategoryName, setEditCategoryName] = useState('');
+    const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string | null>(null);
+    const [showTagMenu, setShowTagMenu] = useState(false);
+    const [newTagName, setNewTagName] = useState('');
+    const [isAddingTag, setIsAddingTag] = useState<string | null>(null); // Category name if adding a tag
+    const [movingTransactionId, setMovingTransactionId] = useState<string | null>(null);
+    const [showUntaggedOnly, setShowUntaggedOnly] = useState(false);
+    const [narrationRules, setNarrationRules] = useState<any[]>([]);
+    const [showConfig, setShowConfig] = useState(false);
+    const [newRuleKeyword, setNewRuleKeyword] = useState('');
+    const [newRuleNickname, setNewRuleNickname] = useState('');
+
+    useEffect(() => {
+        fetchNarrationRules();
+    }, []);
+
+    const fetchNarrationRules = async () => {
+        try {
+            const res = await api.getNarrationRules();
+            if (res.success) {
+                setNarrationRules(res.rules);
+            }
+        } catch (err) {
+            console.error('Error fetching narration rules:', err);
+        }
+    };
+
+    const handleAddRule = async () => {
+        if (!newRuleKeyword || !newRuleNickname) return;
+        try {
+            const res = await api.createNarrationRule(newRuleKeyword, newRuleNickname);
+            if (res.success) {
+                setNarrationRules([res.rule, ...narrationRules]);
+                setNewRuleKeyword('');
+                setNewRuleNickname('');
+            }
+        } catch (err) {
+            console.error('Error adding rule:', err);
+        }
+    };
+
+    const handleDeleteRule = async (id: string) => {
+        try {
+            const res = await api.deleteNarrationRule(id);
+            if (res.success) {
+                setNarrationRules(narrationRules.filter(r => r.id !== id));
+            }
+        } catch (err) {
+            console.error('Error deleting rule:', err);
+        }
+    };
+
+    const applyNarrationRule = (narration: string) => {
+        const matchingRule = narrationRules.find(rule =>
+            narration.toLowerCase().includes(rule.keyword.toLowerCase())
+        );
+        if (matchingRule) {
+            return {
+                styled: matchingRule.nickname,
+                original: narration,
+                hasRule: true
+            };
+        }
+        return {
+            styled: narration,
+            original: narration,
+            hasRule: false
+        };
+    };
 
     const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -184,15 +258,29 @@ export function BankAccountPage() {
         setPeriod(periodFound);
     };
 
-    const toggleSelectAll = () => {
-        const allSelected = transactions.length > 0 && transactions.every(t => t.isSelected);
-        setTransactions(transactions.map(t => ({ ...t, isSelected: !allSelected })));
+    const toggleSelectAll = (isCategorized: boolean = false) => {
+        if (isCategorized) {
+            const allSelected = filteredCategorized.length > 0 && filteredCategorized.every(t => t.isSelected);
+            const filteredIds = new Set(filteredCategorized.map(t => t.id));
+            setCategorizedTransactions(categorizedTransactions.map(t =>
+                filteredIds.has(t.id) ? { ...t, isSelected: !allSelected } : t
+            ));
+        } else {
+            const allSelected = transactions.length > 0 && transactions.every(t => t.isSelected);
+            setTransactions(transactions.map(t => ({ ...t, isSelected: !allSelected })));
+        }
     };
 
-    const toggleSelect = (id: string) => {
-        setTransactions(transactions.map(t =>
-            t.id === id ? { ...t, isSelected: !t.isSelected } : t
-        ));
+    const toggleSelect = (id: string, isCategorized: boolean = false) => {
+        if (isCategorized) {
+            setCategorizedTransactions(categorizedTransactions.map(t =>
+                t.id === id ? { ...t, isSelected: !t.isSelected } : t
+            ));
+        } else {
+            setTransactions(transactions.map(t =>
+                t.id === id ? { ...t, isSelected: !t.isSelected } : t
+            ));
+        }
     };
 
     const selectedCount = transactions.filter(t => t.isSelected).length;
@@ -229,11 +317,11 @@ export function BankAccountPage() {
     const handleAddCategory = async (e: React.FormEvent) => {
         e.preventDefault();
         const name = newCategoryName.trim();
-        if (name && !categories.includes(name)) {
+        if (name && !categories.some(c => c.name === name)) {
             try {
                 const res = await api.createBankCategory(name);
                 if (res.success) {
-                    setCategories([...categories, res.category].sort());
+                    setCategories([...categories, { name: res.category, tags: [] }].sort((a, b) => a.name.localeCompare(b.name)));
                     setNewCategoryName('');
                 } else {
                     alert('Failed to add category: ' + res.error);
@@ -268,7 +356,7 @@ export function BankAccountPage() {
         try {
             const res = await api.updateBankCategory(oldName, newName);
             if (res.success) {
-                setCategories(categories.map(c => c === oldName ? res.category : c).sort());
+                setCategories(categories.map(c => c.name === oldName ? { ...c, name: res.category } : c).sort((a, b) => a.name.localeCompare(b.name)));
                 setCategorizedTransactions(categorizedTransactions.map(tx =>
                     tx.category === oldName ? { ...tx, category: res.category } : tx
                 ));
@@ -305,6 +393,54 @@ export function BankAccountPage() {
         }
     };
 
+    const handleUpdateCategoryTags = async (categoryName: string, tags: string[]) => {
+        try {
+            const res = await api.updateCategoryTags(categoryName, tags);
+            if (res.success) {
+                setCategories(categories.map(c =>
+                    c.name === categoryName ? { ...c, tags: res.tags || [] } : c
+                ));
+            }
+        } catch (err) {
+            console.error('Error updating tags:', err);
+        }
+    };
+
+    const handleTagTransactions = async (tags: string[]) => {
+        const selected = filteredCategorized.filter(t => t.isSelected);
+        if (selected.length === 0) return;
+
+        const ids = selected.map(t => t.id);
+        try {
+            const res = await api.updateTransactionTags(ids, tags);
+            if (res.success) {
+                setCategorizedTransactions(categorizedTransactions.map(tx =>
+                    ids.includes(tx.id) ? { ...tx, tags, isSelected: false } : tx
+                ));
+                setShowTagMenu(false);
+            } else {
+                alert('Failed to update transaction tags');
+            }
+        } catch (err) {
+            console.error('Error tagging transactions:', err);
+        }
+    };
+
+    const handleMoveTransaction = async (id: string, newCategory: string) => {
+        try {
+            const res = await api.updateBankTransactionCategory(id, newCategory);
+            if (res.success) {
+                setCategorizedTransactions(categorizedTransactions.map(tx =>
+                    tx.id === id ? { ...tx, category: newCategory, tags: [] } : tx
+                ));
+            } else {
+                alert('Failed to move transaction: ' + res.error);
+            }
+        } catch (err) {
+            console.error('Error moving transaction:', err);
+        }
+    };
+
     // Derived Data
     const availableMonths = useMemo(() => {
         const monthsSet = new Set<string>();
@@ -328,8 +464,13 @@ export function BankAccountPage() {
     }, [categorizedTransactions, transactions]);
 
     const filteredCategorized = useMemo(() => {
-        return categorizedTransactions.filter(tx => getMonthYearFromDate(tx.date) === monthFilter);
-    }, [categorizedTransactions, monthFilter]);
+        return categorizedTransactions.filter(tx => {
+            const dateMatch = getMonthYearFromDate(tx.date) === monthFilter;
+            const categoryMatch = !selectedCategoryFilter || tx.category === selectedCategoryFilter;
+            const tagsMatch = !showUntaggedOnly || !tx.tags || tx.tags.length === 0;
+            return dateMatch && categoryMatch && tagsMatch;
+        });
+    }, [categorizedTransactions, monthFilter, selectedCategoryFilter, showUntaggedOnly]);
 
     const stats = useMemo(() => {
         let incoming = 0;
@@ -387,9 +528,16 @@ export function BankAccountPage() {
         });
 
         return Array.from(map.entries())
-            .map(([name, stats]) => ({ name, ...stats }))
+            .map(([name, stats]) => {
+                const catDef = categories.find(c => c.name === name);
+                return {
+                    name,
+                    ...stats,
+                    tags: catDef?.tags || []
+                };
+            })
             .sort((a, b) => b.outgoing - a.outgoing); // Sort by highest spend
-    }, [filteredCategorized]);
+    }, [filteredCategorized, categories]);
 
     if (isLoading && transactions.length === 0 && categorizedTransactions.length === 0) {
         return (
@@ -410,6 +558,12 @@ export function BankAccountPage() {
                     </div>
                 </div>
                 <div className={styles['header-actions']}>
+                    <button className={styles['config-btn']} onClick={() => setShowConfig(!showConfig)} title="Narration Config">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+                            <circle cx="12" cy="12" r="3" />
+                        </svg>
+                    </button>
                     <div className={styles['month-wrapper']}>
                         <label>Period:</label>
                         <select
@@ -442,6 +596,90 @@ export function BankAccountPage() {
                     </button>
                 </div>
             </div>
+
+            {showConfig && (
+                <div className={styles['modal-overlay']} onClick={() => setShowConfig(false)}>
+                    <div className={styles['config-modal']} onClick={e => e.stopPropagation()}>
+                        <div className={styles['modal-header']}>
+                            <div className={styles['modal-header-title']}>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: '20px', height: '20px' }}>
+                                    <path d="M12 15a3 3 0 100-6 3 3 0 000 6z" />
+                                    <rect x="2" y="2" width="20" height="20" rx="5" ry="5" />
+                                </svg>
+                                <h3>Narration Config</h3>
+                            </div>
+                            <button className={styles['modal-close']} onClick={() => setShowConfig(false)}>&times;</button>
+                        </div>
+                        <div className={styles['modal-body']}>
+                            <p className={styles['modal-desc']}>Map complex transaction keywords (like UPI IDs) to simple nicknames. Hover over a nickname in the table to see the original narration.</p>
+
+                            <div className={styles['add-rule-form']}>
+                                <div className={styles['input-group']}>
+                                    <label>Keyword</label>
+                                    <input
+                                        type="text"
+                                        placeholder="e.g. UPI/2304..."
+                                        value={newRuleKeyword}
+                                        onChange={(e) => setNewRuleKeyword(e.target.value)}
+                                    />
+                                </div>
+                                <div className={styles['input-group']}>
+                                    <label>Nickname</label>
+                                    <input
+                                        type="text"
+                                        placeholder="e.g. Amazon Pay"
+                                        value={newRuleNickname}
+                                        onChange={(e) => setNewRuleNickname(e.target.value)}
+                                    />
+                                </div>
+                                <button className={styles['primary-btn']} onClick={handleAddRule} style={{ alignSelf: 'flex-end', height: '38px' }}>
+                                    Add Rule
+                                </button>
+                            </div>
+
+                            <div className={styles['rules-list-container']}>
+                                <h4>Saved Rules ({narrationRules.length})</h4>
+                                {narrationRules.length === 0 ? (
+                                    <div className={styles['empty-rules']}>
+                                        <p>No rules defined yet. Add your first rule above!</p>
+                                    </div>
+                                ) : (
+                                    <div className={styles['rules-scroll']}>
+                                        <table className={styles['rules-table']}>
+                                            <thead>
+                                                <tr>
+                                                    <th>Keyword</th>
+                                                    <th>Nickname</th>
+                                                    <th style={{ width: '80px', textAlign: 'center' }}>Action</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {narrationRules.map((rule) => (
+                                                    <tr key={rule.id}>
+                                                        <td className={styles['keyword-cell']}>{rule.keyword}</td>
+                                                        <td className={styles['nickname-cell']}>{rule.nickname}</td>
+                                                        <td style={{ textAlign: 'center' }}>
+                                                            <button
+                                                                className={styles['delete-rule-btn']}
+                                                                onClick={() => handleDeleteRule(rule.id)}
+                                                                title="Delete Rule"
+                                                            >
+                                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: '14px', height: '14px' }}>
+                                                                    <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+                                                                </svg>
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             <div className={styles['stats-grid']}>
                 <div className={styles['stat-card']}>
@@ -501,7 +739,11 @@ export function BankAccountPage() {
                     <h3>Category Breakdown (Spend)</h3>
                     <div className={styles['category-stats-list']}>
                         {categoryStats.map(cat => (
-                            <div key={cat.name} className={styles['category-stat-item']}>
+                            <div
+                                key={cat.name}
+                                className={`${styles['category-stat-item']} ${selectedCategoryFilter === cat.name ? styles['active-filter'] : ''}`}
+                                onClick={() => setSelectedCategoryFilter(selectedCategoryFilter === cat.name ? null : cat.name)}
+                            >
                                 <div className={styles['cat-info']}>
                                     {editingCategory === cat.name ? (
                                         <div className={styles['cat-edit-group']}>
@@ -562,6 +804,47 @@ export function BankAccountPage() {
                                         style={{ width: `${(cat.outgoing / stats.outgoing) * 100}%` }}
                                     ></div>
                                 </div>
+                                <div className={styles['cat-tags']} onClick={e => e.stopPropagation()}>
+                                    {cat.tags?.map(tag => (
+                                        <span key={tag} className={styles['tag-pill']}>{tag}</span>
+                                    ))}
+                                    {isAddingTag === cat.name ? (
+                                        <div className={styles['cat-tag-form']}>
+                                            <input
+                                                className={styles['cat-tag-input']}
+                                                value={newTagName}
+                                                onChange={e => setNewTagName(e.target.value)}
+                                                onKeyDown={e => {
+                                                    if (e.key === 'Enter') {
+                                                        handleUpdateCategoryTags(cat.name, [...(cat.tags || []), newTagName.trim()]);
+                                                        setNewTagName('');
+                                                        setIsAddingTag(null);
+                                                    }
+                                                    if (e.key === 'Escape') setIsAddingTag(null);
+                                                }}
+                                                autoFocus
+                                                placeholder="Tag name..."
+                                            />
+                                            <button
+                                                className={styles['tag-save-btn']}
+                                                onClick={() => {
+                                                    handleUpdateCategoryTags(cat.name, [...(cat.tags || []), newTagName.trim()]);
+                                                    setNewTagName('');
+                                                    setIsAddingTag(null);
+                                                }}
+                                            >
+                                                +
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <button
+                                            className={styles['add-tag-trigger']}
+                                            onClick={() => setIsAddingTag(cat.name)}
+                                        >
+                                            + Tag
+                                        </button>
+                                    )}
+                                </div>
                             </div>
                         ))}
                     </div>
@@ -599,18 +882,18 @@ export function BankAccountPage() {
                                         <div className={styles['category-menu']}>
                                             <div className={styles['category-list']}>
                                                 {categories.map((cat) => (
-                                                    <div key={cat} className={styles['category-menu-item-wrapper']}>
+                                                    <div key={cat.name} className={styles['category-menu-item-wrapper']}>
                                                         <button
-                                                            onClick={() => handleCategorize(cat)}
+                                                            onClick={() => handleCategorize(cat.name)}
                                                             className={styles['category-item']}
                                                         >
-                                                            {cat}
+                                                            {cat.name}
                                                         </button>
                                                         <button
                                                             className={styles['menu-cat-delete']}
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
-                                                                handleDeleteCategory(cat);
+                                                                handleDeleteCategory(cat.name);
                                                             }}
                                                             title="Delete category"
                                                         >
@@ -649,7 +932,7 @@ export function BankAccountPage() {
                                         <input
                                             type="checkbox"
                                             checked={transactions.length > 0 && transactions.every(t => t.isSelected)}
-                                            onChange={toggleSelectAll}
+                                            onChange={() => toggleSelectAll(false)}
                                         />
                                     </th>
                                     <th>Date</th>
@@ -666,12 +949,37 @@ export function BankAccountPage() {
                                             <input
                                                 type="checkbox"
                                                 checked={tx.isSelected}
-                                                onChange={() => toggleSelect(tx.id)}
+                                                onChange={() => toggleSelect(tx.id, false)}
                                             />
                                         </td>
                                         <td className={styles['date-cell']}>{tx.date}</td>
-                                        <td className={styles['narration-cell']} title={tx.narration}>
-                                            {tx.narration}
+                                        <td className={styles['narration-cell']}>
+                                            <div className={styles['narration-content']}>
+                                                {(() => {
+                                                    const { styled, original, hasRule } = applyNarrationRule(tx.narration);
+                                                    return (
+                                                        <>
+                                                            <span className={hasRule ? styles['nickname-text'] : ''}>
+                                                                {styled}
+                                                            </span>
+                                                            {hasRule && (
+                                                                <div className={styles['info-tooltip-wrapper']}>
+                                                                    <button className={styles['info-btn']}>
+                                                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                                            <circle cx="12" cy="12" r="10" />
+                                                                            <line x1="12" y1="16" x2="12" y2="12" />
+                                                                            <line x1="12" y1="8" x2="12.01" y2="8" />
+                                                                        </svg>
+                                                                    </button>
+                                                                    <div className={styles['info-tooltip']}>
+                                                                        {original}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </>
+                                                    );
+                                                })()}
+                                            </div>
                                         </td>
                                         <td className={`${styles['amount-cell']} ${styles.red}`}>
                                             {tx.withdrawal > 0 ? `₹${tx.withdrawal.toLocaleString('en-IN')}` : '—'}
@@ -694,8 +1002,76 @@ export function BankAccountPage() {
                 <div className={styles['section-card']}>
                     <div className={styles['table-header']}>
                         <div className={styles['table-title']}>
-                            <h3>Categorized ({monthFilter})</h3>
-                            <span className={styles['subtitle']}>{filteredCategorized.length} records</span>
+                            <h3>Categorized ({monthFilter}){selectedCategoryFilter && ` : ${selectedCategoryFilter}`}</h3>
+                            <div className={styles['table-subtitles']}>
+                                <span className={styles['subtitle']}>{filteredCategorized.length} records</span>
+                                {selectedCategoryFilter && (
+                                    <button
+                                        className={styles['clear-filter-btn']}
+                                        onClick={() => setSelectedCategoryFilter(null)}
+                                    >
+                                        Show All Categories
+                                    </button>
+                                )}
+                                {selectedCategoryFilter && (
+                                    <label className={styles['toggle-filter']}>
+                                        <input
+                                            type="checkbox"
+                                            checked={showUntaggedOnly}
+                                            onChange={(e) => setShowUntaggedOnly(e.target.checked)}
+                                        />
+                                        <span>Show Untagged Only</span>
+                                    </label>
+                                )}
+                                {filteredCategorized.some(t => t.isSelected) && selectedCategoryFilter && (
+                                    <div className={styles['category-dropdown-container']}>
+                                        <button
+                                            className={styles['clear-filter-btn']}
+                                            onClick={() => setShowTagMenu(!showTagMenu)}
+                                            style={{ marginLeft: '8px' }}
+                                        >
+                                            Add Tag to Selection
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: '10px', height: '10px', marginLeft: '4px' }}>
+                                                <polyline points="6 9 12 15 18 9" />
+                                            </svg>
+                                        </button>
+                                        {showTagMenu && (
+                                            <div className={styles['category-tags-dropdown']}>
+                                                <div className={styles['tag-menu-list']}>
+                                                    {categories.find(c => c.name === selectedCategoryFilter)?.tags.map(tag => (
+                                                        <button
+                                                            key={tag}
+                                                            className={styles['tag-menu-item']}
+                                                            onClick={() => handleTagTransactions([tag])}
+                                                        >
+                                                            {tag}
+                                                        </button>
+                                                    ))}
+                                                    <div className={styles['add-category-form']} style={{ marginTop: '4px' }}>
+                                                        <input
+                                                            type="text"
+                                                            placeholder="New tag..."
+                                                            value={newTagName}
+                                                            onChange={e => setNewTagName(e.target.value)}
+                                                            onKeyDown={e => {
+                                                                if (e.key === 'Enter') {
+                                                                    const cat = categories.find(c => c.name === selectedCategoryFilter);
+                                                                    if (cat) {
+                                                                        const upgradedTags = [...cat.tags, newTagName.trim()];
+                                                                        handleUpdateCategoryTags(cat.name, upgradedTags);
+                                                                        handleTagTransactions([newTagName.trim()]);
+                                                                        setNewTagName('');
+                                                                    }
+                                                                }
+                                                            }}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </div>
 
@@ -703,8 +1079,15 @@ export function BankAccountPage() {
                         <table className={styles['tx-table']}>
                             <thead>
                                 <tr>
+                                    <th>
+                                        <input
+                                            type="checkbox"
+                                            checked={filteredCategorized.length > 0 && filteredCategorized.every(t => t.isSelected)}
+                                            onChange={() => toggleSelectAll(true)}
+                                        />
+                                    </th>
                                     <th>Date</th>
-                                    <th>Category</th>
+                                    <th>Category / Tags</th>
                                     <th>Narration</th>
                                     <th className={styles['amount-cell']}>Withdrawal</th>
                                     <th className={styles['amount-cell']}>Deposit</th>
@@ -714,11 +1097,52 @@ export function BankAccountPage() {
                             <tbody>
                                 {filteredCategorized.map((tx) => (
                                     <tr key={tx.id}>
+                                        <td className={styles['checkbox-cell']}>
+                                            <input
+                                                type="checkbox"
+                                                checked={tx.isSelected || false}
+                                                onChange={() => toggleSelect(tx.id, true)}
+                                            />
+                                        </td>
                                         <td className={styles['date-cell']}>{tx.date}</td>
                                         <td>
-                                            <span className={styles['category-badge']}>{tx.category}</span>
+                                            <div className={styles['cat-badge-group']}>
+                                                <span className={styles['category-badge']}>{tx.category}</span>
+                                                <div className={styles['tx-tags-container']}>
+                                                    {tx.tags?.map(tag => (
+                                                        <span key={tag} className={styles['tx-tag']}>{tag}</span>
+                                                    ))}
+                                                </div>
+                                            </div>
                                         </td>
-                                        <td className={styles['narration-cell']}>{tx.narration}</td>
+                                        <td className={styles['narration-cell']}>
+                                            <div className={styles['narration-content']}>
+                                                {(() => {
+                                                    const { styled, original, hasRule } = applyNarrationRule(tx.narration);
+                                                    return (
+                                                        <>
+                                                            <span className={hasRule ? styles['nickname-text'] : ''}>
+                                                                {styled}
+                                                            </span>
+                                                            {hasRule && (
+                                                                <div className={styles['info-tooltip-wrapper']}>
+                                                                    <button className={styles['info-btn']}>
+                                                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                                            <circle cx="12" cy="12" r="10" />
+                                                                            <line x1="12" y1="16" x2="12" y2="12" />
+                                                                            <line x1="12" y1="8" x2="12.01" y2="8" />
+                                                                        </svg>
+                                                                    </button>
+                                                                    <div className={styles['info-tooltip']}>
+                                                                        {original}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </>
+                                                    );
+                                                })()}
+                                            </div>
+                                        </td>
                                         <td className={`${styles['amount-cell']} ${styles.red}`}>
                                             {tx.withdrawal > 0 ? `₹${tx.withdrawal.toLocaleString('en-IN')}` : '—'}
                                         </td>
@@ -726,15 +1150,50 @@ export function BankAccountPage() {
                                             {tx.deposit > 0 ? `₹${tx.deposit.toLocaleString('en-IN')}` : '—'}
                                         </td>
                                         <td className={styles['action-cell']}>
-                                            <button
-                                                className={styles['remove-btn']}
-                                                onClick={() => removeCategorized(tx.id)}
-                                                title="Revert categorization"
-                                            >
-                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                                    <path d="M19 12H5M12 19l-7-7 7-7" />
-                                                </svg>
-                                            </button>
+                                            <div className={styles['action-cell-content']}>
+                                                <div className={styles['category-dropdown-container']}>
+                                                    <button
+                                                        className={styles['remove-btn']}
+                                                        onClick={() => setMovingTransactionId(movingTransactionId === tx.id ? null : tx.id)}
+                                                        title="Move to another category"
+                                                    >
+                                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                            <polyline points="16 3 21 3 21 8" />
+                                                            <line x1="4" y1="20" x2="21" y2="3" />
+                                                            <polyline points="21 16 21 21 16 21" />
+                                                            <line x1="15" y1="15" x2="21" y2="21" />
+                                                            <line x1="4" y1="4" x2="9" y2="9" />
+                                                        </svg>
+                                                    </button>
+                                                    {movingTransactionId === tx.id && (
+                                                        <div className={styles['category-menu']}>
+                                                            <div className={styles['category-list']}>
+                                                                {categories.map((cat) => (
+                                                                    <button
+                                                                        key={cat.name}
+                                                                        onClick={() => {
+                                                                            handleMoveTransaction(tx.id, cat.name);
+                                                                            setMovingTransactionId(null);
+                                                                        }}
+                                                                        className={`${styles['category-item']} ${tx.category === cat.name ? styles['active-cat'] : ''}`}
+                                                                    >
+                                                                        {cat.name}
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                <button
+                                                    className={styles['remove-btn']}
+                                                    onClick={() => removeCategorized(tx.id)}
+                                                    title="Revert categorization"
+                                                >
+                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                        <path d="M19 12H5M12 19l-7-7 7-7" />
+                                                    </svg>
+                                                </button>
+                                            </div>
                                         </td>
                                     </tr>
                                 ))}

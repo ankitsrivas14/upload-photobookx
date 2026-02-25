@@ -10,3 +10,4 @@ export { DailyAdSpend } from './DailyAdSpend';
 export { default as ShopifyOrderCache, IShopifyOrderCache } from './ShopifyOrderCache';
 export { BankCategory, IBankCategory } from './BankCategory';
 export { BankTransaction, IBankTransaction } from './BankTransaction';
+export { BankNarrationRule, IBankNarrationRule } from './BankNarrationRule';

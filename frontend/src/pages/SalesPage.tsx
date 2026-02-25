@@ -1428,16 +1428,6 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       .reduce((sum, item) => sum + item.calculatedCost, 0);
   };
 
-  const getAdCost = () => {
-    return adCostPerOrderByDate[getOrderDateKey(selectedOrderForCogs?.createdAt || '')] ?? 0;
-  };
-
-  const calculateProfit = () => {
-    if (!selectedOrderForCogs) return 0;
-    const profitLoss = orderProfitLoss.get(selectedOrderForCogs.id);
-    return profitLoss !== undefined ? profitLoss : 0;
-  };
-
   if (isLoading) {
     return (
       <div className={styles['sales-page']}>
