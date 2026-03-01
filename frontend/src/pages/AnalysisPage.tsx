@@ -3,6 +3,7 @@ import { useNavigate, useLocation, Link, Routes, Route, Navigate } from 'react-r
 import { api } from '../services/api';
 import type { AdminUser } from '../services/api';
 import { FailedOrdersAnalysis } from './analysis/FailedOrdersAnalysis';
+import { TaggingLogsAnalysis } from './analysis/TaggingLogsAnalysis';
 import styles from './AnalysisPage.module.css';
 
 export function AnalysisPage() {
@@ -13,6 +14,7 @@ export function AnalysisPage() {
 
     const currentPath = location.pathname;
     const isFailedOrders = currentPath.includes('/admin/analysis/failed-orders');
+    const isTaggingLogs = currentPath.includes('/admin/analysis/tagging-logs');
 
     useEffect(() => {
         loadUser();
@@ -88,10 +90,17 @@ export function AnalysisPage() {
                     >
                         Failed Orders
                     </Link>
+                    <Link
+                        to="/admin/analysis/tagging-logs"
+                        className={`${styles['analysis-nav-item']} ${isTaggingLogs ? styles.active : ''}`}
+                    >
+                        No-COD Tags
+                    </Link>
                 </div>
 
                 <Routes>
                     <Route path="failed-orders" element={<FailedOrdersAnalysis />} />
+                    <Route path="tagging-logs" element={<TaggingLogsAnalysis />} />
                     <Route path="*" element={<Navigate to="failed-orders" replace />} />
                 </Routes>
             </main>

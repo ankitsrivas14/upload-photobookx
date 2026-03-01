@@ -1,5 +1,6 @@
 import shopifyService from './shopifyService';
 import RTOOrder from '../models/RTOOrder';
+import TaggingJobLog from '../models/TaggingJobLog';
 import { ShopifyOrder } from '../types';
 
 class AutomatedTaggingService {
@@ -7,18 +8,18 @@ class AutomatedTaggingService {
 
     /**
      * Start the automated tagging job
-     * Runs every 5 minutes
+     * Runs every 60 minutes
      */
     public start() {
-        console.log('🤖 Automated Tagging Job started (every 5 mins)');
+        console.log('🤖 Automated Tagging Job started (every 60 mins)');
 
         // Run immediately on start
         this.runJob().catch(err => console.error('Error in initial tagging job:', err));
 
-        // Schedule every 5 minutes
+        // Schedule every 60 minutes
         setInterval(() => {
             this.runJob().catch(err => console.error('Error in scheduled tagging job:', err));
-        }, 5 * 60 * 1000);
+        }, 60 * 60 * 1000);
     }
 
     private async runJob() {
@@ -28,6 +29,9 @@ class AutomatedTaggingService {
         }
 
         this.isRunning = true;
+        const startTime = new Date();
+        const taggedCustomersList: Array<{ customerId: number; orderNumber: string; customerName?: string }> = [];
+
         try {
             console.log('🔍 Running automated tagging job for failed orders...');
 
@@ -39,8 +43,6 @@ class AutomatedTaggingService {
             const rtoOrders = await RTOOrder.find({}, { shopifyOrderId: 1 });
             const rtoOrderIds = new Set(rtoOrders.map(o => o.shopifyOrderId));
 
-            let taggedCount = 0;
-
             for (const order of orders) {
                 if (!order.customer) continue;
 
@@ -49,6 +51,7 @@ class AutomatedTaggingService {
 
                 if (isFailed) {
                     const customerId = order.customer.id;
+                    const customerName = `${order.customer.first_name || ''} ${order.customer.last_name || ''}`.trim() || undefined;
                     const currentTags = order.customer.tags || '';
                     const tagsArray = currentTags.split(',').map((t: string) => t.trim().toLowerCase());
 
@@ -57,7 +60,11 @@ class AutomatedTaggingService {
                         console.log(`🏷️ Tagging customer ${customerId} (Order ${order.name}) with no-cod due to failure`);
                         const result = await shopifyService.addCustomerTag(customerId, 'no-cod');
                         if (result.success) {
-                            taggedCount++;
+                            taggedCustomersList.push({
+                                customerId,
+                                orderNumber: order.name,
+                                customerName
+                            });
                         } else {
                             console.error(`Failed to tag customer ${customerId}:`, result.error);
                         }
@@ -65,16 +72,35 @@ class AutomatedTaggingService {
                 }
             }
 
-            if (taggedCount > 0) {
-                console.log(`✅ Automated tagging job complete. Tagged ${taggedCount} customers.`);
+            if (taggedCustomersList.length > 0) {
+                console.log(`✅ Automated tagging job complete. Tagged ${taggedCustomersList.length} customers.`);
                 // Optional: clear cache if any tags were added so UI is fresh
                 await shopifyService.clearOrdersCache();
             } else {
                 console.log('✅ Automated tagging job complete. No new customers to tag.');
             }
 
-        } catch (error) {
+            // Save log to database
+            await TaggingJobLog.create({
+                startedAt: startTime,
+                completedAt: new Date(),
+                outcome: taggedCustomersList.length > 0 ? 'success' : 'skipped',
+                taggedCount: taggedCustomersList.length,
+                taggedCustomers: taggedCustomersList,
+            });
+
+        } catch (error: any) {
             console.error('Error in automated tagging job:', error);
+
+            // Save error log to database
+            await TaggingJobLog.create({
+                startedAt: startTime,
+                completedAt: new Date(),
+                outcome: 'error',
+                taggedCount: taggedCustomersList.length,
+                taggedCustomers: taggedCustomersList,
+                errorMessage: error.message || String(error)
+            });
         } finally {
             this.isRunning = false;
         }
@@ -91,14 +117,14 @@ class AutomatedTaggingService {
         if (order.fulfillments && order.fulfillments.length > 0) {
             const latestFulfillment = order.fulfillments[order.fulfillments.length - 1];
             const status = latestFulfillment.shipment_status?.toLowerCase();
-            if (status === 'failure' || status === 'rto' || status === 'cancelled') {
+            if (status === 'failure' || status === 'rto' || status === 'cancelled' || status === 'attempted_delivery') {
                 return true;
             }
         }
 
         // 3. Check order tags for failure markers
         const tags = (order.tags || '').toLowerCase();
-        if (tags.includes('rto') || tags.includes('failed') || tags.includes('delivery failed')) {
+        if (tags.includes('rto') || tags.includes('failed') || tags.includes('delivery failed') || tags.includes('attempted delivery') || tags.includes('attempted_delivery')) {
             return true;
         }
 

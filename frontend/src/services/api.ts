@@ -774,6 +774,14 @@ class ApiService {
       method: 'DELETE',
     });
   }
+
+  async getTaggingLogs(limit: number = 50, offset: number = 0, outcome?: string, startDate?: string, endDate?: string): Promise<{ success: boolean; logs?: any[]; total?: number; error?: string }> {
+    let url = `/api/admin/tagging-logs?limit=${limit}&offset=${offset}`;
+    if (outcome && outcome !== 'all') url += `&outcome=${outcome}`;
+    if (startDate) url += `&startDate=${startDate}`;
+    if (endDate) url += `&endDate=${endDate}`;
+    return this.request(url);
+  }
 }
 
 
