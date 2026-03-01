@@ -55,6 +55,7 @@ export function DashboardPage() {
   const [user, setUser] = useState<AdminUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
   const [dailyPnlMap, setDailyPnlMap] = useState<Record<string, number>>({});
   const [orders, setOrders] = useState<ShopifyOrder[]>([]);
 
@@ -431,11 +432,11 @@ export function DashboardPage() {
     return data;
   })();
 
-  // Profit Chart Data - Show Current Month Only
+  // Profit Chart Data - Show Selected Month Only
   const profitChartData = (() => {
     const now = new Date();
-    const startDate = new Date(now.getFullYear(), now.getMonth(), 1); // 1st of current month
-    const endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0); // Last day of current month
+    const startDate = new Date(selectedYear, selectedMonth, 1);
+    const endDate = new Date(selectedYear, selectedMonth + 1, 0);
 
     const data: Array<{
       date: string;
@@ -1349,10 +1350,28 @@ export function DashboardPage() {
       </section>
 
       <section className={styles.section}>
-        <h2 className={styles['section-title']}>Profit & Loss — {new Date().toLocaleString('default', { month: 'long', year: 'numeric' })}</h2>
-        <p className={styles['section-desc']}>
-          Shows booked profit for completed days only (all orders delivered/failed). Incomplete days are left empty. Green = profit, Red = loss.
-        </p>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+          <div>
+            <h2 className={styles['section-title']} style={{ marginBottom: '0.25rem', marginTop: 0 }}>
+              Profit & Loss — {monthNames[selectedMonth]} {selectedYear}
+            </h2>
+            <p className={styles['section-desc']} style={{ marginBottom: 0 }}>
+              Shows booked profit for completed days only (all orders delivered/failed). Incomplete days are left empty. Green = profit, Red = loss.
+            </p>
+          </div>
+          <select
+            value={selectedMonth}
+            onChange={(e) => setSelectedMonth(Number(e.target.value))}
+            className={styles.select}
+            style={{ width: 'auto' }}
+          >
+            {monthNames.map((month, index) => (
+              <option key={index} value={index}>
+                {month}
+              </option>
+            ))}
+          </select>
+        </div>
         <div className={styles.chartWrap}>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart
