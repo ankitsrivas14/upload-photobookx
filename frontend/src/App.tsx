@@ -7,6 +7,7 @@ import { SalesManagementPage } from './pages/SalesManagementPage';
 import { ToolsPage } from './pages/ToolsPage';
 import { MagicLinksPage } from './pages/MagicLinksPage';
 import { AnalysisPage } from './pages/AnalysisPage';
+import { LogsPage } from './pages/LogsPage';
 import { AdminLayout } from './layouts/AdminLayout';
 import { api } from './services/api';
 
@@ -46,6 +47,7 @@ function App() {
             <Route path="sales-management" element={<SalesManagementPage />} />
             <Route path="expenses/*" element={<ExpensesPage />} />
             <Route path="analysis/*" element={<AnalysisPage />} />
+            <Route path="logs/*" element={<LogsPage />} />
             <Route path="tools/*" element={<ToolsPage />} />
             <Route path="magic-links/*" element={<MagicLinksPage />} />
 

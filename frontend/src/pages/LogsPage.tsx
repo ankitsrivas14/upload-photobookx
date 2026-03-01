@@ -2,17 +2,17 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useLocation, Link, Routes, Route, Navigate } from 'react-router-dom';
 import { api } from '../services/api';
 import type { AdminUser } from '../services/api';
-import { FailedOrdersAnalysis } from './analysis/FailedOrdersAnalysis';
-import styles from './AnalysisPage.module.css';
+import { NoCodLogs } from './logs/NoCodLogs';
+import styles from './LogsPage.module.css';
 
-export function AnalysisPage() {
+export function LogsPage() {
     const navigate = useNavigate();
     const location = useLocation();
     const [user, setUser] = useState<AdminUser | null>(null);
     const [isLoading, setIsLoading] = useState(true);
 
     const currentPath = location.pathname;
-    const isFailedOrders = currentPath.includes('/admin/analysis/failed-orders');
+    const isNoCod = currentPath.includes('/admin/logs/no-cod');
 
     useEffect(() => {
         loadUser();
@@ -20,8 +20,8 @@ export function AnalysisPage() {
     }, []);
 
     useEffect(() => {
-        if (currentPath === '/admin/analysis' || currentPath === '/admin/analysis/') {
-            navigate('/admin/analysis/failed-orders', { replace: true });
+        if (currentPath === '/admin/logs' || currentPath === '/admin/logs/') {
+            navigate('/admin/logs/no-cod', { replace: true });
         }
     }, [currentPath, navigate]);
 
@@ -50,7 +50,7 @@ export function AnalysisPage() {
 
     if (isLoading) {
         return (
-            <div className={`${styles['analysis-page']} ${styles.loading}`}>
+            <div className={`${styles['logs-page']} ${styles.loading}`}>
                 <div className={styles.spinner}></div>
             </div>
         );
@@ -61,7 +61,7 @@ export function AnalysisPage() {
             <header className={styles['dashboard-header']}>
                 <div className={styles['header-breadcrumb']}>
                     <span className={`${styles['breadcrumb-item']} ${styles.active}`}>
-                        Analysis
+                        Logs
                     </span>
                 </div>
                 <div className={styles['header-right']}>
@@ -81,18 +81,18 @@ export function AnalysisPage() {
             </header>
 
             <main className={styles['dashboard-main']}>
-                <div className={styles['analysis-nav']}>
+                <div className={styles['logs-nav']}>
                     <Link
-                        to="/admin/analysis/failed-orders"
-                        className={`${styles['analysis-nav-item']} ${isFailedOrders ? styles.active : ''}`}
+                        to="/admin/logs/no-cod"
+                        className={`${styles['logs-nav-item']} ${isNoCod ? styles.active : ''}`}
                     >
-                        Failed Orders
+                        No-COD Tags
                     </Link>
                 </div>
 
                 <Routes>
-                    <Route path="failed-orders" element={<FailedOrdersAnalysis />} />
-                    <Route path="*" element={<Navigate to="failed-orders" replace />} />
+                    <Route path="no-cod" element={<NoCodLogs />} />
+                    <Route path="*" element={<Navigate to="no-cod" replace />} />
                 </Routes>
             </main>
         </div>

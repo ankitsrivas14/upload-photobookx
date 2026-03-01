@@ -1,9 +1,9 @@
-.analysis-page {
+.logs-page {
     min-height: 100vh;
     background-color: #f8fafc;
 }
 
-.analysis-page.loading {
+.logs-page.loading {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -133,12 +133,12 @@
     margin: 0;
 }
 
-.analysis-page {
+.logs-page {
     min-height: 100vh;
     background-color: #f8fafc;
 }
 
-.analysis-page.loading {
+.logs-page.loading {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -271,7 +271,7 @@
 }
 
 /* Tabs Navigation */
-.analysis-nav {
+.logs-nav {
     display: flex;
     gap: 0.5rem;
     margin-bottom: 2rem;
@@ -279,7 +279,7 @@
     padding-bottom: 0;
 }
 
-.analysis-nav-item {
+.logs-nav-item {
     padding: 0.75rem 1.5rem;
     font-size: 0.875rem;
     font-weight: 500;
@@ -291,11 +291,11 @@
     position: relative;
 }
 
-.analysis-nav-item:hover {
+.logs-nav-item:hover {
     color: #0f172a;
 }
 
-.analysis-nav-item.active {
+.logs-nav-item.active {
     color: #3b82f6;
     border-bottom-color: #3b82f6;
 }
