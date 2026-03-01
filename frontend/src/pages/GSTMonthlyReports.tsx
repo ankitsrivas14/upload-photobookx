@@ -38,7 +38,7 @@ export function GSTMonthlyReports() {
       const response = await api.getOrders(1000, true, '2026-01-28'); // Fetch ALL from Jan 28, 2026
       if (response.success && response.orders) {
         console.log('Total orders loaded:', response.orders.length);
-        
+
         // Debug: Check delivery statuses
         const deliveryStatuses = response.orders.map(o => ({
           id: o.id,
@@ -48,10 +48,10 @@ export function GSTMonthlyReports() {
           createdAt: o.createdAt
         }));
         console.log('Order statuses sample:', deliveryStatuses.slice(0, 5));
-        
+
         const filteredOrders = filterOrdersByMonth(response.orders, selectedMonth, selectedYear);
         console.log('Filtered delivered orders:', filteredOrders.length);
-        
+
         const summary = calculateGSTSummary(filteredOrders);
         setReportData({ orders: filteredOrders, summary });
       }
@@ -74,17 +74,17 @@ export function GSTMonthlyReports() {
     return orders.filter(order => {
       // Check if order was delivered - check multiple possible values
       const deliveryStatus = order.deliveryStatus?.toLowerCase() || '';
-      
+
       // Consider an order delivered if:
       // 1. deliveryStatus explicitly says "delivered"
       // 2. OR if delivery status includes "delivered"
-      const isDelivered = deliveryStatus === 'delivered' || 
-                          deliveryStatus.includes('delivered');
-      
+      const isDelivered = deliveryStatus === 'delivered' ||
+        deliveryStatus.includes('delivered');
+
       if (!isDelivered) {
         return false; // Only include delivered orders
       }
-      
+
       // Use the actual delivery date if available, otherwise fall back to creation date
       const dateToUse = order.deliveredAt || order.createdAt;
       const orderDate = new Date(dateToUse);
@@ -108,12 +108,12 @@ export function GSTMonthlyReports() {
       // For inter-state, it would be 12% IGST
       const taxableValue = amount / 1.12; // Remove GST to get taxable value
       const gstAmount = amount - taxableValue;
-      
+
       // For simplicity, assuming all orders are intra-state (CGST + SGST)
       // In real scenario, you'd check shipping address to determine state
       const cgst = gstAmount / 2;
       const sgst = gstAmount / 2;
-      
+
       totalTaxableValue += taxableValue;
       totalCGST += cgst;
       totalSGST += sgst;
@@ -215,6 +215,7 @@ export function GSTMonthlyReports() {
       'Order Number',
       'Order Date',
       'Delivery Date',
+      'Address State',
       'Order Items',
       'Order Value',
       'Taxable Value',
@@ -230,7 +231,7 @@ export function GSTMonthlyReports() {
       const cgst = gstAmount / 2;
       const sgst = gstAmount / 2;
 
-      const orderItems = order.lineItems?.map(item => 
+      const orderItems = order.lineItems?.map(item =>
         `${item.title}${item.quantity > 1 ? ` × ${item.quantity}` : ''}`
       ).join('; ') || 'N/A';
 
@@ -239,6 +240,7 @@ export function GSTMonthlyReports() {
         order.name,
         new Date(order.createdAt).toLocaleDateString('en-IN'),
         order.deliveredAt ? new Date(order.deliveredAt).toLocaleDateString('en-IN') : 'N/A',
+        order.customerState ? `"${order.customerState}"` : 'N/A',
         `"${orderItems}"`, // Quoted to handle commas in product names
         amount.toFixed(2),
         taxableValue.toFixed(2),
@@ -250,6 +252,7 @@ export function GSTMonthlyReports() {
 
     // Add totals row
     rows.push([
+      '',
       '',
       '',
       '',
@@ -272,10 +275,10 @@ export function GSTMonthlyReports() {
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
-    
+
     const monthName = getMonthName(selectedMonth);
     const filename = `GST_Report_${monthName}_${selectedYear}.csv`;
-    
+
     link.setAttribute('href', url);
     link.setAttribute('download', filename);
     link.style.visibility = 'hidden';
@@ -299,7 +302,7 @@ export function GSTMonthlyReports() {
         <div className={styles['filter-section']}>
           <div className={styles['filter-group']}>
             <label className={styles['filter-label']}>Month</label>
-            <select 
+            <select
               className={styles['filter-select']}
               value={selectedMonth}
               onChange={(e) => setSelectedMonth(e.target.value)}
@@ -314,7 +317,7 @@ export function GSTMonthlyReports() {
 
           <div className={styles['filter-group']}>
             <label className={styles['filter-label']}>Year</label>
-            <select 
+            <select
               className={styles['filter-select']}
               value={selectedYear}
               onChange={(e) => setSelectedYear(e.target.value)}
@@ -338,9 +341,9 @@ export function GSTMonthlyReports() {
                 style={{ display: 'none' }}
               />
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                <polyline points="17 8 12 3 7 8"/>
-                <line x1="12" y1="3" x2="12" y2="15"/>
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="17 8 12 3 7 8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
               </svg>
               {isUploading ? 'Uploading...' : 'Upload CSV'}
             </label>
@@ -401,9 +404,9 @@ export function GSTMonthlyReports() {
                 <h2 className={styles['section-title']}>Delivered Orders</h2>
                 <button className={styles['download-btn']} onClick={downloadCSV}>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                    <polyline points="7 10 12 15 17 10"/>
-                    <line x1="12" y1="15" x2="12" y2="3"/>
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
                   </svg>
                   Download CSV
                 </button>
@@ -416,6 +419,7 @@ export function GSTMonthlyReports() {
                       <th>Order Number</th>
                       <th>Order Date</th>
                       <th>Delivery Date</th>
+                      <th>Address State</th>
                       <th>Order Items</th>
                       <th className={styles['text-right']}>Order Value</th>
                       <th className={styles['text-right']}>Taxable Value</th>
@@ -433,7 +437,7 @@ export function GSTMonthlyReports() {
                       const sgst = gstAmount / 2;
 
                       // Format order items
-                      const orderItems = order.lineItems?.map(item => 
+                      const orderItems = order.lineItems?.map(item =>
                         `${item.title}${item.quantity > 1 ? ` × ${item.quantity}` : ''}`
                       ).join(', ') || 'N/A';
 
@@ -443,6 +447,7 @@ export function GSTMonthlyReports() {
                           <td className={styles['order-number']}>{order.name}</td>
                           <td>{new Date(order.createdAt).toLocaleDateString('en-IN')}</td>
                           <td>{order.deliveredAt ? new Date(order.deliveredAt).toLocaleDateString('en-IN') : 'N/A'}</td>
+                          <td>{order.customerState || 'N/A'}</td>
                           <td className={styles['items-cell']}>{orderItems}</td>
                           <td className={styles['text-right']}>{formatCurrency(amount)}</td>
                           <td className={styles['text-right']}>{formatCurrency(taxableValue)}</td>
@@ -455,7 +460,7 @@ export function GSTMonthlyReports() {
                   </tbody>
                   <tfoot>
                     <tr>
-                      <td colSpan={5} className={styles['footer-label']}>Total</td>
+                      <td colSpan={6} className={styles['footer-label']}>Total</td>
                       <td className={styles['text-right']}>{formatCurrency(reportData.summary.totalInvoiceValue)}</td>
                       <td className={styles['text-right']}>{formatCurrency(reportData.summary.totalTaxableValue)}</td>
                       <td className={styles['text-right']}>{formatCurrency(reportData.summary.totalCGST)}</td>
@@ -471,11 +476,11 @@ export function GSTMonthlyReports() {
           <div className={styles['empty-state']}>
             <div className={styles['empty-icon']}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                <polyline points="14 2 14 8 20 8"/>
-                <line x1="16" y1="13" x2="8" y2="13"/>
-                <line x1="16" y1="17" x2="8" y2="17"/>
-                <polyline points="10 9 9 9 8 9"/>
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+                <line x1="16" y1="13" x2="8" y2="13" />
+                <line x1="16" y1="17" x2="8" y2="17" />
+                <polyline points="10 9 9 9 8 9" />
               </svg>
             </div>
             <h3 className={styles['empty-title']}>No Delivered Orders Found</h3>

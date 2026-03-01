@@ -206,19 +206,38 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
 
     // Fetch delivery dates from database for all orders
     const orderNumbers = orders.map(o => o.name);
+    const normalizedOrderNumbers = orderNumbers.map(n => n.startsWith('#') ? n.substring(1) : n);
+    const allOrderNumberVariants = [...new Set([...orderNumbers, ...normalizedOrderNumbers])];
+
     const deliveryDates = await OrderDeliveryDate.find({
-      orderNumber: { $in: orderNumbers }
+      orderNumber: { $in: allOrderNumberVariants }
     });
 
-    // Create a map for quick lookup
-    const deliveryDateMap = new Map(
-      deliveryDates.map(dd => [dd.orderNumber, dd.deliveredAt])
-    );
+    // Create a map for quick lookup (key by both with and without #)
+    const deliveryDateMap = new Map();
+    deliveryDates.forEach(dd => {
+      deliveryDateMap.set(dd.orderNumber, dd);
+      if (dd.orderNumber.startsWith('#')) {
+        deliveryDateMap.set(dd.orderNumber.substring(1), dd);
+      } else {
+        deliveryDateMap.set(`#${dd.orderNumber}`, dd);
+      }
+    });
 
     // Fetch shipping charges from database only (no auto-fetch)
     let shippingChargesMap = new Map<string, any>();
     try {
-      shippingChargesMap = await shiprocketService.getShippingCharges(orderNumbers);
+      const dbChargesMap = await shiprocketService.getShippingCharges(allOrderNumberVariants);
+
+      // Make shippingChargesMap agnostic of # prefix
+      for (const [key, value] of dbChargesMap.entries()) {
+        shippingChargesMap.set(key, value);
+        if (key.startsWith('#')) {
+          shippingChargesMap.set(key.substring(1), value);
+        } else {
+          shippingChargesMap.set(`#${key}`, value);
+        }
+      }
     } catch (error) {
       console.error('[API] Error fetching shipping charges:', error);
     }
@@ -268,11 +287,9 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
         }
 
         // If no deliveredAt from Shopify, check database for CSV-imported date
-        if (!deliveredAt) {
-          const csvDate = deliveryDateMap.get(order.name);
-          if (csvDate) {
-            deliveredAt = csvDate.toISOString();
-          }
+        const dbDeliveryData = deliveryDateMap.get(order.name);
+        if (dbDeliveryData && !deliveredAt) {
+          deliveredAt = dbDeliveryData.deliveredAt.toISOString();
         }
 
         return {
@@ -295,7 +312,7 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
           courierName: shippingChargesMap.get(order.name)?.courierName || null,
           city: shippingChargesMap.get(order.name)?.customerCity || null,
           customerName: shippingChargesMap.get(order.name)?.customerName || null,
-          customerState: shippingChargesMap.get(order.name)?.customerState || null,
+          customerState: dbDeliveryData?.addressState || shippingChargesMap.get(order.name)?.customerState || null,
           cancelledAt: order.cancelled_at,
           lineItems: order.line_items?.map(item => ({
             title: item.title,

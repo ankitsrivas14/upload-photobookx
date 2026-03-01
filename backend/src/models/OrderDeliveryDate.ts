@@ -3,6 +3,7 @@ import mongoose, { Schema, Document } from 'mongoose';
 export interface IOrderDeliveryDate extends Document {
   orderNumber: string; // e.g., "PB1159S"
   deliveredAt: Date;
+  addressState?: string; // State from uploaded CSV
   source: 'csv' | 'shopify'; // Track where the date came from
   updatedAt: Date;
 }
@@ -17,6 +18,9 @@ const OrderDeliveryDateSchema = new Schema<IOrderDeliveryDate>({
   deliveredAt: {
     type: Date,
     required: true,
+  },
+  addressState: {
+    type: String,
   },
   source: {
     type: String,

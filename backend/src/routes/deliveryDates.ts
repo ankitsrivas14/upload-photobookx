@@ -33,18 +33,19 @@ router.post('/upload', requireAdmin, upload.single('csv'), async (req: Authentic
       return res.status(400).json({ success: false, error: 'No CSV file uploaded' });
     }
 
-    const results: Array<{ orderNumber: string; deliveredAt: Date }> = [];
+    const results: Array<{ orderNumber: string; deliveredAt: Date; addressState?: string }> = [];
     const errors: Array<string> = [];
 
     // Parse CSV from buffer
     const stream = Readable.from(req.file.buffer.toString());
-    
+
     stream
       .pipe(csv())
       .on('data', (row) => {
         try {
           const orderNumber = row['Order ID']?.trim();
           const deliveredDateStr = row['Order Delivered Date']?.trim();
+          const addressState = row['Address State']?.trim();
 
           // Skip if no order number or delivered date
           if (!orderNumber || !deliveredDateStr || deliveredDateStr === 'N/A' || deliveredDateStr === '') {
@@ -53,14 +54,14 @@ router.post('/upload', requireAdmin, upload.single('csv'), async (req: Authentic
 
           // Parse the date
           const deliveredAt = new Date(deliveredDateStr);
-          
+
           // Validate date
           if (isNaN(deliveredAt.getTime())) {
             errors.push(`Invalid date for order ${orderNumber}: ${deliveredDateStr}`);
             return;
           }
 
-          results.push({ orderNumber, deliveredAt });
+          results.push({ orderNumber, deliveredAt, addressState });
         } catch (error) {
           errors.push(`Error parsing row: ${error}`);
         }
@@ -68,13 +69,14 @@ router.post('/upload', requireAdmin, upload.single('csv'), async (req: Authentic
       .on('end', async () => {
         try {
           // Bulk upsert delivery dates
-          const bulkOps = results.map(({ orderNumber, deliveredAt }) => ({
+          const bulkOps = results.map(({ orderNumber, deliveredAt, addressState }) => ({
             updateOne: {
               filter: { orderNumber },
               update: {
                 $set: {
                   orderNumber,
                   deliveredAt,
+                  ...(addressState && { addressState }),
                   source: 'csv' as 'csv' | 'shopify',
                   updatedAt: new Date(),
                 },
