@@ -104,6 +104,7 @@ interface ShopifyOrder {
   customerTags?: string | null;
   customerId?: number | null;
   city?: string | null;
+  zip?: string | null;
   customerName?: string | null;
   customerState?: string | null;
 }
@@ -781,6 +782,24 @@ class ApiService {
     if (startDate) url += `&startDate=${startDate}`;
     if (endDate) url += `&endDate=${endDate}`;
     return this.request(url);
+  }
+
+  // Pin Codes
+  async getBlockedPinCodes(): Promise<{ success: boolean; pinCodes?: any[]; error?: string }> {
+    return this.request('/api/admin/pincodes/blocked');
+  }
+
+  async addBlockedPinCode(pinCodes: string[], notes?: string): Promise<{ success: boolean; pinCodes?: any[]; error?: string }> {
+    return this.request('/api/admin/pincodes/blocked', {
+      method: 'POST',
+      body: JSON.stringify({ pinCodes, notes }),
+    });
+  }
+
+  async deleteBlockedPinCode(pinCode: string): Promise<{ success: boolean; error?: string }> {
+    return this.request(`/api/admin/pincodes/blocked/${encodeURIComponent(pinCode)}`, {
+      method: 'DELETE',
+    });
   }
 }
 

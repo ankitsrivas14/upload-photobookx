@@ -23,6 +23,7 @@ export interface IShippingCharge extends Document {
   customerName?: string; // Extracted from Shiprocket
   customerCity?: string; // Extracted from Shiprocket
   customerState?: string; // Extracted from Shiprocket
+  customerPincode?: string; // Extracted from Shiprocket
 
   fetchedAt: Date; // When this was fetched from Shiprocket
   updatedAt: Date;
@@ -91,6 +92,9 @@ const ShippingChargeSchema = new Schema<IShippingCharge>({
     type: String,
   },
   customerState: {
+    type: String,
+  },
+  customerPincode: {
     type: String,
   },
 

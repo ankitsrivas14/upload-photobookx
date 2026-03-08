@@ -321,6 +321,7 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
           })),
           customerTags: order.customer?.tags || null,
           customerId: order.customer?.id || null,
+          zip: shippingChargesMap.get(order.name)?.customerPincode || order.shipping_address?.zip || null,
         };
       }),
     });

@@ -11,6 +11,7 @@ import cogsRoutes from './routes/cogs';
 import deliveryDatesRoutes from './routes/deliveryDates';
 import bankAccountRoutes from './routes/bankAccount';
 import taggingLogsRoutes from './routes/taggingLogs';
+import pincodesRoutes from './routes/pincodes';
 import { automatedTaggingService } from './services/automatedTaggingService';
 
 
@@ -50,6 +51,7 @@ app.use('/api/admin/cogs', cogsRoutes);
 app.use('/api/admin/bank-account', bankAccountRoutes);
 app.use('/api/admin/delivery-dates', deliveryDatesRoutes);
 app.use('/api/admin/tagging-logs', taggingLogsRoutes);
+app.use('/api/admin/pincodes', pincodesRoutes);
 app.use('/api/upload', uploadRoutes);
 
 

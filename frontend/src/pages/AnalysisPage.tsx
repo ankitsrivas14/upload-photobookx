@@ -3,6 +3,7 @@ import { useNavigate, useLocation, Link, Routes, Route, Navigate } from 'react-r
 import { api } from '../services/api';
 import type { AdminUser } from '../services/api';
 import { FailedOrdersAnalysis } from './analysis/FailedOrdersAnalysis';
+import { PinCodesAnalysis } from './analysis/PinCodesAnalysis';
 import styles from './AnalysisPage.module.css';
 
 export function AnalysisPage() {
@@ -13,6 +14,7 @@ export function AnalysisPage() {
 
     const currentPath = location.pathname;
     const isFailedOrders = currentPath.includes('/admin/analysis/failed-orders');
+    const isPinCodes = currentPath.includes('/admin/analysis/pin-codes');
 
     useEffect(() => {
         loadUser();
@@ -88,10 +90,17 @@ export function AnalysisPage() {
                     >
                         Failed Orders
                     </Link>
+                    <Link
+                        to="/admin/analysis/pin-codes"
+                        className={`${styles['analysis-nav-item']} ${isPinCodes ? styles.active : ''}`}
+                    >
+                        Pin Codes
+                    </Link>
                 </div>
 
                 <Routes>
                     <Route path="failed-orders" element={<FailedOrdersAnalysis />} />
+                    <Route path="pin-codes" element={<PinCodesAnalysis />} />
                     <Route path="*" element={<Navigate to="failed-orders" replace />} />
                 </Routes>
             </main>

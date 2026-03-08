@@ -26,6 +26,7 @@ interface ShiprocketOrder {
   customer_name?: string;
   customer_city?: string;
   customer_state?: string;
+  customer_pincode?: string;
   picked_up_date?: string;
   delivered_date?: string;
   first_out_for_delivery_date?: string;
@@ -461,6 +462,7 @@ class ShiprocketService {
           customerName: shiprocketOrder.customer_name,
           customerCity: shiprocketOrder.customer_city,
           customerState: shiprocketOrder.customer_state,
+          customerPincode: shiprocketOrder.customer_pincode,
           fetchedAt: new Date(),
         },
         { upsert: true }
@@ -627,6 +629,7 @@ class ShiprocketService {
               customerName: shiprocketOrder.customer_name,
               customerCity: shiprocketOrder.customer_city,
               customerState: shiprocketOrder.customer_state,
+              customerPincode: shiprocketOrder.customer_pincode,
               fetchedAt: new Date(),
             },
             { upsert: true }
@@ -673,6 +676,7 @@ class ShiprocketService {
         customerName: charge.customerName,
         customerCity: charge.customerCity,
         customerState: charge.customerState,
+        customerPincode: charge.customerPincode,
       });
     });
 
