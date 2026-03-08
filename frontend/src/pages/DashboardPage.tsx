@@ -639,6 +639,7 @@ export function DashboardPage() {
     let deliveredCount = 0;
     let failedCount = 0;
     let completedDaysCount = 0;
+    const completedDates = new Set<string>();
 
     // Helper to check final status (duplicated from lower scope, but needed here)
     const isOrderFinal = (order: ShopifyOrder) => {
@@ -668,6 +669,7 @@ export function DashboardPage() {
 
       if (allComplete) {
         completedDaysCount++;
+        completedDates.add(dateKey);
         dayOrders.forEach((order) => {
           const variant = detectVariant(order);
           const paymentMethod = order.paymentMethod?.toLowerCase() === 'prepaid' ? 'prepaid' : 'cod';
@@ -742,7 +744,8 @@ export function DashboardPage() {
       deliveredCount,
       failedCount,
       totalOrders,
-      completedDaysCount
+      completedDaysCount,
+      completedDates
     };
   })();
 
@@ -1267,10 +1270,11 @@ export function DashboardPage() {
         </div>
         <div className={styles.chartStats}>
           <div className={styles.chartStatBlock}>
-            <span className={styles.chartStatLabel}>30-Day Average ROAS</span>
+            <span className={styles.chartStatLabel}>Completed Days Average ROAS</span>
             <span className={styles.chartStatValue} style={{ fontSize: '1.5rem', fontWeight: 600 }}>
               {(() => {
-                const validRoas = roasChartData.filter(d => d.roas !== null && d.roas > 0);
+                const completedDates = breakevenMetrics.completedDates;
+                const validRoas = roasChartData.filter(d => completedDates.has(d.dateKey) && d.roas !== null && d.roas > 0);
                 if (validRoas.length === 0) return 'N/A';
                 const avgRoas = validRoas.reduce((sum, d) => sum + (d.roas || 0), 0) / validRoas.length;
                 return avgRoas.toFixed(2);
@@ -1295,15 +1299,15 @@ export function DashboardPage() {
             </span>
           </div>
           <div className={styles.chartStatBlock}>
-            <span className={styles.chartStatLabel}>Total Revenue (30 days)</span>
+            <span className={styles.chartStatLabel}>Completed Total Revenue</span>
             <span className={styles.chartStatValue} style={{ fontSize: '1.5rem', fontWeight: 600 }}>
-              ₹{roasChartData.reduce((sum, d) => sum + d.revenue, 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+              ₹{roasChartData.filter(d => breakevenMetrics.completedDates.has(d.dateKey)).reduce((sum, d) => sum + d.revenue, 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
             </span>
           </div>
           <div className={styles.chartStatBlock}>
-            <span className={styles.chartStatLabel}>Total Ad Spend (30 days)</span>
+            <span className={styles.chartStatLabel}>Completed Total Ad Spend</span>
             <span className={styles.chartStatValue} style={{ fontSize: '1.5rem', fontWeight: 600 }}>
-              ₹{roasChartData.reduce((sum, d) => sum + d.adSpend, 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+              ₹{roasChartData.filter(d => breakevenMetrics.completedDates.has(d.dateKey)).reduce((sum, d) => sum + d.adSpend, 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
             </span>
           </div>
         </div>
