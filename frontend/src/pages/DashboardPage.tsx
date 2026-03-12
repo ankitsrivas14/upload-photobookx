@@ -69,6 +69,14 @@ export function DashboardPage() {
   const [cogsFields, setCogsFields] = useState<COGSField[]>([]);
   const [rtoOrderIds, setRtoOrderIds] = useState<Set<number>>(new Set());
 
+  // Shipping chart controls
+  const [shippingGranularity, setShippingGranularity] = useState<'day' | 'week' | 'month'>('day');
+  const [activeShippingLines, setActiveShippingLines] = useState({
+    all: true,
+    small: true,
+    large: true,
+  });
+
   useEffect(() => {
     loadUser();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount
@@ -1706,8 +1714,306 @@ export function DashboardPage() {
         </div>
       </section>
 
+      {/* ─── Avg Shipping Charge on Fulfilled Orders ─── */}
+      {(() => {
+        const now = new Date();
+        // ── Compute lookback window based on granularity (always 30 data points) ──
+        const cutoff = new Date('2026-01-01');
+        const windowStart = new Date(now);
+        if (shippingGranularity === 'day') {
+          windowStart.setDate(windowStart.getDate() - 29);          // 30 days
+        } else if (shippingGranularity === 'week') {
+          windowStart.setDate(windowStart.getDate() - 29 * 7);      // 30 weeks
+        } else {
+          windowStart.setMonth(windowStart.getMonth() - 29);        // 30 months
+          windowStart.setDate(1);                                    // start of that month
+        }
+        const effectiveStart = cutoff > windowStart ? cutoff : windowStart;
+
+        // Classify variant mix
+        const classifyVariant = (o: ShopifyOrder): 'small' | 'large' | 'mixed' => {
+          const items = o.lineItems ?? [];
+          const hasLarge = items.some(
+            (i) => i.title?.toLowerCase().includes('large') || i.variantTitle?.toLowerCase().includes('large')
+          );
+          const hasSmall = items.some(
+            (i) => !i.title?.toLowerCase().includes('large') && !i.variantTitle?.toLowerCase().includes('large')
+          );
+          if (hasLarge && hasSmall) return 'mixed';
+          if (hasLarge) return 'large';
+          return 'small';
+        };
+
+        // Helper: avg shipping of a set of orders
+        const avgOf = (arr: typeof orders): number | null => {
+          const valid = arr.filter((o) => (o.shippingCharge ?? 0) > 0);
+          if (valid.length === 0) return null;
+          return valid.reduce((s, o) => s + (o.shippingCharge ?? 0), 0) / valid.length;
+        };
+
+        // Build ordersByDate once
+        const ordersByDate: Record<string, typeof orders[number][]> = {};
+        orders.forEach((o) => {
+          if (o.cancelledAt) return;
+          const d = getOrderDateKey(o.createdAt);
+          if (!ordersByDate[d]) ordersByDate[d] = [];
+          ordersByDate[d].push(o);
+        });
+
+        // ── Build daily data ──
+        type DayPoint = {
+          date: string;
+          dateKey: string;
+          avgShipping: number | null;
+          avgShippingSmall: number | null;
+          avgShippingLarge: number | null;
+          // raw orders for re-aggregation
+          _fulfilled: typeof orders;
+          _small: typeof orders;
+          _large: typeof orders;
+        };
+
+        const dailyPoints: DayPoint[] = [];
+        const cursor = new Date(effectiveStart);
+        cursor.setHours(0, 0, 0, 0);
+        const todayKey = now.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+
+        while (cursor.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE }) <= todayKey) {
+          const dateKey = cursor.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+          const dayOrders = ordersByDate[dateKey] || [];
+          const fulfilled = dayOrders.filter((o) => o.fulfillmentStatus?.toLowerCase() === 'fulfilled');
+          const pureSmall = fulfilled.filter((o) => classifyVariant(o) === 'small');
+          const pureLarge = fulfilled.filter((o) => classifyVariant(o) === 'large');
+
+          dailyPoints.push({
+            date: cursor.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: STORE_TIMEZONE }),
+            dateKey,
+            avgShipping: avgOf(fulfilled),
+            avgShippingSmall: avgOf(pureSmall),
+            avgShippingLarge: avgOf(pureLarge),
+            _fulfilled: fulfilled,
+            _small: pureSmall,
+            _large: pureLarge,
+          });
+
+          cursor.setDate(cursor.getDate() + 1);
+        }
+
+        // ── Aggregate to chosen granularity ──
+        type ChartPoint = { date: string; avgShipping: number | null; avgShippingSmall: number | null; avgShippingLarge: number | null };
+
+        const aggregateGroup = (group: DayPoint[]): ChartPoint => {
+          const allFulfilled = group.flatMap((d) => d._fulfilled);
+          const allSmall     = group.flatMap((d) => d._small);
+          const allLarge     = group.flatMap((d) => d._large);
+          return {
+            date: group[0].date,
+            avgShipping:      avgOf(allFulfilled),
+            avgShippingSmall: avgOf(allSmall),
+            avgShippingLarge: avgOf(allLarge),
+          };
+        };
+
+        let shippingData: ChartPoint[];
+
+        if (shippingGranularity === 'day') {
+          shippingData = dailyPoints.map((d) => ({
+            date: d.date,
+            avgShipping: d.avgShipping,
+            avgShippingSmall: d.avgShippingSmall,
+            avgShippingLarge: d.avgShippingLarge,
+          }));
+        } else if (shippingGranularity === 'week') {
+          // Group by Mon–Sun week
+          const weeks: DayPoint[][] = [];
+          let current: DayPoint[] = [];
+          dailyPoints.forEach((d) => {
+            const dow = new Date(d.dateKey).getDay(); // 0=Sun
+            if (dow === 1 && current.length > 0) { weeks.push(current); current = []; }
+            current.push(d);
+          });
+          if (current.length) weeks.push(current);
+          shippingData = weeks.map((group) => ({
+            ...aggregateGroup(group),
+            // Label: "3 Mar – 9 Mar" (or "3 Mar – today" for the last partial week)
+            date: `${group[0].date} – ${group[group.length - 1].date}`,
+          }));
+        } else {
+          // month
+          const months: Record<string, DayPoint[]> = {};
+          dailyPoints.forEach((d) => {
+            const key = d.dateKey.slice(0, 7); // YYYY-MM
+            if (!months[key]) months[key] = [];
+            months[key].push(d);
+          });
+          shippingData = Object.values(months).map((group) => ({
+            ...aggregateGroup(group),
+            date: new Date(group[0].dateKey).toLocaleDateString('en-IN', { month: 'short', year: '2-digit', timeZone: STORE_TIMEZONE }),
+          }));
+        }
+
+        // ── Summary stats (always over full daily dataset) ──
+        const avg30 = (key: 'avgShipping' | 'avgShippingSmall' | 'avgShippingLarge') => {
+          const days = dailyPoints.filter((d) => d[key] !== null);
+          if (days.length === 0) return null;
+          return days.reduce((s, d) => s + (d[key] as number), 0) / days.length;
+        };
+        const avg30All   = avg30('avgShipping');
+        const avg30Small = avg30('avgShippingSmall');
+        const avg30Large = avg30('avgShippingLarge');
+        const fmt = (v: number | null) => v !== null ? `₹${v.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : 'N/A';
+
+        // ── Line definitions ──
+        const lines = [
+          { key: 'all'   as const, dataKey: 'avgShipping',      name: 'All Fulfilled', color: '#0ea5e9', width: 2.5, dash: undefined },
+          { key: 'small' as const, dataKey: 'avgShippingSmall', name: 'Small Variant', color: '#10b981', width: 2,   dash: '6 3' },
+          { key: 'large' as const, dataKey: 'avgShippingLarge', name: 'Large Variant', color: '#f59e0b', width: 2,   dash: '6 3' },
+        ];
+
+        const toggleLine = (key: 'all' | 'small' | 'large') =>
+          setActiveShippingLines((prev) => ({ ...prev, [key]: !prev[key] }));
+
+        const granularityBtns: { label: string; value: 'day' | 'week' | 'month' }[] = [
+          { label: 'Day',   value: 'day'   },
+          { label: 'Week',  value: 'week'  },
+          { label: 'Month', value: 'month' },
+        ];
+
+        const btnBase: React.CSSProperties = {
+          padding: '4px 12px', fontSize: '0.8rem', fontWeight: 500, borderRadius: 6,
+          border: '1px solid #e2e8f0', cursor: 'pointer', transition: 'all 0.15s',
+        };
+
+        return (
+          <section className={styles.section}>
+            {/* Header row */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.25rem' }}>
+              <div>
+                <h2 className={styles['section-title']} style={{ margin: 0 }}>Avg Shipping Charge on Fulfilled Orders</h2>
+                <p className={styles['section-desc']} style={{ marginBottom: 0, marginTop: '0.25rem' }}>
+                  Average Shiprocket shipping charge, split by variant size.
+                  Orders with both Small &amp; Large items appear only in the overall line.
+                </p>
+              </div>
+
+              {/* Controls: granularity + line toggles */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.5rem' }}>
+                {/* Granularity */}
+                <div style={{ display: 'flex', gap: '2px', background: '#f1f5f9', borderRadius: 8, padding: '3px' }}>
+                  {granularityBtns.map(({ label, value }) => (
+                    <button
+                      key={value}
+                      style={{
+                        ...btnBase,
+                        border: 'none',
+                        background: shippingGranularity === value ? 'white' : 'transparent',
+                        boxShadow: shippingGranularity === value ? '0 1px 4px rgba(0,0,0,0.1)' : 'none',
+                        color: shippingGranularity === value ? '#0f172a' : '#64748b',
+                      }}
+                      onClick={() => setShippingGranularity(value)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Line toggles */}
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  {lines.map(({ key, name, color }) => (
+                    <button
+                      key={key}
+                      onClick={() => toggleLine(key)}
+                      style={{
+                        ...btnBase,
+                        background: activeShippingLines[key] ? color : 'transparent',
+                        borderColor: color,
+                        color: activeShippingLines[key] ? 'white' : color,
+                        opacity: activeShippingLines[key] ? 1 : 0.6,
+                      }}
+                    >
+                      {name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Chart */}
+            <div className={styles.chartWrap}>
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={shippingData} margin={{ top: 12, right: 20, left: 0, bottom: 8 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
+                  <XAxis
+                    dataKey="date"
+                    tick={{ fontSize: 11, fill: 'var(--chart-muted)' }}
+                    tickLine={false}
+                    axisLine={{ stroke: 'var(--chart-axis)' }}
+                    interval="preserveStartEnd"
+                    minTickGap={30}
+                  />
+                  <YAxis
+                    tick={{ fontSize: 11, fill: 'var(--chart-muted)' }}
+                    tickLine={false}
+                    axisLine={false}
+                    width={56}
+                    tickFormatter={(v) => `₹${v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v}`}
+                    domain={[0, 'auto']}
+                  />
+                  <Tooltip
+                    contentStyle={{ border: 'none', borderRadius: 8, boxShadow: '0 4px 12px rgba(0,0,0,0.08)', padding: '10px 14px' }}
+                    labelStyle={{ color: 'var(--chart-muted)', fontWeight: 500, marginBottom: 4 }}
+                    formatter={(value, name) => [
+                      value !== null && value !== undefined
+                        ? `₹${Number(value).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
+                        : 'N/A',
+                      name,
+                    ]}
+                  />
+                  {lines.map(({ key, dataKey, name, color, width, dash }) =>
+                    activeShippingLines[key] ? (
+                      <Line
+                        key={key}
+                        type="monotone"
+                        dataKey={dataKey}
+                        name={name}
+                        stroke={color}
+                        strokeWidth={width}
+                        strokeDasharray={dash}
+                        dot={false}
+                        activeDot={{ r: 5, strokeWidth: 0, fill: color }}
+                        connectNulls={false}
+                      />
+                    ) : null
+                  )}
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* Summary stats */}
+            <div className={styles.chartStats}>
+              <div className={styles.chartStatBlock}>
+                <span className={styles.chartStatLabel} style={{ color: '#0ea5e9' }}>All Fulfilled — 30-day Avg</span>
+                <span className={styles.chartStatValue} style={{ fontSize: '1.5rem', fontWeight: 600, color: '#0ea5e9' }}>{fmt(avg30All)}</span>
+                <span style={{ fontSize: '0.7rem', color: 'var(--chart-muted)', marginTop: '4px', display: 'block' }}>Avg across all fulfilled orders</span>
+              </div>
+              <div className={styles.chartStatBlock}>
+                <span className={styles.chartStatLabel} style={{ color: '#10b981' }}>Small Variant — 30-day Avg</span>
+                <span className={styles.chartStatValue} style={{ fontSize: '1.5rem', fontWeight: 600, color: '#10b981' }}>{fmt(avg30Small)}</span>
+                <span style={{ fontSize: '0.7rem', color: 'var(--chart-muted)', marginTop: '4px', display: 'block' }}>Pure small orders only (no large items)</span>
+              </div>
+              <div className={styles.chartStatBlock}>
+                <span className={styles.chartStatLabel} style={{ color: '#f59e0b' }}>Large Variant — 30-day Avg</span>
+                <span className={styles.chartStatValue} style={{ fontSize: '1.5rem', fontWeight: 600, color: '#f59e0b' }}>{fmt(avg30Large)}</span>
+                <span style={{ fontSize: '0.7rem', color: 'var(--chart-muted)', marginTop: '4px', display: 'block' }}>Pure large orders only (no small items)</span>
+              </div>
+            </div>
+          </section>
+        );
+      })()}
+
+
       <section className={styles.section}>
-        <h2 className={styles['section-title']}>Daily Profit & Loss — {selectedYear}</h2>
+        <h2 className={styles['section-title']}>Daily Profit &amp; Loss — {selectedYear}</h2>
 
         <div className={styles.legend}>
           <span className={styles['legend-label']}>Less</span>
