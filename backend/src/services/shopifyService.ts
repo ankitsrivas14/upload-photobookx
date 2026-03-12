@@ -419,6 +419,105 @@ class ShopifyService {
   }
 
   /**
+   * Sync ALL recent orders incrementaly by looking up the max updated_at of our cache.
+   * Avoids re-downloading thousands of unmodified orders.
+   */
+  async syncOrders(limit: number = 1000): Promise<number> {
+    try {
+      const cacheKey = `all_orders_${limit}`;
+      const cachedData = await ShopifyOrderCache.findOne({ cacheKey });
+      let lastUpdatedAt: Date | null = null;
+      let existingOrders: ShopifyOrder[] = [];
+
+      if (cachedData && cachedData.orders && cachedData.orders.length > 0) {
+        existingOrders = cachedData.orders;
+        // Find the most recent updated_at across all orders
+        const maxUpdateStr = existingOrders.reduce((max, order) => {
+          if (!order.updated_at) return max;
+          if (!max) return order.updated_at;
+          return new Date(order.updated_at) > new Date(max) ? order.updated_at : max;
+        }, null as string | null);
+
+        if (maxUpdateStr) {
+          lastUpdatedAt = new Date(maxUpdateStr);
+          // Backdate by 5 minutes to prevent race conditions or clock slop
+          lastUpdatedAt = new Date(lastUpdatedAt.getTime() - 5 * 60 * 1000);
+        }
+      }
+
+      // If there's no cache or valid updated time, just perform a full fetch
+      if (!lastUpdatedAt) {
+        console.log(`[Sync] No valid cache found, performing full fetch...`);
+        const orders = await this.getAllOrders(limit);
+        return orders.length;
+      }
+
+      console.log(`[Sync] Fetching incremental orders since ${lastUpdatedAt.toISOString()}...`);
+
+      const updatedOrders: ShopifyOrder[] = [];
+      const perPage = 250;
+      let page = 1;
+      let pageInfo: string | null = null;
+
+      const initialParams = new URLSearchParams({
+        status: 'any',
+        limit: perPage.toString(),
+        updated_at_min: lastUpdatedAt.toISOString()
+      });
+
+      // Fetch incremental updates
+      while (true) {
+        const url = page === 1
+          ? `/orders.json?${initialParams.toString()}`
+          : `/orders.json?page_info=${pageInfo}&limit=${perPage}`;
+
+        const { data, linkHeader } = await this.makeRequestWithHeaders<ShopifyOrdersResponse>(url);
+        const orders = data.orders || [];
+
+        updatedOrders.push(...orders);
+
+        if (orders.length === 0 || orders.length < perPage) break;
+
+        pageInfo = this.parseNextPageInfo(linkHeader);
+        if (!pageInfo) break;
+
+        page++;
+        if (page > 10) break; // safety
+      }
+
+      if (updatedOrders.length > 0) {
+        console.log(`[Sync] Found ${updatedOrders.length} updated orders. Merging with cache...`);
+
+        // Map existing orders by ID
+        const existingMap = new Map<string, ShopifyOrder>();
+        existingOrders.forEach(o => existingMap.set(o.id.toString(), o));
+
+        // Overwrite or append updated orders
+        let newOrUpdatedCount = 0;
+        updatedOrders.forEach(newOrder => {
+          existingMap.set(newOrder.id.toString(), newOrder);
+          newOrUpdatedCount++;
+        });
+
+        // Convert back to array, sort by creation date descending, and clamp to limit
+        const mergedOrdersList = Array.from(existingMap.values());
+        mergedOrdersList.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+        const finalOrders = mergedOrdersList.slice(0, limit);
+        await this.updateCache(cacheKey, finalOrders);
+        console.log(`[Sync] Successfully merged ${newOrUpdatedCount} orders into cache.`);
+      } else {
+        console.log(`[Sync] No newly updated orders found since last sync.`);
+      }
+
+      return updatedOrders.length;
+    } catch (error) {
+      console.error('Error syncing orders incrementally:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Get all products with their variants
    */
   async getProducts(limit: number = 50): Promise<any[]> {

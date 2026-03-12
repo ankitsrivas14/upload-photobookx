@@ -311,42 +311,40 @@ class ShiprocketService {
    */
   async getOrderByChannelOrderId(channelOrderId: string): Promise<ShiprocketOrder | null> {
     try {
-      // Normalize the order number (remove # prefix if present)
-      const normalizedOrderId = channelOrderId.replace(/^#/, '');
+      const normalizedRequested = channelOrderId.replace(/^#/, '');
+      
+      // 1. Try Primary Order
+      const response = await this.makeRequest<ShiprocketOrderResponse>(
+        `/orders?show_all=1&channel_order_id=${encodeURIComponent(channelOrderId)}`
+      );
 
-      // Shiprocket's channel_order_id filter doesn't work properly!
-      // Fetch recent orders and search through them manually
-      let page = 1;
-      const perPage = 50;
-      const maxPages = 10; // Search through max 500 orders
+      if (response.data && response.data.length > 0) {
+        // IMPORTANT: Verify Shiprocket actually matched the ID (it often ignores the filter)
+        const match = response.data.find((o: any) => {
+          const srId = (o.channel_order_id || '').replace(/^#/, '');
+          return srId === normalizedRequested;
+        });
+        if (match) return match;
+      }
 
-      while (page <= maxPages) {
-        const response = await this.makeRequest<ShiprocketOrderResponse>(
-          `/orders?page=${page}&per_page=${perPage}`
+      // 2. Try Clone Order (-C)
+      if (!channelOrderId.endsWith('-C')) {
+        const cloneId = normalizedRequested + '-C';
+        console.log(`[Shiprocket] Primary order ${channelOrderId} not matched. Trying clone: ${cloneId}`);
+        const cloneResponse = await this.makeRequest<ShiprocketOrderResponse>(
+          `/orders?show_all=1&channel_order_id=${encodeURIComponent(cloneId)}`
         );
-
-        if (!response.data || response.data.length === 0) {
-          break;
-        }
-
-        // Search through this page for matching order
-        for (const order of response.data) {
-          const orderChannelId = order.channel_order_id;
-
-          // Check if this order matches (with or without # prefix)
-          if (orderChannelId === normalizedOrderId ||
-            orderChannelId === `#${normalizedOrderId}` ||
-            orderChannelId === channelOrderId) {
-            return order;
+        
+        if (cloneResponse.data && cloneResponse.data.length > 0) {
+          const cloneMatch = cloneResponse.data.find((o: any) => {
+            const srId = (o.channel_order_id || '').replace(/^#/, '');
+            return srId === cloneId;
+          });
+          if (cloneMatch) {
+            console.log(`[Shiprocket] Found valid clone order for ${channelOrderId}: ${cloneId}`);
+            return cloneMatch;
           }
         }
-
-        // If we got less than perPage orders, we've reached the end
-        if (response.data.length < perPage) {
-          break;
-        }
-
-        page++;
       }
 
       return null;

@@ -110,6 +110,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
   const [showBulkMenu, setShowBulkMenu] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshStatus, setRefreshStatus] = useState<string | null>(null);
 
   // Status filters (AND filters)
   const [showUnfulfilled, setShowUnfulfilled] = useState(false);
@@ -329,27 +330,78 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
     setIsRefreshing(true);
     try {
       // Step 1: Clear both caches
-      await Promise.all([
+      setRefreshStatus('Syncing latest Shopify orders...');
+      const [shopifySyncResponse] = await Promise.all([
         api.clearOrdersCache(),
         api.clearShippingChargesCache()
       ]);
 
-      // Step 2: Load fresh orders (ALL orders, no date filter)
+      const syncedCount = (shopifySyncResponse as any).syncedCount || 0;
+
+      // Step 2: Load fresh orders
+      setRefreshStatus(syncedCount > 0 ? `Loading ${syncedCount} new/updated orders...` : 'Fetching orders list...');
       const response = await api.getOrders(1000, true);
 
-      // Step 3: Bulk sync shipping charges (fast - fetches all Shiprocket orders once)
+      // Step 3: Bulk sync shipping charges in chunks to show exactly how much progress is made
       if (response.success && response.orders) {
-        const orderNumbers = response.orders.map((o: any) => o.name);
-        await api.syncShippingCharges(orderNumbers);
+        setRefreshStatus('Syncing Shiprocket deliveries...');
+        
+        // Filter: Ignore everything created before 10 Jan 2026.
+        // For orders on/after that date, only sync if they aren't in a terminal state
+        // or if terminal but missing shipping charges.
+        const SYNC_CUTOFF_DATE = new Date('2026-01-10T00:00:00');
+        
+        const orderNumbersToSync = response.orders
+          .filter((o: any) => {
+            if (o.cancelledAt) return false;
+            
+            // Ignore unfulfilled orders - we only sync if there is a shipment
+            const isUnfulfilled = !o.fulfillmentStatus || o.fulfillmentStatus === 'unfulfilled';
+            if (isUnfulfilled) return false;
+
+            // Date cutoff per user request
+            if (new Date(o.createdAt) < SYNC_CUTOFF_DATE) return false;
+
+            const { isFailed, isDelivered } = getOrderStatus(o);
+            
+            // Needs sync if:
+            // 1. Not in a terminal state (In Transit, etc.)
+            // 2. IS in a terminal state but we don't have the shipping charge yet
+            const isTerminal = isFailed || isDelivered;
+            const hasChargeData = (o.shippingCharge ?? 0) > 0;
+            
+            return !isTerminal || !hasChargeData;
+          })
+          .map((o: any) => o.name);
+
+        console.log(`Refresh: Total orders: ${response.orders.length}. Sync required for: ${orderNumbersToSync.length}`);
+
+        if (orderNumbersToSync.length === 0) {
+          setRefreshStatus('All deliveries up to date!');
+          await new Promise(resolve => setTimeout(resolve, 800)); // Brief pause for UX
+        } else {
+          const chunkSize = 50;
+          let processed = 0;
+
+          for (let i = 0; i < orderNumbersToSync.length; i += chunkSize) {
+            setRefreshStatus(`Syncing deliveries... (${processed}/${orderNumbersToSync.length})`);
+            const chunk = orderNumbersToSync.slice(i, i + chunkSize);
+            await api.syncShippingCharges(chunk);
+            processed += chunk.length;
+          }
+          setRefreshStatus(`Syncing deliveries... (${orderNumbersToSync.length}/${orderNumbersToSync.length})`);
+        }
       }
 
       // Step 4: Reload to get updated data with shipping breakdown
+      setRefreshStatus('Finishing up...');
       await loadData();
     } catch (err) {
       console.error('Failed to refresh data:', err);
       alert('Failed to refresh data. Please try again.');
     } finally {
       setIsRefreshing(false);
+      setRefreshStatus(null);
     }
   };
 
@@ -2455,6 +2507,14 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
           </div>
         )
       }
-    </div >
+
+      {/* Refresh Status Toast */}
+      {refreshStatus && (
+        <div className={styles['refresh-toast']}>
+          <div className={styles['refresh-spinner']}></div>
+          <span>{refreshStatus}</span>
+        </div>
+      )}
+    </div>
   );
 }

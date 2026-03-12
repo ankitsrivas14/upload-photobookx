@@ -100,6 +100,7 @@ export interface ShopifyOrder {
   name: string;
   email?: string;
   created_at: string;
+  updated_at?: string;
   line_items: ShopifyLineItem[];
   fulfillment_status?: string | null;
   fulfillments?: ShopifyFulfillment[];

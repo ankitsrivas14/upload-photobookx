@@ -99,6 +99,9 @@ export const OrderRow: React.FC<OrderRowProps> = ({
         <div className={styles['order-name-wrapper']}>
           <span className={`${styles['payment-dot']} ${styles[order.paymentMethod?.toLowerCase() || 'prepaid']}`}></span>
           <span className={styles['order-number']}>{order.name}</span>
+          {(order.fulfillmentStatus && order.fulfillmentStatus.toLowerCase() !== 'unfulfilled' && (order.shippingCharge ?? 0) === 0 && !order.cancelledAt) && (
+            <span className={styles['missing-charge-dot']} title="Fulfillment exists but shipping charge is 0"></span>
+          )}
         </div>
 
       </td>

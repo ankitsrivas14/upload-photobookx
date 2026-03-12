@@ -172,18 +172,20 @@ router.delete('/:token', requireAdmin, async (req: AuthenticatedRequest, res: Re
 
 /**
  * POST /api/admin/shopify/orders/clear-cache
- * Clear the orders cache to force fresh data from Shopify
+ * Trigger an incremental sync of orders from Shopify to fetch changes
  */
 router.post('/shopify/orders/clear-cache', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
   try {
-    await shopifyService.clearOrdersCache();
+    // Instead of completely dropping the cache, incrementally sync newly updated orders
+    const syncedCount = await shopifyService.syncOrders(1000);
     res.json({
       success: true,
-      message: 'Orders cache cleared successfully',
+      message: `Orders synced successfully (${syncedCount} updated)`,
+      syncedCount
     });
   } catch (error) {
-    console.error('Error clearing cache:', error);
-    res.status(500).json({ success: false, error: 'Failed to clear cache' });
+    console.error('Error syncing orders:', error);
+    res.status(500).json({ success: false, error: 'Failed to sync orders' });
   }
 });
 
@@ -894,20 +896,30 @@ router.post('/shiprocket/fetch-shipping-charge', requireAdmin, async (req: Authe
 
 /**
  * POST /api/admin/magic-links/shiprocket/clear-cache
- * Clear all shipping charges from database
+ * Clear non-terminal shipping charges from database to force a refetch
  */
 router.post('/shiprocket/clear-cache', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
   try {
-    const result = await ShippingCharge.deleteMany({});
+    const terminalStatuses = ['7', '12', '13', '15', '16', 'delivered', 'canceled', 'cancelled', 'rto delivered'];
+
+    // Only delete shipping charges that have not reached a terminal status
+    // and don't already have a deliveredDate.
+    const result = await ShippingCharge.deleteMany({
+      $and: [
+        { status: { $nin: terminalStatuses } },
+        { deliveredDate: { $in: [null, undefined, ''] } }
+      ]
+    });
+
     res.json({
       success: true,
-      message: `Cleared ${result.deletedCount} shipping charges from cache`,
+      message: `Cleared ${result.deletedCount} non-terminal shipping charges from cache`,
     });
   } catch (error) {
-    console.error('[API] Error clearing shipping charges cache:', error);
+    console.error('[API] Error clearing non-terminal shipping charges cache:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to clear shipping charges cache'
+      error: 'Failed to clear non-terminal shipping charges cache'
     });
   }
 });
