@@ -12,3 +12,4 @@ export { BankCategory, IBankCategory } from './BankCategory';
 export { BankTransaction, IBankTransaction } from './BankTransaction';
 export { BankNarrationRule, IBankNarrationRule } from './BankNarrationRule';
 export { default as Ticket } from './Ticket';
+export { default as ProfitPrediction } from './ProfitPrediction';

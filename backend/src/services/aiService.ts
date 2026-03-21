@@ -63,6 +63,138 @@ class AIService {
 
         return response.choices[0].message.content;
     }
+
+    async predictMonthEnd(data: {
+        monthYear: string,
+        daysElapsed: number,
+        totalDays: number,
+        currentOrders: number,
+        currentPL: number,
+        historicalData: any[], // Daily breakdown of sales/expenses/orders
+        pendingOrdersCount: number,
+        avgPLPerDay: number,
+        avgOrdersPerDay: number,
+        ndrRate: number
+    }) {
+        console.log('--- Calling AIService.predictMonthEnd ---');
+        if (!this.openai) {
+            throw new Error('OpenAI API key is missing.');
+        }
+
+        const prompt = `
+            Month-End Comprehensive Business Prediction Task:
+            Target Month: ${data.monthYear}
+            Current Progress: ${data.daysElapsed}/${data.totalDays} days elapsed.
+            
+            Current Performance:
+            - Orders: ${data.currentOrders} (Avg: ${data.avgOrdersPerDay.toFixed(1)}/day)
+            - Realized P/L: ₹${data.currentPL.toFixed(2)} (Avg: ₹${data.avgPLPerDay.toFixed(2)}/day)
+            - Current NDR Rate: ${data.ndrRate.toFixed(2)}%
+            - Pending Orders awaiting delivery results: ${data.pendingOrdersCount}
+            
+            Historical Daily Breakdown (provided context):
+            ${JSON.stringify(data.historicalData)}
+            
+            Analytics Context:
+            "Realized P/L" is the current profit after COGS, Ads, and Shipping.
+            "NDR" stands for Non-Delivery Rate (failed orders).
+            You have the daily trend including ad spend and order volume.
+            
+            Task:
+            1. Predict FINAL TOTAL ORDERS for the month (Current + projected for remaining days).
+            2. Predict FINAL NDR RATE (%) for the month (Will it improve or worsen based on recent trends?).
+            3. Predict FINAL PROFIT (₹) for the month (Taking into account order volume trends and current margins).
+            4. Provide a "Master Insight" - a short, actionable sentence for the business owner.
+            
+            Return ONLY a valid JSON object with:
+            {
+              "predictedOrders": number,
+              "predictedNDR": number,
+              "predictedFinalProfit": number,
+              "reasoning": "Detailed 2-3 sentence logic for these numbers",
+              "insight": "1 short punchy actionable line"
+            }
+        `;
+
+        console.log('--- AI Forecast Prompt ---');
+        console.log(prompt);
+        console.log('---------------------------');
+
+        try {
+            const response = await this.openai.chat.completions.create({
+                model: 'gpt-4o',
+                messages: [
+                    { role: 'system', content: 'You are a data-driven e-commerce strategist. You output precise projections in JSON.' },
+                    { role: 'user', content: prompt }
+                ],
+                response_format: { type: 'json_object' }
+            });
+
+            const rawContent = response.choices[0].message.content || '{}';
+            const result = JSON.parse(rawContent);
+            return result;
+        } catch (err: any) {
+            console.error('AIService Error:', err);
+            throw err;
+        }
+    }
+
+    async predictStock(data: {
+        daysToPredict: number,
+        historicalData: any[], // Grouped product stats
+        totalBusinessDays: number
+    }) {
+        if (!this.openai) {
+            throw new Error('OpenAI API key is missing.');
+        }
+
+        const prompt = `
+            Task: Inventory & Stock Requirement Prediction
+            
+            Predict exactly how much stock of each book is required for the next ${data.daysToPredict} days based on historical sales volume.
+            
+            Historical Context:
+            - Analysis Period: Total ${data.totalBusinessDays} days of sales data provided.
+            - Product Sales Data: ${JSON.stringify(data.historicalData)}
+            
+            Strict Requirements:
+            1. For each product/variant, calculate the required stock: (Total Orders / Total Business Days) * ${data.daysToPredict} days.
+            2. Factor in a "Safety Buffer" - if a product has higher volume, add a 10% safety margin.
+            3. Round UP all quantities to the nearest whole integer.
+            4. Provide a brief "Reasoning" for each product's stock requirement.
+            
+            Return ONLY a valid JSON object with:
+            {
+              "predictions": [
+                {
+                  "productName": "string",
+                  "variantTitle": "string",
+                  "currentAvgPerDay": number,
+                  "requiredStock": number,
+                  "reasoning": "1 short sentence explaining context"
+                }
+              ]
+            }
+        `;
+
+        try {
+            const response = await this.openai.chat.completions.create({
+                model: 'gpt-4o',
+                messages: [
+                    { role: 'system', content: 'You are an inventory planning expert. You output precise stock requirements in JSON.' },
+                    { role: 'user', content: prompt }
+                ],
+                response_format: { type: 'json_object' }
+            });
+
+            const rawContent = response.choices[0].message.content || '{}';
+            const result = JSON.parse(rawContent);
+            return result;
+        } catch (err: any) {
+            console.error('AIService Stock Prediction Error:', err);
+            throw err;
+        }
+    }
 }
 
 export default new AIService();

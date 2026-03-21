@@ -3,40 +3,7 @@ import { api } from '../services/api';
 import styles from './SalesPage.module.css';
 import { OrdersTableBody } from './SalesPage/OrdersTableBody';
 
-interface ShippingChargeBreakdown {
-  freightForward: number;
-  freightCOD: number;
-  freightRTO: number;
-  whatsappCharges: number;
-  otherCharges: number;
-}
-
-interface ShopifyOrder {
-  id: number;
-  name: string;
-  email?: string;
-  createdAt: string;
-  fulfillmentStatus?: string | null;
-  deliveryStatus?: string | null;
-  deliveredAt?: string | null;
-  trackingUrl?: string | null;
-  paymentMethod?: string;
-  maxUploads: number;
-  totalPrice?: number;
-  shippingCharge?: number;
-  shippingBreakdown?: ShippingChargeBreakdown;
-  pickupDate?: string | null;
-  deliveredDate?: string | null;
-  firstAttemptDate?: string | null;
-  cancelledAt?: string | null;
-  lineItems?: Array<{
-    title: string;
-    quantity: number;
-    variantTitle?: string;
-  }>;
-  customerTags?: string | null;
-  customerId?: number | null;
-}
+import { type ShopifyOrder } from '../services/api';
 
 interface COGSField {
   id: string;
@@ -189,9 +156,84 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
   // Ad spend by date (YYYY-MM-DD -> total amount). Used to show "Ad spend" in day header row.
   const [adSpendByDate, setAdSpendByDate] = useState<Record<string, number>>({});
 
+  // AI Prediction State
+  const [aiPrediction, setAiPrediction] = useState<any>(null);
+  const [isPredicting, setIsPredicting] = useState(false);
+
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    if (selectedMonthFilter !== 'all') {
+      fetchCurrentPrediction();
+    }
+  }, [selectedMonthFilter]);
+
+  const fetchCurrentPrediction = async () => {
+    const monthYear = selectedMonthFilter === 'current' 
+      ? new Date().toISOString().substring(0, 7)
+      : selectedMonthFilter;
+    
+    if (monthYear.length !== 7) return;
+
+    try {
+      const res = await api.getProfitPrediction(monthYear);
+      if (res.success && res.prediction) {
+        setAiPrediction(res.prediction);
+      } else {
+        setAiPrediction(null);
+      }
+    } catch (err) {
+      console.error('Failed to fetch prediction:', err);
+    }
+  };
+
+  const runAiPrediction = async () => {
+    if (!expectedProfit) return;
+    
+    const monthYear = selectedMonthFilter === 'current' 
+      ? new Date().toISOString().substring(0, 7)
+      : selectedMonthFilter;
+
+    setIsPredicting(true);
+    try {
+      // Prepare historical data for AI (last 90 days of P/L, cutoff Jan 28, 2026)
+      const CUTOFF_DATE = new Date('2026-01-28');
+      const historicalData = ordersGroupedByDate
+        .filter(g => new Date(g.dateKey) >= CUTOFF_DATE)
+        .map(g => {
+          let dailyPL = -g.adSpend;
+          g.orders.forEach(o => {
+            dailyPL += (orderProfitLoss.get(o.id) ?? 0);
+          });
+          return { date: g.dateKey, pl: dailyPL, orders: g.orders.length };
+        }).slice(0, 90);
+
+      const res = await api.predictProfit({
+        monthYear,
+        daysElapsed: expectedProfit.daysElapsed,
+        totalDays: expectedProfit.totalDays,
+        currentOrders: stats.totalOrders,
+        currentPL: expectedProfit.currentPL,
+        historicalData,
+        pendingOrdersCount: expectedProfit.pendingOrdersCount,
+        avgPLPerDay: expectedProfit.avgPLPerDay,
+        avgOrdersPerDay: stats.totalOrders / expectedProfit.daysElapsed,
+        ndrRate: globalNdrRate
+      });
+
+      if (res.success && res.prediction) {
+        setAiPrediction(res.prediction);
+      } else {
+        alert(res.error || 'Prediction failed');
+      }
+    } catch (err) {
+      alert('Error running AI prediction');
+    } finally {
+      setIsPredicting(false);
+    }
+  };
 
   // Close delay dropdown when clicking outside
   useEffect(() => {
@@ -1907,6 +1949,90 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
             </div>
           </div>
         </div>
+
+        {/* Dedicated AI Prediction Row */}
+        {selectedMonthFilter !== 'all' && expectedProfit && (
+          <div className={styles['ai-prediction-row']}>
+            <div className={styles['ai-row-header']}>
+              <div className={styles['ai-row-title']}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a10 10 0 1 0 10 10H12V2z"></path><path d="M12 2a10 10 0 0 1 10 10"></path></svg>
+                AI Performance Forecast
+              </div>
+              <button 
+                className={styles['refresh-btn']}
+                onClick={runAiPrediction}
+                disabled={isPredicting}
+              >
+                <svg className={isPredicting ? styles.spinning : ''} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"></path></svg>
+                {isPredicting ? 'Analyzing...' : 'Refresh AI'}
+              </button>
+            </div>
+
+            <div className={styles['ai-stat-card']}>
+              <div className={styles['stat-label']}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"></path><path d="M3 6h18"></path><path d="M16 10a4 4 0 0 1-8 0"></path></svg>
+                AI Total Orders
+              </div>
+              <div className={styles['stat-value']}>
+                {aiPrediction?.predictedOrders ? formatIndianNumber(aiPrediction.predictedOrders, 0) : '—'}
+              </div>
+              <div className={styles['stat-subtext']}>Predicted for Month-end</div>
+            </div>
+
+            <div className={styles['ai-stat-card']}>
+              <div className={styles['stat-label']}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m3 9 2.45-4.9A2 2 0 0 1 7.24 3h9.52a2 2 0 0 1 1.8 1.1L21 9"></path><path d="M12 3v6"></path><path d="M5 9v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9"></path><path d="M9 9h6"></path></svg>
+                Expected NDR
+              </div>
+              <div className={`${styles['stat-value']} ${aiPrediction?.predictedNDR > 15 ? styles.loss : styles.profit}`}>
+                {aiPrediction?.predictedNDR ? `${formatIndianNumber(aiPrediction.predictedNDR, 1)}%` : '—'}
+              </div>
+              <div className={styles['stat-subtext']}>Projected final rate</div>
+            </div>
+
+            <div className={styles['ai-stat-card']}>
+              <div className={styles['stat-label']}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path></svg>
+                Predicted Profit
+              </div>
+              <div className={`${styles['stat-value']} ${aiPrediction?.predictedFinalProfit > 0 ? styles.profit : styles.loss}`}>
+                {aiPrediction?.predictedFinalProfit ? `₹${formatIndianNumber(aiPrediction.predictedFinalProfit, 0)}` : '—'}
+              </div>
+              <div className={styles['stat-subtext']}>Estimated P/L</div>
+            </div>
+
+            <div className={styles['ai-stat-card']}>
+              <div className={styles['stat-label']}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                Daily Trend
+              </div>
+              <div className={styles['stat-value']}>
+                {aiPrediction ? 'Trend-Aware' : '—'}
+              </div>
+              <div className={styles['stat-subtext']}>Growth Analysis</div>
+            </div>
+
+            <div className={styles['ai-insight-card']}>
+              <div className={styles['insight-header']}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m12 14 4-4"></path><path d="M3.34 19a10 10 0 1 1 17.32 0"></path></svg>
+                Strategic AI Insight
+              </div>
+              <div className={styles['insight-text']}>
+                {aiPrediction?.insight || "Refresh AI to get an actionable insight for this month."}
+              </div>
+              {aiPrediction?.reasoning && (
+                <div className={styles['ai-reasoning']}>
+                  {aiPrediction.reasoning}
+                </div>
+              )}
+              <div className={styles['ai-footer']}>
+                <div className={styles['ai-timestamp']}>
+                  {aiPrediction ? `Last Analysis: ${new Date(aiPrediction.lastUpdated).toLocaleDateString('en-IN')} ${new Date(aiPrediction.lastUpdated).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}` : 'Not yet analyzed'}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Status Filters */}
         <div className={styles['status-filters']}>

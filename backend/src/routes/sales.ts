@@ -1,7 +1,8 @@
 import express, { Response } from 'express';
-import { DiscardedOrder, RTOOrder } from '../models';
+import { DiscardedOrder, RTOOrder, ProfitPrediction } from '../models';
 import { requireAdmin } from './adminAuth';
 import { AuthenticatedRequest } from '../types';
+import aiService from '../services/aiService';
 
 const router = express.Router();
 
@@ -193,9 +194,101 @@ router.delete('/mark-rto', requireAdmin, async (req: AuthenticatedRequest, res: 
       message: `${orderIds.length} order(s) unmarked from RTO`,
     });
   } catch (error) {
-    console.error('Error unmarking RTO orders:', error);
     res.status(500).json({ success: false, error: 'Failed to unmark RTO orders' });
   }
 });
+
+/**
+ * GET /api/admin/sales/prediction/:monthYear
+ */
+router.get('/prediction/:monthYear', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { monthYear } = req.params;
+    const prediction = await ProfitPrediction.findOne({ monthYear, status: 'active' });
+    res.json({ success: true, prediction });
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Failed to fetch prediction' });
+  }
+});
+
+router.post('/predict', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { 
+      monthYear, 
+      daysElapsed, 
+      totalDays, 
+      currentOrders,
+      currentPL, 
+      historicalData, 
+      pendingOrdersCount, 
+      avgPLPerDay, 
+      avgOrdersPerDay,
+      ndrRate 
+    } = req.body;
+    
+    // Call AI to predict
+    const aiResult = await aiService.predictMonthEnd({
+      monthYear,
+      daysElapsed,
+      totalDays,
+      currentOrders,
+      currentPL,
+      historicalData,
+      pendingOrdersCount,
+      avgPLPerDay,
+      avgOrdersPerDay,
+      ndrRate
+    });
+
+    // Archive old prediction
+    await ProfitPrediction.updateMany({ monthYear, status: 'active' }, { status: 'archived' });
+
+    // Save new prediction
+    const prediction = new ProfitPrediction({
+      monthYear,
+      predictedFinalProfit: aiResult.predictedFinalProfit,
+      predictedOrders: aiResult.predictedOrders,
+      predictedNDR: aiResult.predictedNDR,
+      reasoning: aiResult.reasoning,
+      insight: (aiResult as any).insight, // Optional field
+      lastUpdated: new Date(),
+      status: 'active'
+    });
+    await prediction.save();
+
+    res.json({ 
+      success: true, 
+      prediction,
+      reasoning: aiResult.reasoning,
+      insight: (aiResult as any).insight
+    });
+  } catch (error) {
+    console.error('AI Prediction Error:', error);
+    res.status(500).json({ success: false, error: 'AI Prediction failed' });
+  }
+});
+ 
+ /**
+  * POST /api/admin/sales/predict-stock
+  */
+ router.post('/predict-stock', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+   try {
+     const { daysToPredict, historicalData, totalBusinessDays } = req.body;
+     
+     const aiResult = await aiService.predictStock({
+       daysToPredict,
+       historicalData,
+       totalBusinessDays
+     });
+ 
+     res.json({ 
+       success: true, 
+       predictions: aiResult.predictions 
+     });
+   } catch (error) {
+     console.error('AI Stock Prediction Error:', error);
+     res.status(500).json({ success: false, error: 'AI Stock Prediction failed' });
+   }
+ });
 
 export default router;

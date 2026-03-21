@@ -843,6 +843,28 @@ class ApiService {
       body: JSON.stringify(data),
     });
   }
+
+  async getProfitPrediction(monthYear: string): Promise<{ success: boolean; prediction?: any; error?: string }> {
+    return this.request(`/api/admin/sales/prediction/${monthYear}`);
+  }
+
+  async predictProfit(data: any): Promise<{ success: boolean; prediction?: any; reasoning?: string; error?: string }> {
+    return this.request('/api/admin/sales/predict', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async predictStock(data: {
+    daysToPredict: number;
+    historicalData: any[];
+    totalBusinessDays: number;
+  }): Promise<{ success: boolean; predictions?: any[]; error?: string }> {
+    return this.request('/api/admin/sales/predict-stock', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
 }
 
 

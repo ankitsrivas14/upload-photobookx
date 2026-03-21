@@ -181,6 +181,126 @@
   align-items: start;
 }
 
+/* AI Prediction Card Styles */
+.prediction-card {
+  background: linear-gradient(135deg, #ffffff 0%, #f1f5f9 100%);
+  border: 1.5px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 0.875rem 1rem;
+  box-shadow: 0 4px 15px -3px rgba(0, 0, 0, 0.05);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+}
+
+.prediction-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 20px -5px rgba(0, 0, 0, 0.1);
+  border-color: #3b82f6;
+}
+
+.prediction-card::after {
+  content: "AI";
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  font-size: 2.5rem;
+  font-weight: 900;
+  color: rgba(59, 130, 246, 0.05);
+  pointer-events: none;
+}
+
+.prediction-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.prediction-card .stat-label {
+  margin-bottom: 0;
+  color: #3b82f6;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.prediction-card .stat-label svg {
+  width: 14px;
+  height: 14px;
+}
+
+.reload-prediction-btn {
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  color: #64748b;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  padding: 0;
+}
+
+.reload-prediction-btn:hover:not(:disabled) {
+  background: #e2e8f0;
+  color: #3b82f6;
+  border-color: #3b82f6;
+}
+
+.reload-prediction-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.reload-prediction-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.spinning {
+  animation: spin 1s linear infinite;
+}
+
+.prediction-value {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: #1e293b;
+  margin-bottom: 0.15rem;
+}
+
+.prediction-reasoning {
+  font-size: 0.65rem;
+  color: #64748b;
+  line-height: 1.4;
+  font-style: italic;
+  margin-top: 0.25rem;
+  padding: 0.4rem;
+  background: rgba(255, 255, 255, 0.5);
+  border-radius: 6px;
+  border: 1px dashed #cbd5e1;
+}
+
+.prediction-footer {
+  margin-top: 0.5rem;
+  font-size: 0.6rem;
+  color: #94a3b8;
+  display: flex;
+  justify-content: space-between;
+}
+
+@media (max-width: 1300px) {
+  .stats-section {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
 @media (max-width: 1024px) {
   .stats-section {
     grid-template-columns: repeat(2, 1fr);
@@ -310,6 +430,160 @@
   grid-column: 1 / -1;
   min-width: 0;
   overflow: hidden;
+}
+
+/* AI Prediction Row Styles - Harmonized with App Theme */
+.ai-prediction-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+  margin-top: 2rem;
+  margin-bottom: 2rem;
+  padding: 1.5rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  position: relative;
+}
+
+.ai-row-header {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.ai-row-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: #1e293b;
+  text-transform: uppercase;
+  letter-spacing: 0.05rem;
+}
+
+.ai-row-title svg {
+  width: 18px;
+  height: 18px;
+  color: #3b82f6;
+}
+
+.ai-stat-card {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 1rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  transition: all 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.ai-stat-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+}
+
+.ai-stat-card .stat-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.ai-stat-card .stat-label svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ai-stat-card .stat-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.2;
+}
+
+.ai-stat-card .stat-subtext {
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.ai-insight-card {
+  grid-column: 1 / -1;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 1.25rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.insight-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #3b82f6;
+  text-transform: uppercase;
+  letter-spacing: 0.05rem;
+}
+
+.insight-header svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.insight-text {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: #1e293b;
+  line-height: 1.5;
+}
+
+.ai-reasoning {
+  font-size: 0.75rem;
+  color: #64748b;
+  line-height: 1.5;
+  background: #f1f5f9;
+  padding: 1rem;
+  border-radius: 8px;
+  border-left: 3px solid #cbd5e1;
+}
+
+.ai-footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  margin-top: 0.5rem;
+}
+
+.ai-timestamp {
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+@media (max-width: 1024px) {
+  .ai-prediction-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .ai-prediction-row {
+    grid-template-columns: 1fr;
+  }
 }
 
 .stat-card-combined:hover {

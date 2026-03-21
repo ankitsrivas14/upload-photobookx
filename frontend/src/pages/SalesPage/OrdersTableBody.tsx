@@ -2,40 +2,7 @@ import React from 'react';
 import { OrderRow } from './OrderRow';
 import styles from '../SalesPage.module.css';
 
-interface ShippingChargeBreakdown {
-  freightForward: number;
-  freightCOD: number;
-  freightRTO: number;
-  whatsappCharges: number;
-  otherCharges: number;
-}
-
-interface ShopifyOrder {
-  id: number;
-  name: string;
-  email?: string;
-  createdAt: string;
-  fulfillmentStatus?: string | null;
-  deliveryStatus?: string | null;
-  deliveredAt?: string | null;
-  trackingUrl?: string | null;
-  paymentMethod?: string;
-  maxUploads: number;
-  totalPrice?: number;
-  shippingCharge?: number;
-  shippingBreakdown?: ShippingChargeBreakdown;
-  pickupDate?: string | null;
-  deliveredDate?: string | null;
-  firstAttemptDate?: string | null;
-  cancelledAt?: string | null;
-  lineItems?: Array<{
-    title: string;
-    quantity: number;
-    variantTitle?: string;
-  }>;
-  customerTags?: string | null;
-  customerId?: number | null;
-}
+import { type ShopifyOrder } from '../../services/api';
 
 interface OrdersTableBodyProps {
   hasStatusFilter: boolean;
