@@ -19,7 +19,7 @@ export function StockPrediction() {
 
   useEffect(() => {
     loadOrdersAndCalculate();
-  }, []);
+  }, [startDate]);
 
   const loadOrdersAndCalculate = async () => {
     try {
@@ -27,14 +27,14 @@ export function StockPrediction() {
       setError(null);
 
       // Fetch all orders
-      const response = await api.getOrders(1000, true, '2026-01-28');
+      const response = await api.getOrders(1000, true);
       
       if (!response.success || !response.orders) {
         setError('Failed to fetch orders');
         return;
       }
 
-      // Filter orders from Jan 28, 2026 onwards
+      // Filter: Ignore everything created before Start Date
       const filteredOrders = response.orders.filter(order => {
         const orderDate = new Date(order.createdAt);
         return orderDate >= startDate && !order.cancelledAt;
@@ -47,9 +47,21 @@ export function StockPrediction() {
 
       // Group by product + variant and count
       const productMap = new Map<string, { title: string; variant: string; count: number }>();
+      const allowedBooks = [
+        'jyotirling',
+        'bharat ke dhaam'
+      ];
 
       filteredOrders.forEach((order: ShopifyOrder) => {
         order.lineItems?.forEach(item => {
+          const itemTitle = item.title.toLowerCase();
+          
+          // Only include specific books
+          const isAllowed = allowedBooks.some(book => itemTitle.includes(book));
+          if (!isAllowed) {
+            return;
+          }
+
           const variantTitle = item.variantTitle || 'Default';
           const productKey = `${item.title}|||${variantTitle}`;
           const existing = productMap.get(productKey);
@@ -72,9 +84,9 @@ export function StockPrediction() {
           productName: product.title,
           variantTitle: product.variant,
           totalOrders: product.count,
-          avgOrdersPerDay: Math.floor(product.count / days),
+          avgOrdersPerDay: product.count / days,
         }))
-        .filter(p => p.avgOrdersPerDay > 0) // Remove products with 0 avg orders per day
+        .filter(p => p.avgOrdersPerDay > 0)
         .sort((a, b) => b.avgOrdersPerDay - a.avgOrdersPerDay);
 
       setProducts(productStats);
@@ -185,7 +197,7 @@ export function StockPrediction() {
                   <td className={styles['total-orders']}>{product.totalOrders}</td>
                   <td className={styles['avg-orders']}>
                     <span className={styles['avg-badge']}>
-                      {product.avgOrdersPerDay}
+                      {product.avgOrdersPerDay.toFixed(2)}
                     </span>
                   </td>
                 </tr>
@@ -210,7 +222,7 @@ export function StockPrediction() {
           <div className={styles['summary-card']}>
             <div className={styles['summary-label']}>Avg Orders/Day</div>
             <div className={styles['summary-value']}>
-              {Math.floor(products.reduce((sum, p) => sum + p.avgOrdersPerDay, 0))}
+              {products.reduce((sum, p) => sum + p.avgOrdersPerDay, 0).toFixed(2)}
             </div>
           </div>
         </div>
