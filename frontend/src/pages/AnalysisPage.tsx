@@ -4,6 +4,8 @@ import { api } from '../services/api';
 import type { AdminUser } from '../services/api';
 import { FailedOrdersAnalysis } from './analysis/FailedOrdersAnalysis';
 import { PinCodesAnalysis } from './analysis/PinCodesAnalysis';
+import { StuckOrdersAnalysis } from './analysis/StuckOrdersAnalysis';
+import { TicketsAnalysis } from './analysis/TicketsAnalysis';
 import styles from './AnalysisPage.module.css';
 
 export function AnalysisPage() {
@@ -15,6 +17,8 @@ export function AnalysisPage() {
     const currentPath = location.pathname;
     const isFailedOrders = currentPath.includes('/admin/analysis/failed-orders');
     const isPinCodes = currentPath.includes('/admin/analysis/pin-codes');
+    const isStuckOrders = currentPath.includes('/admin/analysis/stuck-orders');
+    const isTickets = currentPath.includes('/admin/analysis/tickets');
 
     useEffect(() => {
         loadUser();
@@ -96,11 +100,25 @@ export function AnalysisPage() {
                     >
                         Pin Codes
                     </Link>
+                    <Link
+                        to="/admin/analysis/stuck-orders"
+                        className={`${styles['analysis-nav-item']} ${isStuckOrders ? styles.active : ''}`}
+                    >
+                        Stuck Orders
+                    </Link>
+                    <Link
+                        to="/admin/analysis/tickets"
+                        className={`${styles['analysis-nav-item']} ${isTickets ? styles.active : ''}`}
+                    >
+                        Tickets
+                    </Link>
                 </div>
 
                 <Routes>
                     <Route path="failed-orders" element={<FailedOrdersAnalysis />} />
                     <Route path="pin-codes" element={<PinCodesAnalysis />} />
+                    <Route path="stuck-orders" element={<StuckOrdersAnalysis />} />
+                    <Route path="tickets" element={<TicketsAnalysis />} />
                     <Route path="*" element={<Navigate to="failed-orders" replace />} />
                 </Routes>
             </main>

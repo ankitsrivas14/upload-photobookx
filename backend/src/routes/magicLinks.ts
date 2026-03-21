@@ -3,6 +3,7 @@ import { requireAdmin } from './adminAuth';
 import magicLinkService from '../services/magicLinkService';
 import shopifyService from '../services/shopifyService';
 import shiprocketService from '../services/shiprocketService';
+import aiService from '../services/aiService';
 import type { AuthenticatedRequest } from '../types';
 import config from '../config';
 import { UploadedImage } from '../models';
@@ -10,9 +11,132 @@ import OrderDeliveryDate from '../models/OrderDeliveryDate';
 import ShippingCharge from '../models/ShippingCharge';
 import { S3Client, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { fromInstanceMetadata } from '@aws-sdk/credential-provider-imds';
+import { Ticket } from '../models';
 import archiver from 'archiver';
 
 const router = Router();
+
+/**
+ * GET /api/admin/magic-links/tickets
+ */
+router.get('/tickets', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const tickets = await Ticket.find().sort({ createdAt: -1 });
+    res.json({ success: true, tickets });
+  } catch (error: any) {
+    console.error('Tickets fetch error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * Check if a ticket exists for an AWB
+ * GET /api/admin/magic-links/tickets/:awb
+ */
+router.get('/tickets/:awb', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { awb } = req.params;
+    const ticket = await Ticket.findOne({ awb }).sort({ createdAt: -1 });
+    res.json({ success: true, ticket });
+  } catch (error: any) {
+    console.error('Ticket fetch error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * Handle ticket creation
+ * POST /api/admin/magic-links/tickets
+ */
+router.post('/tickets', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { 
+      orderNumber, 
+      customerName, 
+      awb, 
+      courierName, 
+      currentStatus, 
+      activities, 
+      generatedMessage 
+    } = req.body;
+
+    const ticket = new Ticket({
+      orderNumber,
+      customerName,
+      awb,
+      courierName,
+      currentStatus,
+      activities,
+      generatedMessage
+    });
+
+    await ticket.save();
+    res.json({ success: true, ticket });
+  } catch (error: any) {
+    console.error('Ticket creation error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * Update ticket status
+ * PATCH /api/admin/magic-links/tickets/:id
+ */
+router.patch('/tickets/:id', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    const ticket = await Ticket.findByIdAndUpdate(
+      id,
+      { status, updatedAt: new Date() },
+      { new: true }
+    );
+
+    if (!ticket) {
+      return res.status(404).json({ success: false, error: 'Ticket not found' });
+    }
+
+    res.json({ success: true, ticket });
+  } catch (error: any) {
+    console.error('Ticket update error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/admin/magic-links/tracking/:awb
+ * Get detailed tracking info for an AWB
+ */
+router.get('/tracking/:awb', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const awb = req.params.awb as string;
+    if (!awb) {
+      return res.status(400).json({ success: false, error: 'AWB is required' });
+    }
+
+    const trackingData = await shiprocketService.getAWBTrackingActivities(awb);
+    res.json({ success: true, tracking: trackingData });
+  } catch (error) {
+    console.error('Tracking fetch error:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch tracking details' });
+  }
+});
+
+/**
+ * POST /api/admin/magic-links/generate-complaint
+ */
+router.post('/generate-complaint', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { activities, orderName, courierName, customerName, awb, currentStatus } = req.body;
+    
+    const message = await aiService.generateSupportMessage(activities, orderName, courierName, customerName, awb, currentStatus);
+    res.json({ success: true, message });
+  } catch (error: any) {
+    console.error('AI error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 
 /**
  * GET /api/admin/magic-links
@@ -317,6 +441,7 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
           customerName: shippingChargesMap.get(order.name)?.customerName || null,
           customerState: dbDeliveryData?.addressState || shippingChargesMap.get(order.name)?.customerState || null,
           cancelledAt: order.cancelled_at,
+          awbCode: shippingChargesMap.get(order.name)?.awbCode || null,
           lineItems: order.line_items?.map(item => ({
             title: item.title,
             quantity: item.quantity,
@@ -993,4 +1118,8 @@ router.get('/shiprocket/wallet-transactions', requireAdmin, async (req: Authenti
   }
 });
 
+/**
+ * GET /api/admin/magic-links/tracking/:awb
+ * Get detailed tracking info for an AWB
+ */
 export default router;

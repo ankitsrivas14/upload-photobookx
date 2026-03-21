@@ -28,6 +28,7 @@
     "mongoose": "^9.1.2",
     "multer": "^2.0.2",
     "node-fetch": "^2.7.0",
+    "openai": "^6.32.0",
     "uuid": "^13.0.0"
   },
   "devDependencies": {

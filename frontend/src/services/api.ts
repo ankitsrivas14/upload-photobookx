@@ -91,6 +91,14 @@ interface ShopifyOrder {
   maxUploads: number;
   totalPrice?: number;
   shippingCharge?: number; // Shipping charge paid to Shiprocket
+  shippingFetchedAt?: string | null;
+  shippingBreakdown?: {
+    freightForward: number;
+    freightCOD: number;
+    freightRTO: number;
+    whatsappCharges: number;
+    otherCharges: number;
+  } | null;
   pickupDate?: string | null;
   courierName?: string | null;
   deliveredDate?: string | null;
@@ -107,6 +115,7 @@ interface ShopifyOrder {
   zip?: string | null;
   customerName?: string | null;
   customerState?: string | null;
+  awbCode?: string | null;
 }
 
 interface OrdersResponse {
@@ -799,6 +808,39 @@ class ApiService {
   async deleteBlockedPinCode(pinCode: string): Promise<{ success: boolean; error?: string }> {
     return this.request(`/api/admin/pincodes/blocked/${encodeURIComponent(pinCode)}`, {
       method: 'DELETE',
+    });
+  }
+
+  async getTracking(awb: string): Promise<{ success: boolean; tracking?: any; error?: string }> {
+    return this.request(`/api/admin/magic-links/tracking/${awb}`);
+  }
+
+  async getTickets(): Promise<{ success: boolean; tickets?: any[]; error?: string }> {
+    return this.request('/api/admin/magic-links/tickets');
+  }
+
+  async createTicket(data: any): Promise<{ success: boolean; ticket?: any; error?: string }> {
+    return this.request('/api/admin/magic-links/tickets', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  }
+
+  async updateTicketStatus(id: string, status: string): Promise<{ success: boolean; ticket?: any; error?: string }> {
+    return this.request(`/api/admin/magic-links/tickets/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status })
+    });
+  }
+
+  async getTicketByAWB(awb: string): Promise<{ success: boolean; ticket?: any; error?: string }> {
+    return this.request(`/api/admin/magic-links/tickets/${awb}`);
+  }
+
+  async generateComplaint(data: { activities: any[], orderName: string, courierName: string, customerName: string }): Promise<{ success: boolean; message?: string; error?: string }> {
+    return this.request('/api/admin/magic-links/generate-complaint', {
+      method: 'POST',
+      body: JSON.stringify(data),
     });
   }
 }

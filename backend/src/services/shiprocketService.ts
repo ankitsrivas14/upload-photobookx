@@ -766,6 +766,18 @@ class ShiprocketService {
     const date = new Date(dateStr);
     return isNaN(date.getTime()) ? undefined : dateStr;
   }
+  /**
+   * Fetch tracking activities for a specific AWB
+   */
+  async getAWBTrackingActivities(awbCode: string) {
+    try {
+      const response = await this.makeRequest<any>(`/courier/track/awb/${awbCode}`);
+      return response;
+    } catch (error) {
+      console.error(`Error fetching tracking for AWB ${awbCode}:`, error);
+      return null;
+    }
+  }
 }
 
 export default new ShiprocketService();

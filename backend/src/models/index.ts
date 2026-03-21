@@ -11,3 +11,4 @@ export { default as ShopifyOrderCache, IShopifyOrderCache } from './ShopifyOrder
 export { BankCategory, IBankCategory } from './BankCategory';
 export { BankTransaction, IBankTransaction } from './BankTransaction';
 export { BankNarrationRule, IBankNarrationRule } from './BankNarrationRule';
+export { default as Ticket } from './Ticket';
