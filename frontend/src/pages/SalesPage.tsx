@@ -329,23 +329,21 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
   const handleRefresh = async () => {
     setIsRefreshing(true);
     try {
-      // Step 1: Clear both caches
-      setRefreshStatus('Syncing latest Shopify orders...');
-      const [shopifySyncResponse] = await Promise.all([
-        api.clearOrdersCache(),
-        api.clearShippingChargesCache()
-      ]);
+      // Step 1a: Clear Shiprocket shipping charges cache
+      setRefreshStatus('Clearing shipping cache...');
+      await api.clearShippingChargesCache();
 
+      // Step 1b: Sync latest orders from Shopify
+      setRefreshStatus('Syncing new orders from Shopify...');
+      const shopifySyncResponse = await api.clearOrdersCache();
       const syncedCount = (shopifySyncResponse as any).syncedCount || 0;
 
-      // Step 2: Load fresh orders
-      setRefreshStatus(syncedCount > 0 ? `Loading ${syncedCount} new/updated orders...` : 'Fetching orders list...');
+      // Step 2: Load fresh orders from DB/cache
+      setRefreshStatus(syncedCount > 0 ? `Found ${syncedCount} updated orders. Loading all orders...` : 'No new orders. Loading order list...');
       const response = await api.getOrders(1000, true);
 
       // Step 3: Bulk sync shipping charges in chunks to show exactly how much progress is made
       if (response.success && response.orders) {
-        setRefreshStatus('Syncing Shiprocket deliveries...');
-        
         // Filter: Ignore everything created before 10 Jan 2026.
         // For orders on/after that date, only sync if they aren't in a terminal state
         // or if terminal but missing shipping charges.
@@ -365,36 +363,59 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
             const { isFailed, isDelivered } = getOrderStatus(o);
             
             // Needs sync if:
-            // 1. Not in a terminal state (In Transit, etc.)
-            // 2. IS in a terminal state but we don't have the shipping charge yet
+            // 1. Not in a terminal state (In Transit, Attempted, Out for Delivery, etc.)
+            // 2. IS in a terminal state but we have NO deliveryStatus at all (newly fulfilled)
+            // 3. IS terminal with status, charge is 0, AND shipping was never fetched after our search fix
+            //    (i.e. needs one-time charge recovery with the corrected Shiprocket search)
             const isTerminal = isFailed || isDelivered;
+            const hasStatusData = !!o.deliveryStatus;
             const hasChargeData = (o.shippingCharge ?? 0) > 0;
+            const FIX_DATE = new Date('2026-03-21T00:00:00Z');
+            const wasFetchedAfterFix = o.shippingFetchedAt && new Date(o.shippingFetchedAt) >= FIX_DATE;
             
-            return !isTerminal || !hasChargeData;
+            // Non-terminal → always sync (status may have changed)
+            if (!isTerminal) return true;
+            // Terminal with no delivery status → sync to get initial data
+            if (!hasStatusData) return true;
+            // Terminal with good charge → skip
+            if (hasChargeData) return false;
+            // Terminal with 0 charge but already fetched after fix → skip (genuinely 0 or not found)
+            if (wasFetchedAfterFix) return false;
+            // Terminal with 0 charge, never fetched after fix → sync (one-time recovery)
+            return true;
           })
           .map((o: any) => o.name);
 
-        console.log(`Refresh: Total orders: ${response.orders.length}. Sync required for: ${orderNumbersToSync.length}`);
+        // Count breakdown for display
+        const totalOrders = response.orders.length;
+        const fulfilledOrders = response.orders.filter((o: any) => o.fulfillmentStatus && o.fulfillmentStatus !== 'unfulfilled').length;
+        console.log(`Refresh: Total: ${totalOrders}, Fulfilled: ${fulfilledOrders}, Sync needed: ${orderNumbersToSync.length}`);
 
         if (orderNumbersToSync.length === 0) {
-          setRefreshStatus('All deliveries up to date!');
+          setRefreshStatus(`All ${fulfilledOrders} deliveries up to date!`);
           await new Promise(resolve => setTimeout(resolve, 800)); // Brief pause for UX
         } else {
+          setRefreshStatus(`Syncing ${orderNumbersToSync.length} deliveries from Shiprocket...`);
           const chunkSize = 50;
           let processed = 0;
+          let totalFetched = 0;
+          let totalSkipped = 0;
 
           for (let i = 0; i < orderNumbersToSync.length; i += chunkSize) {
-            setRefreshStatus(`Syncing deliveries... (${processed}/${orderNumbersToSync.length})`);
             const chunk = orderNumbersToSync.slice(i, i + chunkSize);
-            await api.syncShippingCharges(chunk);
+            setRefreshStatus(`Syncing deliveries... (${processed}/${orderNumbersToSync.length})`);
+            const result = await api.syncShippingCharges(chunk);
             processed += chunk.length;
+            totalFetched += result.fetched || 0;
+            totalSkipped += (result as any).skipped || 0;
           }
-          setRefreshStatus(`Syncing deliveries... (${orderNumbersToSync.length}/${orderNumbersToSync.length})`);
+          setRefreshStatus(`Synced ${totalFetched} orders, ${totalSkipped} skipped`);
+          await new Promise(resolve => setTimeout(resolve, 600));
         }
       }
 
       // Step 4: Reload to get updated data with shipping breakdown
-      setRefreshStatus('Finishing up...');
+      setRefreshStatus('Refreshing display...');
       await loadData();
     } catch (err) {
       console.error('Failed to refresh data:', err);
@@ -442,11 +463,18 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
     const deliveryStatus = order.deliveryStatus?.toLowerCase() || '';
     const fulfillmentStatus = order.fulfillmentStatus?.toLowerCase() || '';
 
+    // terminal numeric statuses: 
+    // 12: Lost, 13: Canceled, 15: RTO Delivered, 16: RTO Acknowledged, 
+    // 17: RTO Initiated, 18: RTO In Transit, 19: RTO Out for Delivery, 
+    // 20: RTO Undelivered, 42: RTO Something, 46: RTO Acknowledged
+    const terminalNumericStatuses = ['12', '13', '15', '16', '17', '18', '19', '20', '42', '46', '10'];
+
     // Failed statuses: failure, RTO-related (attempted_delivery excluded)
     const isFailed = rtoOrderIds.has(order.id) ||
       deliveryStatus === 'failure' ||
       deliveryStatus.includes('failed') ||
-      deliveryStatus.includes('rto');
+      deliveryStatus.includes('rto') ||
+      terminalNumericStatuses.includes(deliveryStatus);
 
     // Delivered statuses: delivered only
     const isDelivered = deliveryStatus === 'delivered';

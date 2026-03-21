@@ -99,9 +99,18 @@ export const OrderRow: React.FC<OrderRowProps> = ({
         <div className={styles['order-name-wrapper']}>
           <span className={`${styles['payment-dot']} ${styles[order.paymentMethod?.toLowerCase() || 'prepaid']}`}></span>
           <span className={styles['order-number']}>{order.name}</span>
-          {(order.fulfillmentStatus && order.fulfillmentStatus.toLowerCase() !== 'unfulfilled' && (order.shippingCharge ?? 0) === 0 && !order.cancelledAt) && (
-            <span className={styles['missing-charge-dot']} title="Fulfillment exists but shipping charge is 0"></span>
-          )}
+          {(() => {
+            const isUnfulfilled = !order.fulfillmentStatus || order.fulfillmentStatus.toLowerCase() === 'unfulfilled';
+            const hasDeliveryStatus = !!order.deliveryStatus;
+            
+            // Show red dot ONLY if it is fulfilled but we don't have a valid delivery status AND no shipping charge.
+            // (If we have a valid delivery status like 'failure', it means shiprocket gave us a status, and the charge is just legitimately 0).
+            const isMissingData = !isUnfulfilled && !order.cancelledAt && (order.shippingCharge ?? 0) === 0 && !hasDeliveryStatus;
+            
+            return isMissingData ? (
+              <span className={styles['missing-charge-dot']} title="Fulfillment exists but delivery data is missing"></span>
+            ) : null;
+          })()}
         </div>
 
       </td>

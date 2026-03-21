@@ -307,6 +307,7 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
           maxUploads: shopifyService.getMaxUploadsForOrder(order),
           totalPrice: order.current_total_price ? parseFloat(order.current_total_price) : undefined,
           shippingCharge: shippingChargesMap.get(order.name)?.shippingCharge || 0,
+          shippingFetchedAt: shippingChargesMap.get(order.name)?.fetchedAt || null,
           shippingBreakdown: shippingChargesMap.get(order.name)?.breakdown || null,
           pickupDate: shippingChargesMap.get(order.name)?.pickupDate || null,
           deliveredDate: shippingChargesMap.get(order.name)?.deliveredDate || null,
@@ -900,14 +901,23 @@ router.post('/shiprocket/fetch-shipping-charge', requireAdmin, async (req: Authe
  */
 router.post('/shiprocket/clear-cache', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
   try {
-    const terminalStatuses = ['7', '12', '13', '15', '16', 'delivered', 'canceled', 'cancelled', 'rto delivered'];
+    const terminalStatuses = [
+      '7', '12', '13', '15', '16', '17', '18', '19', '20', '42', '46', 
+      'delivered', 'canceled', 'cancelled', 'rto delivered', 'rto acknowledged', 
+      'rto initiated', 'rto in transit', 'failure', 'failed', 'rto', 'not found'
+    ];
 
-    // Only delete shipping charges that have not reached a terminal status
-    // and don't already have a deliveredDate.
+    // Only delete shipping charges that are explicitly in an ACTIVE (non-terminal) state.
+    // We want to preserve RTO, Failure, and other states that are unlikely to change
+    // or where we already have the final charge.
+    const activeStatuses = ['1', '2', '3', '4', '5', '6', '11', '14', '21', '38', '44', 'shipped', 'picked up', 'ready to ship', 'out for delivery', 'in transit'];
+
     const result = await ShippingCharge.deleteMany({
       $and: [
+        { status: { $in: activeStatuses } },
         { status: { $nin: terminalStatuses } },
-        { deliveredDate: { $in: [null, undefined, ''] } }
+        { deliveredDate: { $in: [null, undefined, ''] } },
+        { status: { $ne: 'not found' } }
       ]
     });
 

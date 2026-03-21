@@ -140,6 +140,29 @@ class ShopifyService {
   }
 
   /**
+   * Determine if an order has reached a terminal state (cannot change further)
+   */
+  private isOrderTerminal(order: ShopifyOrder): boolean {
+    if (order.cancelled_at) return true;
+    if (order.fulfillment_status === 'restocked') return true;
+
+    if (order.fulfillments && order.fulfillments.length > 0) {
+      const latest = order.fulfillments[order.fulfillments.length - 1];
+      const status = latest.shipment_status?.toLowerCase();
+      
+      // Common terminal shipment statuses
+      const terminalStatuses = ['delivered', 'failure', 'rto', 'cancelled', 'returned'];
+      if (status && terminalStatuses.includes(status)) return true;
+    }
+
+    // Check tags for failure markers
+    const tags = (order.tags || '').toLowerCase();
+    if (tags.includes('rto') || tags.includes('failed') || tags.includes('delivery failed')) return true;
+
+    return false;
+  }
+
+  /**
    * Find order by order number
    */
   async findOrderByNumber(orderNumber: string): Promise<ShopifyOrder | null> {
@@ -419,100 +442,83 @@ class ShopifyService {
   }
 
   /**
-   * Sync ALL recent orders incrementaly by looking up the max updated_at of our cache.
-   * Avoids re-downloading thousands of unmodified orders.
+   * Sync orders using the "Head + Pending" strategy.
+   * 1. Fetches "Head": New orders created since the last known order.
+   * 2. Fetches "Pending": Updates for existing in-flight orders that aren't terminal.
    */
   async syncOrders(limit: number = 1000): Promise<number> {
     try {
       const cacheKey = `all_orders_${limit}`;
       const cachedData = await ShopifyOrderCache.findOne({ cacheKey });
-      let lastUpdatedAt: Date | null = null;
-      let existingOrders: ShopifyOrder[] = [];
-
-      if (cachedData && cachedData.orders && cachedData.orders.length > 0) {
-        existingOrders = cachedData.orders;
-        // Find the most recent updated_at across all orders
-        const maxUpdateStr = existingOrders.reduce((max, order) => {
-          if (!order.updated_at) return max;
-          if (!max) return order.updated_at;
-          return new Date(order.updated_at) > new Date(max) ? order.updated_at : max;
-        }, null as string | null);
-
-        if (maxUpdateStr) {
-          lastUpdatedAt = new Date(maxUpdateStr);
-          // Backdate by 5 minutes to prevent race conditions or clock slop
-          lastUpdatedAt = new Date(lastUpdatedAt.getTime() - 5 * 60 * 1000);
-        }
-      }
-
-      // If there's no cache or valid updated time, just perform a full fetch
-      if (!lastUpdatedAt) {
-        console.log(`[Sync] No valid cache found, performing full fetch...`);
+      
+      if (!cachedData || !cachedData.orders || cachedData.orders.length === 0) {
+        console.log(`[Sync] No cache found, performing full fetch...`);
         const orders = await this.getAllOrders(limit);
         return orders.length;
       }
 
-      console.log(`[Sync] Fetching incremental orders since ${lastUpdatedAt.toISOString()}...`);
+      const existingOrders: ShopifyOrder[] = cachedData.orders;
+      const latestOrder = existingOrders[0]; // Assuming sorted by created_at desc
+      
+      // Step 1: Identify "Pending" orders to re-sync
+      const pendingIds = existingOrders
+        .filter(order => !this.isOrderTerminal(order))
+        .map(order => order.id.toString());
+      
+      console.log(`[Sync] Identified ${pendingIds.length} pending orders to update.`);
 
       const updatedOrders: ShopifyOrder[] = [];
-      const perPage = 250;
-      let page = 1;
-      let pageInfo: string | null = null;
 
-      const initialParams = new URLSearchParams({
-        status: 'any',
-        limit: perPage.toString(),
-        updated_at_min: lastUpdatedAt.toISOString()
-      });
-
-      // Fetch incremental updates
-      while (true) {
-        const url = page === 1
-          ? `/orders.json?${initialParams.toString()}`
-          : `/orders.json?page_info=${pageInfo}&limit=${perPage}`;
-
-        const { data, linkHeader } = await this.makeRequestWithHeaders<ShopifyOrdersResponse>(url);
-        const orders = data.orders || [];
-
-        updatedOrders.push(...orders);
-
-        if (orders.length === 0 || orders.length < perPage) break;
-
-        pageInfo = this.parseNextPageInfo(linkHeader);
-        if (!pageInfo) break;
-
-        page++;
-        if (page > 10) break; // safety
+      // Step 2: Fetch "Head" (New orders)
+      // We use since_id to get orders created AFTER the latest one we have
+      if (latestOrder) {
+        console.log(`[Sync] Fetching new orders since ID ${latestOrder.id} (#${latestOrder.name})...`);
+        const { data } = await this.makeRequestWithHeaders<ShopifyOrdersResponse>(
+          `/orders.json?since_id=${latestOrder.id}&status=any&limit=250`
+        );
+        if (data.orders && data.orders.length > 0) {
+          console.log(`[Sync] Found ${data.orders.length} new orders.`);
+          updatedOrders.push(...data.orders);
+        }
       }
 
-      if (updatedOrders.length > 0) {
-        console.log(`[Sync] Found ${updatedOrders.length} updated orders. Merging with cache...`);
+      // Step 3: Fetch "Pending" updates by ID list
+      // Shopify allows up to 250 IDs in one request
+      if (pendingIds.length > 0) {
+        for (let i = 0; i < pendingIds.length; i += 250) {
+          const batch = pendingIds.slice(i, i + 250);
+          console.log(`[Sync] Fetching batch of ${batch.length} pending updates...`);
+          const { data } = await this.makeRequestWithHeaders<ShopifyOrdersResponse>(
+            `/orders.json?ids=${batch.join(',')}&status=any`
+          );
+          if (data.orders) {
+            updatedOrders.push(...data.orders);
+          }
+        }
+      }
 
-        // Map existing orders by ID
+      // Step 4: Merge results back into cache
+      if (updatedOrders.length > 0) {
         const existingMap = new Map<string, ShopifyOrder>();
         existingOrders.forEach(o => existingMap.set(o.id.toString(), o));
 
-        // Overwrite or append updated orders
-        let newOrUpdatedCount = 0;
-        updatedOrders.forEach(newOrder => {
-          existingMap.set(newOrder.id.toString(), newOrder);
-          newOrUpdatedCount++;
+        updatedOrders.forEach(order => {
+          existingMap.set(order.id.toString(), order);
         });
 
-        // Convert back to array, sort by creation date descending, and clamp to limit
         const mergedOrdersList = Array.from(existingMap.values());
         mergedOrdersList.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
         const finalOrders = mergedOrdersList.slice(0, limit);
         await this.updateCache(cacheKey, finalOrders);
-        console.log(`[Sync] Successfully merged ${newOrUpdatedCount} orders into cache.`);
-      } else {
-        console.log(`[Sync] No newly updated orders found since last sync.`);
+        console.log(`[Sync] Successfully updated ${updatedOrders.length} orders in cache.`);
+        return updatedOrders.length;
       }
 
-      return updatedOrders.length;
+      console.log(`[Sync] No updates found.`);
+      return 0;
     } catch (error) {
-      console.error('Error syncing orders incrementally:', error);
+      console.error('Error syncing orders:', error);
       throw error;
     }
   }

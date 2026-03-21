@@ -225,8 +225,9 @@ class ShiprocketService {
       // Try to fetch wallet transactions
       // This endpoint might be /wallet/transactions or /billing/transactions
       // We'll search by AWB code or order number
+      const searchQuery = awbCode || orderNumber.replace(/^#/, '');
       const response = await this.makeRequest<WalletTransactionResponse>(
-        `/wallet/transactions?search=${encodeURIComponent(orderNumber)}&per_page=100`
+        `/wallet/transactions?search=${encodeURIComponent(searchQuery)}&per_page=100`
       );
 
       if (response.data && response.data.length > 0) {
@@ -315,7 +316,7 @@ class ShiprocketService {
       
       // 1. Try Primary Order
       const response = await this.makeRequest<ShiprocketOrderResponse>(
-        `/orders?show_all=1&channel_order_id=${encodeURIComponent(channelOrderId)}`
+        `/orders?search=${encodeURIComponent(normalizedRequested)}`
       );
 
       if (response.data && response.data.length > 0) {
@@ -332,7 +333,7 @@ class ShiprocketService {
         const cloneId = normalizedRequested + '-C';
         console.log(`[Shiprocket] Primary order ${channelOrderId} not matched. Trying clone: ${cloneId}`);
         const cloneResponse = await this.makeRequest<ShiprocketOrderResponse>(
-          `/orders?show_all=1&channel_order_id=${encodeURIComponent(cloneId)}`
+          `/orders?search=${encodeURIComponent(cloneId)}`
         );
         
         if (cloneResponse.data && cloneResponse.data.length > 0) {
@@ -389,16 +390,16 @@ class ShiprocketService {
         // Parse transactions to extract charges
         transactions.forEach(txn => {
           const amount = Math.abs(txn.amount); // Use absolute value
-          const type = txn.type?.toLowerCase() || '';
+          const searchStr = `${txn.type || ''} ${txn.description || ''} ${(txn as any).sub_category || ''} ${(txn as any).category || ''}`.toLowerCase();
 
-          if (type.includes('freight forward')) {
+          if (searchStr.includes('freight forward') || searchStr.includes('forward charges')) {
             freightForward += amount;
-          } else if (type.includes('freight cod')) {
+          } else if (searchStr.includes('freight cod') || searchStr.includes('cod charges')) {
             // COD can be positive (reversed) or negative (applied)
             freightCOD += txn.amount; // Keep sign
-          } else if (type.includes('freight rto') || type.includes('rto')) {
+          } else if (searchStr.includes('freight rto') || searchStr.includes('rto charges') || searchStr.includes('rto')) {
             freightRTO += amount;
-          } else if (type.includes('whatsapp')) {
+          } else if (searchStr.includes('whatsapp')) {
             whatsappCharges += amount;
           } else {
             otherCharges += amount;
@@ -502,36 +503,70 @@ class ShiprocketService {
     // Step 1: Fetch all recent Shiprocket orders in bulk
     const shiprocketOrdersMap = await this.getAllRecentOrdersMap(1000);
 
-    // Step 2: Process orders in batches of 5 (parallel processing with wallet transactions)
-    const batchSize = 5; // Smaller batches since we're calling wallet API
+    // Step 2: Fetch recent wallet transactions in bulk (last 30 days) to avoid individual calls
+    // This is much faster and stays under rate limits
+    const allWalletTransactions = await this.getAllWalletTransactions();
+    
+    // Group transactions by AWB and order ID
+    const txnMap = new Map<string, WalletTransaction[]>();
+    allWalletTransactions.forEach(txn => {
+      const keys = [txn.awb, txn.order_id, txn.description].filter(Boolean);
+      keys.forEach(key => {
+        if (!key) return;
+        const normalized = key.toString().replace(/^#/, '');
+        if (!txnMap.has(normalized)) txnMap.set(normalized, []);
+        txnMap.get(normalized)!.push(txn);
+      });
+    });
+
+    // Step 3: Process orders in batches (parallel processing for individual fallbacks if needed)
+    const batchSize = 10;
     let fetched = 0;
     let skipped = 0;
+
+    const terminalStatuses = [
+      '7', '12', '13', '15', '16', '17', '18', '19', '20', '42', '46', 
+      'delivered', 'canceled', 'cancelled', 'rto delivered', 'rto acknowledged', 
+      'rto initiated', 'rto in transit', 'failure', 'failed', 'rto'
+    ];
 
     for (let i = 0; i < orderNumbers.length; i += batchSize) {
       const batch = orderNumbers.slice(i, i + batchSize);
 
       await Promise.all(batch.map(async (orderNumber) => {
         try {
+          const normalizedOrderNumber = orderNumber.replace(/^#/, '');
+          
           // Check if already exists in DB and has reached a terminal state
           const existing = await ShippingCharge.findOne({ orderNumber });
           if (existing) {
             const hasDelivered = !!existing.deliveredDate;
             const statusStr = existing.status?.toString().toLowerCase() || '';
-
-            // Terminal statuses:
-            // 7: Delivered, 12: Lost, 13: Canceled, 15: RTO Delivered, 16: RTO Acknowledged
-            const terminalStatuses = ['7', '12', '13', '15', '16', 'delivered', 'canceled', 'cancelled', 'rto delivered'];
             const isTerminal = hasDelivered || terminalStatuses.includes(statusStr);
 
-            if (isTerminal) {
+            // Skip terminal orders if they have a good charge OR were recently fetched
+            const FIX_DATE = new Date('2026-03-21T00:00:00Z');
+            const wasFetchedAfterFix = existing.fetchedAt && new Date(existing.fetchedAt) >= FIX_DATE;
+            
+            if (isTerminal && (existing.shippingCharge > 0 || wasFetchedAfterFix)) {
               skipped++;
               return;
             }
           }
 
-          // Get from pre-fetched map
-          const shiprocketOrder = shiprocketOrdersMap.get(orderNumber);
+          // Get from pre-fetched map or fetch individually if older
+          let shiprocketOrder = shiprocketOrdersMap.get(orderNumber) || shiprocketOrdersMap.get(normalizedOrderNumber);
+          if (!shiprocketOrder) {
+            shiprocketOrder = await this.getOrderByChannelOrderId(orderNumber) || undefined;
+          }
+          
           if (!shiprocketOrder || !shiprocketOrder.shipments || shiprocketOrder.shipments.length === 0) {
+            // Create a placeholder record so we don't keep retrying orders not on Shiprocket
+            await ShippingCharge.findOneAndUpdate(
+              { orderNumber },
+              { shippingCharge: 0, fetchedAt: new Date(), status: 'not found' },
+              { upsert: true }
+            );
             return;
           }
 
@@ -544,57 +579,61 @@ class ShiprocketService {
           let whatsappCharges = 0;
           let otherCharges = 0;
 
-          // Try wallet transactions if AWB exists (shipped orders)
-          if (awbCode) {
-            const transactions = await this.getWalletTransactionsForOrder(awbCode, orderNumber);
+          // Use our bulk transaction map first (FAST)
+          const transactions = (awbCode ? txnMap.get(awbCode) : null) || txnMap.get(normalizedOrderNumber) || [];
 
-            if (transactions.length > 0) {
-              // Parse transactions for detailed breakdown
-              transactions.forEach(txn => {
+          if (transactions.length > 0) {
+            // Parse transactions for detailed breakdown
+            transactions.forEach(txn => {
+              const amount = Math.abs(txn.amount);
+              const searchStr = `${txn.type || ''} ${txn.description || ''} ${(txn as any).sub_category || ''} ${(txn as any).category || ''}`.toLowerCase();
+
+              if (searchStr.includes('freight forward') || searchStr.includes('forward charges')) {
+                freightForward += amount;
+              } else if (searchStr.includes('freight cod') || searchStr.includes('cod charges')) {
+                freightCOD += txn.amount; // Keep sign for reversals
+              } else if (searchStr.includes('freight rto') || searchStr.includes('rto charges') || searchStr.includes('rto')) {
+                freightRTO += amount;
+              } else if (searchStr.includes('whatsapp')) {
+                whatsappCharges += amount;
+              } else {
+                otherCharges += amount;
+              }
+            });
+          } else if (awbCode) {
+            // Only if not in bulk map, try individual fetch (SLOWER - fallback)
+            const individualTxns = await this.getWalletTransactionsForOrder(awbCode, orderNumber);
+            if (individualTxns.length > 0) {
+              individualTxns.forEach(txn => {
                 const amount = Math.abs(txn.amount);
-                const type = txn.type?.toLowerCase() || '';
-
-                if (type.includes('freight forward')) {
-                  freightForward += amount;
-                } else if (type.includes('freight cod')) {
-                  freightCOD += txn.amount; // Keep sign for reversals
-                } else if (type.includes('freight rto') || type.includes('rto')) {
-                  freightRTO += amount;
-                } else if (type.includes('whatsapp')) {
-                  whatsappCharges += amount;
-                } else {
-                  otherCharges += amount;
-                }
+                const searchStr = `${txn.type || ''} ${txn.description || ''} ${(txn as any).sub_category || ''} ${(txn as any).category || ''}`.toLowerCase();
+                if (searchStr.includes('freight forward')) freightForward += amount;
+                else if (searchStr.includes('freight cod')) freightCOD += txn.amount;
+                else if (searchStr.includes('freight rto')) freightRTO += amount;
+                else if (searchStr.includes('whatsapp')) whatsappCharges += amount;
+                else otherCharges += amount;
               });
             }
           }
 
-          // Fallback to AWB charges if no wallet transactions
+          // Fallback to AWB charges if no wallet transactions found anywhere
           if (freightForward === 0 && freightCOD === 0 && freightRTO === 0) {
             if (shiprocketOrder.awb_data?.charges) {
               const charges = shiprocketOrder.awb_data.charges;
               const totalFreight = parseFloat(charges.freight_charges as any) || 0;
               const codComponent = parseFloat(charges.cod_charges as any) || 0;
-
-              // freight_charges INCLUDES COD, so we need to extract base freight
-              // Base Freight = Total Freight - COD Component
               freightForward = totalFreight - codComponent;
               freightCOD = codComponent;
               freightRTO = parseFloat(charges.applied_weight_amount_rto as any) || 0;
             }
 
-            // Last fallback: shipment.cost
             if (freightForward === 0 && shipment.cost) {
               freightForward = parseFloat(shipment.cost as any) || 0;
             }
           }
 
-          // Calculate total: Base Freight + COD + RTO + Other
-          // Note: COD will be reversed in frontend for RTO orders
           const totalShippingCost = freightForward + freightCOD + freightRTO + whatsappCharges + otherCharges;
 
-          // Store everything to capture address demographic details early
-          // if (totalShippingCost > 0) {
           const detectedPickupDate = this.isValidDate(shiprocketOrder.picked_up_date)
             ? shiprocketOrder.picked_up_date
             : (this.isValidDate(shipment.pickup_actual_date)
@@ -602,10 +641,6 @@ class ShiprocketService {
               : (this.isStatusPickedUp(shipment.status?.toString()) && this.isValidDate(shipment.pickup_date)
                 ? shipment.pickup_date
                 : undefined));
-
-          if (detectedPickupDate) {
-            console.log(`[Shiprocket] Found pickup date for ${orderNumber}: ${detectedPickupDate}`);
-          }
 
           await ShippingCharge.findOneAndUpdate(
             { orderNumber },
@@ -633,13 +668,11 @@ class ShiprocketService {
             { upsert: true }
           );
           fetched++;
-          // }
         } catch (error) {
           console.error(`[Shiprocket] Error processing ${orderNumber}:`, error);
         }
       }));
 
-      // Log progress every batch
       console.log(`[Shiprocket] Progress: ${Math.min(i + batchSize, orderNumbers.length)}/${orderNumbers.length} orders processed`);
     }
 
@@ -675,6 +708,7 @@ class ShiprocketService {
         customerCity: charge.customerCity,
         customerState: charge.customerState,
         customerPincode: charge.customerPincode,
+        fetchedAt: charge.fetchedAt,
       });
     });
 
