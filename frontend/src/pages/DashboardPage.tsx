@@ -1463,8 +1463,31 @@ export function DashboardPage() {
                 name="ROAS"
                 stroke="#8b5cf6"
                 strokeWidth={2.5}
-                dot={false}
-                activeDot={{ r: 5, strokeWidth: 0, fill: '#8b5cf6' }}
+                dot={(props: any) => {
+                  const { cx, cy, payload } = props;
+                  const date = new Date(payload.dateKey);
+                  // 1 is Monday
+                  const isMonday = date.getDay() === 1;
+                  if (isMonday) {
+                    return (
+                      <g key={payload.dateKey}>
+                        <circle cx={cx} cy={cy} r={5} fill="#8b5cf6" stroke="#fff" strokeWidth={2} />
+                        <text 
+                          x={cx} 
+                          y={cy - 12} 
+                          textAnchor="middle" 
+                          fontSize={10} 
+                          fontWeight="700" 
+                          fill="#7c3aed"
+                        >
+                          {payload.roas?.toFixed(1)}
+                        </text>
+                      </g>
+                    );
+                  }
+                  return null as any;
+                }}
+                activeDot={{ r: 6, strokeWidth: 0, fill: '#8b5cf6' }}
                 connectNulls
               />
               {breakevenMetrics.breakevenROAS > 0 && (
@@ -1513,6 +1536,20 @@ export function DashboardPage() {
             </span>
             <span style={{ fontSize: '0.7rem', color: 'var(--chart-muted)', marginTop: '4px', display: 'block' }}>
               ROAS must be above this to profit
+            </span>
+          </div>
+          <div className={styles.chartStatBlock}>
+            <span className={styles.chartStatLabel}>Monday Average ROAS</span>
+            <span className={styles.chartStatValue} style={{ fontSize: '1.5rem', fontWeight: 600, color: '#7c3aed' }}>
+              {(() => {
+                const mondays = roasChartData.filter(d => {
+                  const date = new Date(d.dateKey);
+                  return date.getDay() === 1 && d.roas !== null && d.roas > 0;
+                });
+                if (mondays.length === 0) return 'N/A';
+                const avgRoas = mondays.reduce((sum, d) => sum + (d.roas || 0), 0) / mondays.length;
+                return avgRoas.toFixed(2);
+              })()}
             </span>
           </div>
           <div className={styles.chartStatBlock}>
