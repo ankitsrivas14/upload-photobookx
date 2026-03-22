@@ -39,7 +39,7 @@ class AIService {
             1. ONLY DATES (YYYY-MM-DD), remove any time (HH:MM:SS) from everywhere.
             2. For "Picked up", use format: Picked up: Date (X days ago).
             3. ENGLISH ONLY. No Hindi words like "yaar" or "bhai".
-            4. NO GREETINGS AND NO CLOSING.
+            4. NO GREETINGS, but ALWAYS end the message with "- PhotobookX team".
             5. FORMAT: 
                - Start with a very short, casual 1-sentence description of the problem (e.g., this order is stuck).
                - Then provide these 4 details in a BULLET POINT list:
@@ -56,7 +56,7 @@ class AIService {
         const response = await this.openai.chat.completions.create({
             model: 'gpt-4o',
             messages: [
-                { role: 'system', content: 'You write extremely short, bulleted logistics complaints in plain casual English without any greetings or closing, using only dates.' },
+                { role: 'system', content: 'You write extremely short, bulleted logistics complaints in plain casual English without any greetings, always ending with "- PhotobookX team", and using only dates.' },
                 { role: 'user', content: prompt }
             ]
         });
@@ -285,8 +285,9 @@ class AIService {
             2. Greet the customer by their first name (e.g. "Hello Ankit,") if available.
             3. Ask the customer to provide their complete address (including House No, Area, Landmark, and Pincode) so we can ship their photobook.
             4. Mention the order number for reference.
-            5. Do not use placeholders.
-            6. Return only the message text.
+            5. Always end the message with "- PhotobookX team".
+            6. Do not use placeholders.
+            7. Return only the message text.
             
             Language: English (Professional but friendly).
         `;
