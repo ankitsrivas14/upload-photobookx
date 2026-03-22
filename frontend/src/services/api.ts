@@ -865,6 +865,23 @@ class ApiService {
       body: JSON.stringify(data),
     });
   }
+
+  async predictDailyPerformance(data: {
+    dayName: string;
+    expectedAdSpend: number;
+    historicalSameDayData: any[];
+    dateKey: string;
+    todayData: any;
+  }): Promise<{ success: boolean; prediction?: any; error?: string }> {
+    return this.request('/api/admin/sales/predict-daily-performance', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getDailyPerformancePrediction(dateKey: string): Promise<{ success: boolean; prediction?: any; error?: string }> {
+    return this.request(`/api/admin/sales/predict-daily-performance/${dateKey}`);
+  }
 }
 
 

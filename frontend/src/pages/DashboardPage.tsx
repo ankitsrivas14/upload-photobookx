@@ -77,6 +77,17 @@ export function DashboardPage() {
     large: true,
   });
 
+  // AI Daily Prediction State
+  const [expectedAdSpend, setExpectedAdSpend] = useState<number>(0);
+  const [aiForecastData, setAiForecastData] = useState<{
+    hourlyCumul: number[];
+    hourlyRevenueCumul: number[];
+    reasoning: string;
+    totalOrders: number;
+    totalRevenue: number;
+  } | null>(null);
+  const [isAiPredicting, setIsAiPredicting] = useState(false);
+
   useEffect(() => {
     loadUser();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount
@@ -254,8 +265,31 @@ export function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    if (user) loadDailyPnl();
+    if (user) {
+      loadDailyPnl();
+      loadTodayPrediction();
+    }
   }, [user, loadDailyPnl]);
+
+  const loadTodayPrediction = async () => {
+    try {
+      const todayKey = new Date().toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+      const res = await api.getDailyPerformancePrediction(todayKey);
+      if (res.success && res.prediction) {
+        const p = res.prediction;
+        setAiForecastData({
+          hourlyCumul: p.predictedHourlyCumul,
+          hourlyRevenueCumul: p.predictedHourlyRevenueCumul,
+          reasoning: p.reasoning,
+          totalOrders: p.predictedTotalOrders,
+          totalRevenue: p.predictedTotalRevenue
+        });
+        setExpectedAdSpend(p.expectedAdSpend);
+      }
+    } catch (err) {
+      console.error('Failed to load today prediction:', err);
+    }
+  };
 
   const weekLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S']; // Monday to Sunday
   const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -280,6 +314,100 @@ export function DashboardPage() {
     if (abs >= 500) return 2;
     if (abs >= 100) return 1;
     return 0;
+  };
+
+  const handleAiPredict = async () => {
+    try {
+      setIsAiPredicting(true);
+      const now = new Date();
+      const dayName = now.toLocaleDateString('en-US', { weekday: 'long', timeZone: STORE_TIMEZONE });
+      const dateKey = now.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+
+      // Find all previous same-day data (e.g. all previous Sundays)
+      const sameDayHistorical: any[] = [];
+
+      // We look back at last 10 weeks of same day
+      const ordersByDateByHour: Record<string, number[]> = {};
+      const revenueByDateByHour: Record<string, number[]> = {};
+      orders.forEach(o => {
+        if (o.cancelledAt) return;
+        const { dateKey, hour } = getOrderDateAndHour(o.createdAt);
+        if (!ordersByDateByHour[dateKey]) ordersByDateByHour[dateKey] = new Array(24).fill(0);
+        if (!revenueByDateByHour[dateKey]) revenueByDateByHour[dateKey] = new Array(24).fill(0);
+        ordersByDateByHour[dateKey][hour]++;
+        revenueByDateByHour[dateKey][hour] += (o.totalPrice || 0);
+      });
+
+      for (let i = 1; i <= 10; i++) {
+        const d = new Date(now);
+        d.setDate(d.getDate() - (i * 7));
+        const dateKey = d.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+        
+        // Only include if date is after Jan 28, 2026
+        if (d < new Date('2026-01-28')) break;
+
+        const hourlyOrders = ordersByDateByHour[dateKey] || new Array(24).fill(0);
+        const hourlyRevenue = revenueByDateByHour[dateKey] || new Array(24).fill(0);
+        const totalAdSpend = adSpendByDate[dateKey] || 0;
+
+        // Convert to cumulative
+        const hourlyCumul = [];
+        const hourlyRevCumul = [];
+        let runningTotal = 0;
+        let runningRevenue = 0;
+        for (let h = 0; h < 24; h++) {
+          runningTotal += hourlyOrders[h];
+          runningRevenue += hourlyRevenue[h];
+          hourlyCumul.push(runningTotal);
+          hourlyRevCumul.push(runningRevenue);
+        }
+
+        sameDayHistorical.push({
+          date: dateKey,
+          totalAdSpend,
+          hourlyCumul,
+          hourlyRevCumul
+        });
+      }
+
+      if (sameDayHistorical.length === 0) {
+        alert('Not enough historical data for this day yet.');
+        return;
+      }
+
+      const todayDateKey = now.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+      const currentHour = Number(now.toLocaleString('en-US', { timeZone: STORE_TIMEZONE, hour: 'numeric', hour12: false }));
+      const todayHourlyOrders = ordersByDateByHour[todayDateKey] || new Array(24).fill(0);
+      const todayHourlyRevenue = revenueByDateByHour[todayDateKey] || new Array(24).fill(0);
+      const todayAdSpend = adSpendByDate[todayDateKey] || 0;
+
+      const res = await api.predictDailyPerformance({
+        dayName,
+        expectedAdSpend,
+        historicalSameDayData: sameDayHistorical,
+        dateKey,
+        todayData: {
+          totalAdSpend: todayAdSpend,
+          hourlyOrders: todayHourlyOrders,
+          hourlyRevenue: todayHourlyRevenue,
+          currentHour
+        }
+      });
+
+      if (res.success && res.prediction) {
+        setAiForecastData({
+          hourlyCumul: res.prediction.predictedHourlyCumul,
+          hourlyRevenueCumul: res.prediction.predictedHourlyRevenueCumul,
+          reasoning: res.prediction.reasoning,
+          totalOrders: res.prediction.predictedTotalOrders,
+          totalRevenue: res.prediction.predictedTotalRevenue
+        });
+      }
+    } catch (err) {
+      console.error('Failed AI Daily Prediction:', err);
+    } finally {
+      setIsAiPredicting(false);
+    }
   };
 
   // Today vs same day last week: order counts by hour (store timezone)
@@ -318,12 +446,16 @@ export function DashboardPage() {
     const currentHourClamped = Math.min(23, Math.max(0, Number.isNaN(currentHour) ? 0 : currentHour));
 
     const dayLabel = now.toLocaleDateString('en-IN', { weekday: 'long', timeZone: STORE_TIMEZONE });
-    const chartData = Array.from({ length: 24 }, (_, h) => ({
-      hour: h,
-      label: h === 0 ? '12am' : h === 12 ? '12pm' : h < 12 ? `${h}am` : `${h - 12}pm`,
-      today: h <= currentHourClamped ? todayCumul[h] : null,
-      lastWeek: lastWeekCumul[h],
-    }));
+    const chartData = Array.from({ length: 24 }, (_, h) => {
+      const isPastOrPresent = h <= currentHourClamped;
+      return {
+        hour: h,
+        label: h === 0 ? '12am' : h === 12 ? '12pm' : h < 12 ? `${h}am` : `${h - 12}pm`,
+        today: isPastOrPresent ? todayCumul[h] : null,
+        lastWeek: lastWeekCumul[h],
+        aiForecast: aiForecastData ? aiForecastData.hourlyCumul[h] : null,
+      };
+    });
 
     return {
       chartData,
@@ -377,12 +509,16 @@ export function DashboardPage() {
     }
 
     const dayLabel = now.toLocaleDateString('en-IN', { weekday: 'long', timeZone: STORE_TIMEZONE });
-    const chartData = Array.from({ length: 24 }, (_, h) => ({
-      hour: h,
-      label: h === 0 ? '12am' : h === 12 ? '12pm' : h < 12 ? `${h}am` : `${h - 12}pm`,
-      today: h <= currentHourClamped ? todayCumul[h] : null,
-      lastWeek: lastWeekCumul[h],
-    }));
+    const chartData = Array.from({ length: 24 }, (_, h) => {
+      const isPastOrPresent = h <= currentHourClamped;
+      return {
+        hour: h,
+        label: h === 0 ? '12am' : h === 12 ? '12pm' : h < 12 ? `${h}am` : `${h - 12}pm`,
+        today: isPastOrPresent ? todayCumul[h] : null,
+        lastWeek: lastWeekCumul[h],
+        aiForecastRev: aiForecastData ? aiForecastData.hourlyRevenueCumul[h] : null,
+      };
+    });
 
     return {
       chartData,
@@ -1026,72 +1162,172 @@ export function DashboardPage() {
         </div>
       </header>
 
-      <section className={styles.section}>
-        <h2 className={styles['section-title']}>Orders today vs last {orderCountChartData.dayLabel}</h2>
-        <p className={styles['section-desc']}>
-          Cumulative order count by hour (store time: {STORE_TIMEZONE}).
-        </p>
-        <div className={styles.chartWrap}>
-          <ResponsiveContainer width="100%" height={280}>
-            <LineChart
-              data={orderCountChartData.chartData}
-              margin={{ top: 12, right: 12, left: 0, bottom: 8 }}
-            >
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
-              <XAxis
-                dataKey="label"
-                tick={{ fontSize: 11, fill: 'var(--chart-muted)' }}
-                tickLine={false}
-                axisLine={{ stroke: 'var(--chart-axis)' }}
-                interval={2}
-              />
-              <YAxis
-                tick={{ fontSize: 11, fill: 'var(--chart-muted)' }}
-                tickLine={false}
-                axisLine={false}
-                allowDecimals={false}
-                width={28}
-              />
-              <Tooltip
-                contentStyle={{
-                  border: 'none',
-                  borderRadius: 8,
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
-                  padding: '10px 14px',
-                }}
-                labelStyle={{ color: 'var(--chart-muted)', fontWeight: 500, marginBottom: 4 }}
-              />
-              <Legend
-                wrapperStyle={{ paddingTop: 12 }}
-                iconType="line"
-                iconSize={10}
-                formatter={(value) => <span className={styles.chartLegendText}>{value}</span>}
-              />
-              <Line
-                type="monotone"
-                dataKey="today"
-                name="Today"
-                stroke="var(--chart-today)"
-                strokeWidth={2}
-                dot={false}
-                activeDot={{ r: 4, strokeWidth: 0, fill: 'var(--chart-today)' }}
-                connectNulls={false}
-              />
-              <Line
-                type="monotone"
-                dataKey="lastWeek"
-                name={`Last ${orderCountChartData.dayLabel}`}
-                stroke="var(--chart-lastweek)"
-                strokeWidth={2}
-                strokeDasharray="5 5"
-                dot={false}
-                activeDot={{ r: 4, strokeWidth: 0, fill: 'var(--chart-lastweek)' }}
-                connectNulls
-              />
-            </LineChart>
-          </ResponsiveContainer>
+      <section className={styles['comparison-section']}>
+        <div className={styles['comparison-header']}>
+          <h2 className={styles['section-title']}>Today's Performance vs Last {orderCountChartData.dayLabel}</h2>
+          <p className={styles['section-desc']}>
+            Real-time cumulative data comparison by hour (Store time: {STORE_TIMEZONE})
+          </p>
         </div>
-        <div className={styles.chartStats}>
+
+        <div className={styles['comparison-grid']}>
+          <div className={styles['comparison-item']}>
+            <h3 className={styles['item-title']}>Orders</h3>
+            <div className={styles.chartWrap}>
+              <ResponsiveContainer width="100%" height={260}>
+                <LineChart
+                  data={orderCountChartData.chartData}
+                  margin={{ top: 12, right: 12, left: 0, bottom: 8 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
+                  <XAxis
+                    dataKey="label"
+                    tick={{ fontSize: 10, fill: 'var(--chart-muted)' }}
+                    tickLine={false}
+                    axisLine={{ stroke: 'var(--chart-axis)' }}
+                    interval={2}
+                  />
+                  <YAxis
+                    tick={{ fontSize: 10, fill: 'var(--chart-muted)' }}
+                    tickLine={false}
+                    axisLine={false}
+                    allowDecimals={false}
+                    width={24}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      border: 'none',
+                      borderRadius: 8,
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+                      padding: '10px 14px',
+                    }}
+                    labelStyle={{ color: 'var(--chart-muted)', fontWeight: 500, marginBottom: 4 }}
+                  />
+                  <Legend
+                    wrapperStyle={{ paddingTop: 8 }}
+                    iconType="line"
+                    iconSize={10}
+                    formatter={(value) => <span className={styles.chartLegendText}>{value}</span>}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="today"
+                    name="Today"
+                    stroke="var(--chart-today)"
+                    strokeWidth={2}
+                    dot={false}
+                    activeDot={{ r: 4, strokeWidth: 0, fill: "var(--chart-today)" }}
+                    connectNulls={false}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="lastWeek"
+                    name={`Last ${orderCountChartData.dayLabel}`}
+                    stroke="var(--chart-lastweek)"
+                    strokeWidth={2}
+                    strokeDasharray="5 5"
+                    dot={false}
+                    activeDot={{ r: 4, strokeWidth: 0, fill: "var(--chart-lastweek)" }}
+                    connectNulls
+                  />
+                  {aiForecastData && (
+                    <Line
+                      type="monotone"
+                      dataKey="aiForecast"
+                      name="AI Forecast Today"
+                      stroke="#8b5cf6"
+                      strokeWidth={2}
+                      dot={false}
+                      strokeDasharray="3 3"
+                      activeDot={{ r: 4, strokeWidth: 0, fill: "#8b5cf6" }}
+                      connectNulls
+                    />
+                  )}
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div className={styles['comparison-item']}>
+            <h3 className={styles['item-title']}>Revenue</h3>
+            <div className={styles.chartWrap}>
+              <ResponsiveContainer width="100%" height={260}>
+                <LineChart
+                  data={revenueChartData.chartData}
+                  margin={{ top: 12, right: 12, left: 0, bottom: 8 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
+                  <XAxis
+                    dataKey="label"
+                    tick={{ fontSize: 10, fill: 'var(--chart-muted)' }}
+                    tickLine={false}
+                    axisLine={{ stroke: 'var(--chart-axis)' }}
+                    interval={2}
+                  />
+                  <YAxis
+                    tick={{ fontSize: 10, fill: 'var(--chart-muted)' }}
+                    tickLine={false}
+                    axisLine={false}
+                    width={40}
+                    tickFormatter={(v) => `₹${v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v}`}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      border: 'none',
+                      borderRadius: 8,
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+                      padding: '10px 14px',
+                    }}
+                    labelStyle={{ color: 'var(--chart-muted)', fontWeight: 500, marginBottom: 4 }}
+                    formatter={(value, name) => [`₹${Number(value ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`, name]}
+                  />
+                  <Legend
+                    wrapperStyle={{ paddingTop: 8 }}
+                    iconType="line"
+                    iconSize={10}
+                    formatter={(value) => <span className={styles.chartLegendText}>{value}</span>}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="today"
+                    name="Today"
+                    stroke="var(--chart-today)"
+                    strokeWidth={2}
+                    dot={false}
+                    activeDot={{ r: 4, strokeWidth: 0, fill: "var(--chart-today)" }}
+                    connectNulls={false}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="lastWeek"
+                    name={`Last ${revenueChartData.dayLabel}`}
+                    stroke="var(--chart-lastweek)"
+                    strokeWidth={2}
+                    strokeDasharray="5 5"
+                    dot={false}
+                    activeDot={{ r: 4, strokeWidth: 0, fill: "var(--chart-lastweek)" }}
+                    connectNulls
+                  />
+                  {aiForecastData && (
+                    <Line
+                      type="monotone"
+                      dataKey="aiForecastRev"
+                      name="AI Forecast Revenue"
+                      stroke="#8b5cf6"
+                      strokeWidth={2}
+                      dot={false}
+                      strokeDasharray="3 3"
+                      activeDot={{ r: 4, strokeWidth: 0, fill: "#8b5cf6" }}
+                      connectNulls
+                    />
+                  )}
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+
+        <div className={styles['comparison-stats']}>
           <div className={styles.chartStatBlock}>
             <span className={styles.chartStatLabel}>Ad spend</span>
             <span className={styles.chartStatRow}>
@@ -1114,75 +1350,48 @@ export function DashboardPage() {
               <span className={styles.chartStatValue}>₹{revenueChartData.totalRevenueLastWeek.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
             </span>
           </div>
-        </div>
-      </section>
 
-      <section className={styles.section}>
-        <h2 className={styles['section-title']}>Revenue today vs last {revenueChartData.dayLabel}</h2>
-        <p className={styles['section-desc']}>
-          Cumulative revenue by hour (store time: {STORE_TIMEZONE}). Solid = today, dotted = last {revenueChartData.dayLabel}.
-        </p>
-        <div className={styles.chartWrap}>
-          <ResponsiveContainer width="100%" height={280}>
-            <LineChart
-              data={revenueChartData.chartData}
-              margin={{ top: 12, right: 12, left: 0, bottom: 8 }}
+          <div className={styles['ai-controls']}>
+            <div className={styles['ai-input-group']}>
+              <label className={styles['ai-input-label']}>Expected Ad Spend</label>
+              <input
+                type="number"
+                className={styles['ai-input']}
+                value={expectedAdSpend || ''}
+                onChange={(e) => setExpectedAdSpend(Number(e.target.value))}
+                placeholder="Enter amount..."
+              />
+            </div>
+            <button
+              className={styles['ai-predict-btn']}
+              onClick={handleAiPredict}
+              disabled={isAiPredicting || !expectedAdSpend}
             >
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
-              <XAxis
-                dataKey="label"
-                tick={{ fontSize: 11, fill: 'var(--chart-muted)' }}
-                tickLine={false}
-                axisLine={{ stroke: 'var(--chart-axis)' }}
-                interval={2}
-              />
-              <YAxis
-                tick={{ fontSize: 11, fill: 'var(--chart-muted)' }}
-                tickLine={false}
-                axisLine={false}
-                width={44}
-                tickFormatter={(v) => `₹${v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v}`}
-              />
-              <Tooltip
-                contentStyle={{
-                  border: 'none',
-                  borderRadius: 8,
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
-                  padding: '10px 14px',
-                }}
-                labelStyle={{ color: 'var(--chart-muted)', fontWeight: 500, marginBottom: 4 }}
-                formatter={(value, name) => [`₹${Number(value ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`, name]}
-              />
-              <Legend
-                wrapperStyle={{ paddingTop: 12 }}
-                iconType="line"
-                iconSize={10}
-                formatter={(value) => <span className={styles.chartLegendText}>{value}</span>}
-              />
-              <Line
-                type="monotone"
-                dataKey="today"
-                name="Today"
-                stroke="var(--chart-today)"
-                strokeWidth={2}
-                dot={false}
-                activeDot={{ r: 4, strokeWidth: 0, fill: 'var(--chart-today)' }}
-                connectNulls={false}
-              />
-              <Line
-                type="monotone"
-                dataKey="lastWeek"
-                name={`Last ${revenueChartData.dayLabel}`}
-                stroke="var(--chart-lastweek)"
-                strokeWidth={2}
-                strokeDasharray="5 5"
-                dot={false}
-                activeDot={{ r: 4, strokeWidth: 0, fill: 'var(--chart-lastweek)' }}
-                connectNulls
-              />
-            </LineChart>
-          </ResponsiveContainer>
+              {isAiPredicting ? 'AI Analyzing...' : 'Predict with AI'}
+            </button>
+          </div>
         </div>
+
+        {aiForecastData && (
+          <div className={styles['ai-prediction-info']}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', alignItems: 'center' }}>
+              <span style={{ fontWeight: 600, color: '#0369a1', fontSize: '0.9rem' }}>
+                AI FORECAST FOR TODAY: {aiForecastData.totalOrders} ORDERS (₹{aiForecastData.totalRevenue.toLocaleString('en-IN')})
+              </span>
+              <button 
+                onClick={() => setAiForecastData(null)}
+                style={{ border: 'none', background: 'none', color: '#0369a1', cursor: 'pointer', fontSize: '0.8rem' }}
+              >
+                Clear
+              </button>
+            </div>
+            <div className={styles['ai-reasoning']}>
+              {aiForecastData.reasoning.split('\n').map((line, i) => (
+                <div key={i}>{line}</div>
+              ))}
+            </div>
+          </div>
+        )}
       </section>
 
       <section className={styles.section}>

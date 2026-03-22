@@ -1,5 +1,5 @@
 import express, { Response } from 'express';
-import { DiscardedOrder, RTOOrder, ProfitPrediction } from '../models';
+import { DiscardedOrder, RTOOrder, ProfitPrediction, DailyPerformancePrediction } from '../models';
 import { requireAdmin } from './adminAuth';
 import { AuthenticatedRequest } from '../types';
 import aiService from '../services/aiService';
@@ -290,5 +290,54 @@ router.post('/predict', requireAdmin, async (req: AuthenticatedRequest, res: Res
      res.status(500).json({ success: false, error: 'AI Stock Prediction failed' });
    }
  });
+
+  /**
+   * GET /api/admin/sales/predict-daily-performance/:dateKey
+   */
+  router.get('/predict-daily-performance/:dateKey', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { dateKey } = req.params;
+      const prediction = await DailyPerformancePrediction.findOne({ dateKey }).sort({ createdAt: -1 });
+      res.json({ success: true, prediction });
+    } catch (error) {
+      res.status(500).json({ success: false, error: 'Failed to fetch prediction' });
+    }
+  });
+
+  /**
+   * POST /api/admin/sales/predict-daily-performance
+   */
+  router.post('/predict-daily-performance', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { dayName, expectedAdSpend, historicalSameDayData, dateKey, todayData } = req.body;
+      
+      const aiResult = await aiService.predictDailyPerformance({
+        dayName,
+        expectedAdSpend,
+        historicalSameDayData,
+        todayData
+      });
+
+      // Save to DB
+      const dbPrediction = new DailyPerformancePrediction({
+        dateKey,
+        expectedAdSpend,
+        predictedHourlyCumul: aiResult.predictedHourlyCumul,
+        predictedHourlyRevenueCumul: aiResult.predictedHourlyRevenueCumul,
+        predictedTotalOrders: aiResult.predictedTotalOrders,
+        predictedTotalRevenue: aiResult.predictedTotalRevenue,
+        reasoning: aiResult.reasoning
+      });
+      await dbPrediction.save();
+  
+      res.json({ 
+        success: true, 
+        prediction: aiResult 
+      });
+    } catch (error) {
+      console.error('AI Daily Performance Prediction Error:', error);
+      res.status(500).json({ success: false, error: 'AI Daily Performance Prediction failed' });
+    }
+  });
 
 export default router;
