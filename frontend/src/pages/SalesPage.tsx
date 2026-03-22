@@ -203,11 +203,29 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       const historicalData = ordersGroupedByDate
         .filter(g => new Date(g.dateKey) >= CUTOFF_DATE)
         .map(g => {
-          let dailyPL = -g.adSpend;
+          // Calculate REALIZED vs ACCRUED (Pending) for the day
+          let realizedPL = -g.adSpend;
+          let pendingOrdersInGroup = 0;
+          
           g.orders.forEach(o => {
-            dailyPL += (orderProfitLoss.get(o.id) ?? 0);
+            const isFinal = isOrderDelivered(o) || (o.paymentMethod?.toLowerCase() === 'prepaid');
+            if (isFinal) {
+              realizedPL += (orderProfitLoss.get(o.id) ?? 0);
+            } else {
+              pendingOrdersInGroup++;
+            }
           });
-          return { date: g.dateKey, pl: dailyPL, orders: g.orders.length };
+
+          // Accurate Combined Trend: Realized + potential from pending
+          const combinedPL = realizedPL + (pendingOrdersInGroup * expectedProfit.avgPLPerDeliveredOrder * (1 - globalNdrRate/100));
+
+          return { 
+            date: g.dateKey, 
+            pl: combinedPL,
+            realizedPL,
+            ordersPlaced: g.orders.length,
+            adSpend: g.adSpend
+          };
         }).slice(0, 90);
 
       const res = await api.predictProfit({
@@ -220,7 +238,15 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
         pendingOrdersCount: expectedProfit.pendingOrdersCount,
         avgPLPerDay: expectedProfit.avgPLPerDay,
         avgOrdersPerDay: stats.totalOrders / expectedProfit.daysElapsed,
-        ndrRate: globalNdrRate
+        ndrRate: globalNdrRate,
+        stats: {
+          delivered: stats.deliveredCount,
+          failed: stats.failedCount,
+          prepaid: stats.prepaidCount,
+          cod: stats.codCount,
+          avgProfitPerOrder: expectedProfit.avgPLPerDeliveredOrder,
+          avgLossPerFailure: (expectedProfit as any).avgLossPerFailedOrder || 0
+        }
       });
 
       if (res.success && res.prediction) {

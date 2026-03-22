@@ -90,20 +90,23 @@ class AIService {
             - Orders: ${data.currentOrders} (Avg: ${data.avgOrdersPerDay.toFixed(1)}/day)
             - Realized P/L: ₹${data.currentPL.toFixed(2)} (Avg: ₹${data.avgPLPerDay.toFixed(2)}/day)
             - Current NDR Rate: ${data.ndrRate.toFixed(2)}%
-            - Pending Orders awaiting delivery results: ${data.pendingOrdersCount}
+            - Pending Orders awaiting delivery results: ${data.pendingOrdersCount} (These are COD orders in-transit)
             
-            Historical Daily Breakdown (provided context):
+            Deep Granular Stats Provided:
+            - Payment Mix: ${JSON.stringify((data as any).stats)}
+            - Historical Daily Breakdown (last 90 days): 
             ${JSON.stringify(data.historicalData)}
             
             Analytics Context:
-            "Realized P/L" is the current profit after COGS, Ads, and Shipping.
-            "NDR" stands for Non-Delivery Rate (failed orders).
-            You have the daily trend including ad spend and order volume.
+            - "Realized P/L" is current profit from Delivered + Prepaid orders, MINUS Ad Spend and Shipping.
+            - "Pending Orders" are COD orders not yet Delivered or Failed.
+            - Historical Daily "pl" is Combined (Accrued) - it includes realized profit + potential profit from pending orders placed that day.
+            - High COD ratio usually leads to higher final NDR.
             
             Task:
             1. Predict FINAL TOTAL ORDERS for the month (Current + projected for remaining days).
-            2. Predict FINAL NDR RATE (%) for the month (Will it improve or worsen based on recent trends?).
-            3. Predict FINAL PROFIT (₹) for the month (Taking into account order volume trends and current margins).
+            2. Predict FINAL NDR RATE (%) - adjust based on recent trend and COD/Prepaid ratio.
+            3. Predict FINAL PROFIT (₹) - account for current margins and expected NDR impact on pending orders.
             4. Provide a "Master Insight" - a short, actionable sentence for the business owner.
             
             Return ONLY a valid JSON object with:
@@ -111,7 +114,7 @@ class AIService {
               "predictedOrders": number,
               "predictedNDR": number,
               "predictedFinalProfit": number,
-              "reasoning": "Detailed 2-3 sentence logic for these numbers",
+              "reasoning": "Detailed 2-3 sentence logic accounting for payment mix and accrued profit",
               "insight": "1 short punchy actionable line"
             }
         `;
