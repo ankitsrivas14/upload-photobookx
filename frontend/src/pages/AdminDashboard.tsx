@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import toast from 'react-hot-toast';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../services/api';
 import type { AdminUser, MagicLinkInfo, ShopifyOrder } from '../services/api';
@@ -218,9 +219,9 @@ export function AdminDashboard() {
         const { successful, failed, total } = result.summary;
 
         if (successful === total) {
-          alert(`✅ Successfully updated prices for ${successful} product${successful !== 1 ? 's' : ''}!`);
+          toast.success(`✅ Successfully updated prices for ${successful} product${successful !== 1 ? 's' : ''}!`);
         } else {
-          alert(
+          toast.success(
             `⚠️ Updated ${successful} product${successful !== 1 ? 's' : ''}, ${failed} failed.\n\n` +
             `Failed products:\n${result.results
               .filter(r => !r.success)
@@ -242,11 +243,11 @@ export function AdminDashboard() {
         setPriceChangeAmount('');
         setSelectedProducts(new Set());
       } else {
-        alert(result.error || 'Failed to update prices');
+        toast.error(result.error || 'Failed to update prices');
       }
     } catch (error) {
       console.error('Error updating prices:', error);
-      alert('An error occurred while updating prices. Please try again.');
+      toast.error('An error occurred while updating prices. Please try again.');
     } finally {
       setIsUpdatingPrices(false);
     }
@@ -295,7 +296,7 @@ export function AdminDashboard() {
       await api.downloadOrderImages(token);
     } catch (err) {
       console.error('Failed to download images:', err);
-      alert('Failed to download images. Please try again.');
+      toast.error('Failed to download images. Please try again.');
     } finally {
       setDownloadingFor(null);
     }
@@ -362,13 +363,13 @@ export function AdminDashboard() {
           return l;
         }));
 
-        alert('Images deleted successfully');
+        toast.success('Images deleted successfully');
       } else {
-        alert(response.error || 'Failed to delete images');
+        toast.error(response.error || 'Failed to delete images');
       }
     } catch (err) {
       console.error('Failed to delete images:', err);
-      alert('Failed to delete images. Please try again.');
+      toast.error('Failed to delete images. Please try again.');
     } finally {
       setDeletingFor(null);
       handleCloseDeleteModal();

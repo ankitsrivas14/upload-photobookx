@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import toast from 'react-hot-toast';
+import { Link } from 'react-router-dom';
 import { api } from '../../services/api';
 import styles from '../AnalysisPage.module.css';
 
@@ -53,11 +55,12 @@ export function TicketsAnalysis() {
                 if (selectedTicket?._id === id) {
                     setSelectedTicket(res.ticket);
                 }
+                toast.success('Ticket status updated');
             } else {
-                alert(res.error || 'Failed to update status');
+                toast.error(res.error || 'Failed to update status');
             }
         } catch (err) {
-            alert('Error updating ticket status');
+            toast.error('Error updating ticket status');
         } finally {
             setIsUpdating(false);
         }
@@ -94,9 +97,25 @@ export function TicketsAnalysis() {
     return (
         <div className={styles['analysis-content']} style={{ display: 'grid', gridTemplateColumns: selectedTicket ? '1fr 400px' : '1fr', gap: '2rem' }}>
             <div style={{ backgroundColor: '#fff', padding: '1.5rem', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)', border: '1px solid #f1f5f9' }}>
-                <h3 style={{ marginTop: 0, marginBottom: '1.5rem', fontSize: '1.1rem', fontWeight: 600, color: '#1e293b' }}>
-                    Shipment Concern Tickets ({tickets.length})
-                </h3>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+                    <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 600, color: '#1e293b' }}>
+                        Shipment Concern Tickets ({tickets.length})
+                    </h3>
+                    <Link 
+                        to="/admin/analysis/tickets/new" 
+                        style={{ 
+                            backgroundColor: '#0f172a', color: '#fff', padding: '0.6rem 1.2rem', 
+                            borderRadius: '8px', fontSize: '0.875rem', fontWeight: 600, textDecoration: 'none',
+                            display: 'flex', alignItems: 'center', gap: '0.5rem'
+                        }}
+                    >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                            <line x1="12" y1="5" x2="12" y2="19" />
+                            <line x1="5" y1="12" x2="19" y2="12" />
+                        </svg>
+                        Create Ticket
+                    </Link>
+                </div>
                 
                 {tickets.length === 0 ? (
                     <div style={{ textAlign: 'center', padding: '3rem' }}>

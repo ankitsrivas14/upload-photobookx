@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import toast from 'react-hot-toast';
 import { api } from '../services/api';
 import styles from './SalesPage.module.css';
 import { OrdersTableBody } from './SalesPage/OrdersTableBody';
@@ -252,10 +253,10 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       if (res.success && res.prediction) {
         setAiPrediction(res.prediction);
       } else {
-        alert(res.error || 'Prediction failed');
+        toast.error(res.error || 'Prediction failed');
       }
     } catch (err) {
-      alert('Error running AI prediction');
+      toast.error('Error running AI prediction');
     } finally {
       setIsPredicting(false);
     }
@@ -487,7 +488,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       await loadData();
     } catch (err) {
       console.error('Failed to refresh data:', err);
-      alert('Failed to refresh data. Please try again.');
+      toast.error('Failed to refresh data. Please try again.');
     } finally {
       setIsRefreshing(false);
       setRefreshStatus(null);
@@ -1161,7 +1162,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       }
     } catch (err) {
       console.error('Failed to discard orders:', err);
-      alert('Failed to discard orders');
+      toast.error('Failed to discard orders');
     } finally {
       setIsProcessing(false);
     }
@@ -1188,7 +1189,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       }
     } catch (err) {
       console.error('Failed to mark orders as RTO:', err);
-      alert('Failed to mark orders as RTO');
+      toast.error('Failed to mark orders as RTO');
     } finally {
       setIsProcessing(false);
     }
@@ -1212,7 +1213,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       }
     } catch (err) {
       console.error('Failed to unmark RTO orders:', err);
-      alert('Failed to unmark RTO orders');
+      toast.error('Failed to unmark RTO orders');
     } finally {
       setIsProcessing(false);
     }
@@ -1500,12 +1501,13 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
         await loadData();
         setShowDeliveryStatusModal(false);
         setSelectedOrderForStatus(null);
+        toast.success('Delivery status updated successfully');
       } else {
-        alert(`Failed to update delivery status: ${response.error || 'Unknown error'}`);
+        toast.error(`Failed to update delivery status: ${response.error || 'Unknown error'}`);
       }
     } catch (error) {
       console.error('Error updating delivery status:', error);
-      alert('An error occurred while updating delivery status');
+      toast.error('An error occurred while updating delivery status');
     } finally {
       setUpdatingStatus(false);
     }
@@ -1518,13 +1520,13 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
         if (response.success) {
           await api.clearOrdersCache();
           await loadData();
-          alert('Tag added successfully');
+          toast.success('Tag added successfully');
         } else {
-          alert(`Error: ${response.error || 'Failed to add tag'}`);
+          toast.error(`Error: ${response.error || 'Failed to add tag'}`);
         }
       } catch (error) {
         console.error('Error adding customer tag:', error);
-        alert('Failed to add tag');
+        toast.error('Failed to add tag');
       }
     }
   };
@@ -1541,7 +1543,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
     ));
 
     if (customerIds.length === 0) {
-      alert('Selected orders do not have associated customer IDs');
+      toast.error('Selected orders do not have associated customer IDs');
       return;
     }
 
@@ -1557,16 +1559,16 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
         setSelectAll(false);
         setShowBulkMenu(false);
         if (response.summary) {
-          alert(`Successfully updated ${response.summary.successful} customers. Failed: ${response.summary.failed}.`);
+          toast.success(`Successfully updated ${response.summary.successful} customers. Failed: ${response.summary.failed}.`);
         } else {
-          alert('Customers updated successfully');
+          toast.success('Customers updated successfully');
         }
       } else {
-        alert(`Error: ${response.error || 'Failed to update customers'}`);
+        toast.error(`Error: ${response.error || 'Failed to update customers'}`);
       }
     } catch (err) {
       console.error('Failed to add bulk customer tags:', err);
-      alert('An error occurred during bulk operation');
+      toast.error('An error occurred during bulk operation');
     } finally {
       setIsProcessing(false);
     }

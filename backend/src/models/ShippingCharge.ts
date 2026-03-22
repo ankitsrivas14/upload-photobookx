@@ -12,6 +12,7 @@ export interface IShippingCharge extends Document {
   otherCharges: number; // Any other charges
 
   shiprocketOrderId?: number; // Shiprocket's internal order ID
+  shopifyOrderId?: number; // Shopify's internal order ID
   awbCode?: string; // AWB tracking code
   courierName?: string; // Courier company name
   weight?: number; // Package weight in kg
@@ -24,6 +25,7 @@ export interface IShippingCharge extends Document {
   customerCity?: string; // Extracted from Shiprocket
   customerState?: string; // Extracted from Shiprocket
   customerPincode?: string; // Extracted from Shiprocket
+  customerPhone?: string; // Extracted from Shiprocket
 
   fetchedAt: Date; // When this was fetched from Shiprocket
   updatedAt: Date;
@@ -63,6 +65,9 @@ const ShippingChargeSchema = new Schema<IShippingCharge>({
   shiprocketOrderId: {
     type: Number,
   },
+  shopifyOrderId: {
+    type: Number,
+  },
   awbCode: {
     type: String,
   },
@@ -95,6 +100,9 @@ const ShippingChargeSchema = new Schema<IShippingCharge>({
     type: String,
   },
   customerPincode: {
+    type: String,
+  },
+  customerPhone: {
     type: String,
   },
 

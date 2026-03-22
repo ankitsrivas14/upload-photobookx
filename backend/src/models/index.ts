@@ -14,3 +14,5 @@ export { BankNarrationRule, IBankNarrationRule } from './BankNarrationRule';
 export { default as Ticket } from './Ticket';
 export { default as ProfitPrediction } from './ProfitPrediction';
 export { default as DailyPerformancePrediction } from './DailyPerformancePrediction';
+export { default as ShippingCharge } from './ShippingCharge';
+export { default as OrderDeliveryDate } from './OrderDeliveryDate';

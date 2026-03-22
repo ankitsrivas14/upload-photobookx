@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import toast from 'react-hot-toast';
 import { useParams } from 'react-router-dom';
 import { api } from '../services/api';
 import type { UploadInfo } from '../services/api';
@@ -138,10 +139,10 @@ export function UploadPage() {
           setInfo({ ...info, photoSize, photoType });
         }
       } else {
-        alert(result.error || 'Failed to save settings');
+        toast.error(result.error || 'Failed to save settings');
       }
     } catch {
-      alert('Failed to save settings');
+      toast.error('Failed to save settings');
     }
   };
 
@@ -299,10 +300,10 @@ export function UploadPage() {
           });
         }
       } else {
-        alert(result.error || 'Failed to delete image');
+        toast.error(result.error || 'Failed to delete image');
       }
     } catch {
-      alert('Failed to delete image');
+      toast.error('Failed to delete image');
     } finally {
       setDeletingImageId(null);
     }
@@ -333,10 +334,10 @@ export function UploadPage() {
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }
       } else {
-        alert(result.error || 'Failed to submit for printing');
+        toast.error(result.error || 'Failed to submit for printing');
       }
     } catch {
-      alert('Failed to submit for printing');
+      toast.error('Failed to submit for printing');
     } finally {
       setIsSubmitting(false);
     }

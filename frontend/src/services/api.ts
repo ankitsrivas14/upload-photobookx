@@ -114,8 +114,10 @@ interface ShopifyOrder {
   city?: string | null;
   zip?: string | null;
   customerName?: string | null;
+  customerPhone?: string | null;
   customerState?: string | null;
   awbCode?: string | null;
+  hasTicket?: boolean;
 }
 
 interface OrdersResponse {
@@ -842,6 +844,17 @@ class ApiService {
       method: 'POST',
       body: JSON.stringify(data),
     });
+  }
+
+  async generateIncompleteAddressMessage(customerName: string, orderNumber: string): Promise<{ success: boolean; message?: string; error?: string }> {
+    return this.request('/api/admin/sales/generate-incomplete-address-message', {
+      method: 'POST',
+      body: JSON.stringify({ customerName, orderNumber }),
+    });
+  }
+
+  async searchOrders(query: string): Promise<{ success: boolean; orders: any[]; error?: string }> {
+    return this.request(`/api/admin/sales/search-orders?query=${encodeURIComponent(query)}`);
   }
 
   async getProfitPrediction(monthYear: string): Promise<{ success: boolean; prediction?: any; error?: string }> {

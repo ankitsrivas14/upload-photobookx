@@ -264,6 +264,48 @@ class AIService {
             throw err;
         }
     }
+
+    async generateIncompleteAddressMessage(data: {
+        customerName: string;
+        orderNumber: string;
+    }) {
+        if (!this.openai) {
+            throw new Error('OpenAI API key is missing.');
+        }
+
+        const prompt = `
+            Task: Draft a concise, professional WhatsApp message for an e-commerce order with an incomplete address.
+            
+            Context:
+            - Customer Name: ${data.customerName}
+            - Order Number: ${data.orderNumber}
+            
+            Requirements:
+            1. Keep it very short and professional (max 2-3 sentences).
+            2. Greet the customer by their first name (e.g. "Hello Ankit,") if available.
+            3. Ask the customer to provide their complete address (including House No, Area, Landmark, and Pincode) so we can ship their photobook.
+            4. Mention the order number for reference.
+            5. Do not use placeholders.
+            6. Return only the message text.
+            
+            Language: English (Professional but friendly).
+        `;
+
+        try {
+            const response = await this.openai.chat.completions.create({
+                model: 'gpt-4o',
+                messages: [
+                    { role: 'system', content: 'You are a professional customer support assistant for PhotoBookX.' },
+                    { role: 'user', content: prompt }
+                ]
+            });
+
+            return response.choices[0].message.content || '';
+        } catch (err: any) {
+            console.error('AIService Incomplete Address Message Error:', err);
+            throw err;
+        }
+    }
 }
 
 export default new AIService();

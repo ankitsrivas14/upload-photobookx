@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { Toaster } from 'react-hot-toast';
 import { AdminLogin } from './pages/AdminLogin';
 import { DashboardPage } from './pages/DashboardPage';
 import { ExpensesPage } from './pages/ExpensesPage';
@@ -28,6 +29,7 @@ function ExternalRedirect() {
 function App() {
   return (
     <BrowserRouter>
+      <Toaster position="bottom-right" reverseOrder={false} />
       <Routes>
         {/* Root redirects to photobookx.com */}
         <Route path="/" element={<ExternalRedirect />} />

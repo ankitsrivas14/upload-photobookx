@@ -1,5 +1,6 @@
 import React from 'react';
-import { MoreVertical, CheckCircle, Tag } from 'lucide-react';
+import { MoreVertical, CheckCircle, Tag, LifeBuoy } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -36,6 +37,7 @@ export const OrderRow: React.FC<OrderRowProps> = ({
   onUpdateDeliveryStatus,
   onAddCustomerTag,
 }) => {
+  const navigate = useNavigate();
   const handleMarkDeliveryStatus = () => {
     if (onUpdateDeliveryStatus) {
       onUpdateDeliveryStatus(order.id, order.name);
@@ -119,6 +121,15 @@ export const OrderRow: React.FC<OrderRowProps> = ({
           {rtoOrderIds.has(order.id) && (
             <span className={`${styles['tag-badge']} ${styles.rto}`}>RTO</span>
           )}
+          {order.hasTicket && (
+            <span 
+              className={`${styles['tag-badge']}`} 
+              style={{ backgroundColor: '#e0f2fe', color: '#0369a1', cursor: 'pointer' }}
+              onClick={() => navigate('/admin/analysis/tickets')}
+            >
+              Ticket
+            </span>
+          )}
         </div>
       </td>
       <td className={styles['profit-loss-cell']}>
@@ -187,6 +198,13 @@ export const OrderRow: React.FC<OrderRowProps> = ({
               <DropdownMenuItem onClick={handleMarkNoCOD} className={styles['action-dropdown-item']}>
                 <Tag />
                 <span>Mark as no-cod</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem 
+                onClick={() => navigate('/admin/analysis/tickets/new', { state: { orderNumber: order.name } })} 
+                className={styles['action-dropdown-item']}
+              >
+                <LifeBuoy />
+                <span>Support Ticket</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

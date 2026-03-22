@@ -538,6 +538,41 @@ router.get('/shopify/orders/:orderNumber', requireAdmin, async (req: Authenticat
       return;
     }
 
+    let customerPhone = (order as any).customer?.phone || (order as any).shipping_address?.phone || '';
+    let customerName = `${(order as any).customer?.first_name || ''} ${(order as any).customer?.last_name || ''}`.trim() || 'N/A';
+
+    if (!customerPhone) {
+      // Check database or fetch from Shiprocket if missing
+      const dbCharge = await ShippingCharge.findOne({
+        $or: [
+          { orderNumber: order.name },
+          { orderNumber: order.name.replace(/^#/, '') }
+        ]
+      });
+
+      if (dbCharge && dbCharge.customerPhone) {
+        customerPhone = dbCharge.customerPhone;
+        if (customerName === 'N/A') customerName = dbCharge.customerName || 'N/A';
+      } else {
+        // Fallback: Try to fetch and save from Shiprocket
+        try {
+          await shiprocketService.fetchShippingChargeForOrder(order.name);
+          const updatedCharge = await ShippingCharge.findOne({
+            $or: [
+              { orderNumber: order.name },
+              { orderNumber: order.name.replace(/^#/, '') }
+            ]
+          });
+          if (updatedCharge && updatedCharge.customerPhone) {
+            customerPhone = updatedCharge.customerPhone;
+            if (customerName === 'N/A') customerName = updatedCharge.customerName || 'N/A';
+          }
+        } catch (e) {
+          console.warn(`[API] Failed to fetch customer data from Shiprocket for ${order.name}`);
+        }
+      }
+    }
+
     res.json({
       success: true,
       order: {
@@ -545,6 +580,8 @@ router.get('/shopify/orders/:orderNumber', requireAdmin, async (req: Authenticat
         name: order.name,
         email: order.email,
         createdAt: order.created_at,
+        customerName,
+        customerPhone,
         lineItems: order.line_items?.map(item => ({
           title: item.title,
           quantity: item.quantity,

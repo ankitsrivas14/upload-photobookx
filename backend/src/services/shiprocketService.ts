@@ -27,6 +27,7 @@ interface ShiprocketOrder {
   customer_city?: string;
   customer_state?: string;
   customer_pincode?: string;
+  customer_phone?: string;
   picked_up_date?: string;
   delivered_date?: string;
   first_out_for_delivery_date?: string;
@@ -445,6 +446,7 @@ class ShiprocketService {
           whatsappCharges,
           otherCharges,
           shiprocketOrderId: shiprocketOrder.id,
+          shopifyOrderId: (shiprocketOrder as any).api_order_id || (shiprocketOrder as any).others?.api_order_id,
           awbCode,
           courierName: shipment.courier_name || shipment.courier,
           weight: parseFloat(shipment.weight) || undefined,
@@ -462,6 +464,7 @@ class ShiprocketService {
           customerCity: shiprocketOrder.customer_city,
           customerState: shiprocketOrder.customer_state,
           customerPincode: shiprocketOrder.customer_pincode,
+          customerPhone: shiprocketOrder.customer_phone || (shiprocketOrder as any).customer_mobile,
           fetchedAt: new Date(),
         },
         { upsert: true }
@@ -652,6 +655,7 @@ class ShiprocketService {
               whatsappCharges,
               otherCharges,
               shiprocketOrderId: shiprocketOrder.id,
+              shopifyOrderId: (shiprocketOrder as any).api_order_id || (shiprocketOrder as any).others?.api_order_id,
               awbCode,
               courierName: shipment.courier_name || shipment.courier,
               weight: parseFloat(shipment.weight) || undefined,
@@ -663,6 +667,7 @@ class ShiprocketService {
               customerCity: shiprocketOrder.customer_city,
               customerState: shiprocketOrder.customer_state,
               customerPincode: shiprocketOrder.customer_pincode,
+              customerPhone: shiprocketOrder.customer_phone || (shiprocketOrder as any).customer_mobile,
               fetchedAt: new Date(),
             },
             { upsert: true }
@@ -708,6 +713,7 @@ class ShiprocketService {
         customerCity: charge.customerCity,
         customerState: charge.customerState,
         customerPincode: charge.customerPincode,
+        customerPhone: charge.customerPhone,
         fetchedAt: charge.fetchedAt,
       });
     });

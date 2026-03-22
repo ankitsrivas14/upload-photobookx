@@ -446,7 +446,7 @@ class ShopifyService {
    * 1. Fetches "Head": New orders created since the last known order.
    * 2. Fetches "Pending": Updates for existing in-flight orders that aren't terminal.
    */
-  async syncOrders(limit: number = 1000): Promise<number> {
+  async syncOrders(limit: number = 5000): Promise<number> {
     try {
       const cacheKey = `all_orders_${limit}`;
       const cachedData = await ShopifyOrderCache.findOne({ cacheKey });

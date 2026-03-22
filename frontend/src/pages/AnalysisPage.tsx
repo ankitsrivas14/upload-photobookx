@@ -6,6 +6,7 @@ import { FailedOrdersAnalysis } from './analysis/FailedOrdersAnalysis';
 import { PinCodesAnalysis } from './analysis/PinCodesAnalysis';
 import { StuckOrdersAnalysis } from './analysis/StuckOrdersAnalysis';
 import { TicketsAnalysis } from './analysis/TicketsAnalysis';
+import { CreateTicketForm } from './analysis/CreateTicketForm';
 import styles from './AnalysisPage.module.css';
 
 export function AnalysisPage() {
@@ -119,6 +120,7 @@ export function AnalysisPage() {
                     <Route path="pin-codes" element={<PinCodesAnalysis />} />
                     <Route path="stuck-orders" element={<StuckOrdersAnalysis />} />
                     <Route path="tickets" element={<TicketsAnalysis />} />
+                    <Route path="tickets/new" element={<CreateTicketForm />} />
                     <Route path="*" element={<Navigate to="failed-orders" replace />} />
                 </Routes>
             </main>
