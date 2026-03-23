@@ -895,6 +895,59 @@ class ApiService {
   async getDailyPerformancePrediction(dateKey: string): Promise<{ success: boolean; prediction?: any; error?: string }> {
     return this.request(`/api/admin/sales/predict-daily-performance/${dateKey}`);
   }
+
+  async analyzeAds(adData: any[]): Promise<{ success: boolean; recommendations: any[]; overallStrategy: string; error?: string }> {
+    return this.request('/api/admin/sales/analyze-ads', {
+      method: 'POST',
+      body: JSON.stringify({ adData }),
+    });
+  }
+
+  async saveAdsPerformance(adData: any[], level?: string, date?: string): Promise<{ success: boolean; count: number; error?: string }> {
+    return this.request('/api/admin/sales/ads-performance', {
+      method: 'POST',
+      body: JSON.stringify({ adData, level, date }),
+    });
+  }
+
+  async getAdsPerformanceStatus(): Promise<{ success: boolean; count: number; latestDate: string | null; archivedDates: string[]; error?: string }> {
+    return this.request('/api/admin/sales/ads-performance/status');
+  }
+
+  async clearAdsPerformance(): Promise<{ success: boolean; message: string; error?: string }> {
+    return this.request('/api/admin/sales/ads-performance', { method: 'DELETE' });
+  }
+
+  async getAdsPerformanceDaily(): Promise<{ success: boolean; data: any[]; error?: string }> {
+    return this.request('/api/admin/sales/ads-performance/daily');
+  }
+
+  async getAdsAnalysis(date: string): Promise<{ success: boolean; data?: any; error?: string }> {
+    return this.request(`/api/admin/sales/ads-analysis/${date}`);
+  }
+
+  async getAdsAnalysisLatest(): Promise<{ success: boolean; data?: any; error?: string }> {
+    return this.request('/api/admin/sales/ads-analysis-latest');
+  }
+
+  async getAdsAnalysisDates(): Promise<{ success: boolean; dates: string[]; error?: string }> {
+    return this.request('/api/admin/sales/ads-analysis-dates');
+  }
+
+    async getAdsPerformance(date: string): Promise<{ success: boolean; data?: any; error?: string }> {
+    return this.request(`/api/admin/sales/ads-performance/${date}`);
+  }
+
+  async getAdsPerformanceAll(): Promise<{ success: boolean; count: number; data: any[]; error?: string }> {
+    return this.request('/api/admin/sales/ads-performance-all');
+  }
+
+  async adsChat(userQuestion: string, date: string): Promise<{ success: boolean; aiResponse: string; chat: any[]; error?: string }> {
+    return this.request('/api/admin/sales/ads-chat', {
+      method: 'POST',
+      body: JSON.stringify({ userQuestion, date })
+    });
+  }
 }
 
 

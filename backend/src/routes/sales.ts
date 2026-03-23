@@ -1,5 +1,5 @@
 import express, { Response } from 'express';
-import { DiscardedOrder, RTOOrder, ProfitPrediction, DailyPerformancePrediction, ShippingCharge, OrderDeliveryDate, ShopifyOrderCache } from '../models';
+import { DiscardedOrder, RTOOrder, ProfitPrediction, DailyPerformancePrediction, ShippingCharge, OrderDeliveryDate, ShopifyOrderCache, MetaAdPerformance, MetaAdAnalysis } from '../models';
 import { requireAdmin } from './adminAuth';
 import { AuthenticatedRequest } from '../types';
 import aiService from '../services/aiService';
@@ -454,6 +454,346 @@ router.post('/predict', requireAdmin, async (req: AuthenticatedRequest, res: Res
     } catch (error) {
       console.error('Generate Incomplete Address Message Error:', error);
       res.status(500).json({ success: false, error: 'Failed to generate message' });
+    }
+  });
+
+  /**
+   * GET /api/admin/sales/ads-performance/status
+   * Check if any historical ad data exists
+   */
+  router.get('/ads-performance/status', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const count = await MetaAdPerformance.countDocuments();
+      const latest = await MetaAdPerformance.findOne({}).sort({ date: -1 });
+      const archivedDates = await MetaAdPerformance.distinct('date');
+      res.json({ success: true, count, latestDate: latest?.date || null, archivedDates });
+    } catch (error) {
+      console.error('Check Ads Status Error:', error);
+      res.status(500).json({ success: false, error: 'Failed' });
+    }
+  });
+
+  /**
+   * GET /api/admin/sales/ads-performance/daily
+   * Aggregate data by date for charts
+   */
+  router.get('/ads-performance/daily', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const dailyData = await MetaAdPerformance.aggregate([
+        {
+          $group: {
+            _id: '$date',
+            spend: { $sum: '$spend' },
+            revenue: { $sum: { $multiply: ['$spend', '$roas'] } },
+            count: { $sum: 1 }
+          }
+        },
+        { $sort: { _id: 1 } }
+      ]);
+      res.json({ success: true, data: dailyData });
+    } catch (error) {
+      console.error('Daily Ads Performance Error:', error);
+      res.status(500).json({ success: false, error: 'Failed' });
+    }
+  });
+
+  /**
+   * DELETE /api/admin/sales/ads-performance
+   * Clear all archived data to start from scratch
+   */
+  router.delete('/ads-performance', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      await MetaAdPerformance.deleteMany({});
+      res.json({ success: true, message: 'All ad performance data cleared' });
+    } catch (error) {
+      console.error('Clear Ads Performance Error:', error);
+      res.status(500).json({ success: false, error: 'Failed' });
+    }
+  });
+  router.post('/ads-performance', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { adData, level, date } = req.body;
+      if (!adData || !Array.isArray(adData) || adData.length === 0) {
+        return res.status(400).json({ success: false, error: 'Ad data is required' });
+      }
+
+      // Log first row keys for debugging column names
+      if (adData[0]) {
+        console.log('Sample Ad Data Headers:', Object.keys(adData[0]));
+      }
+
+      // Robust key matcher
+      const findValue = (row: any, aliases: string[]) => {
+        const keys = Object.keys(row);
+        const lowerAliases = aliases.map(a => a.toLowerCase());
+        
+        // 1. Try exact match (case-insensitive)
+        for (const alias of lowerAliases) {
+          const exactMatch = keys.find(k => k.toLowerCase() === alias);
+          if (exactMatch !== undefined && row[exactMatch] !== undefined) return row[exactMatch];
+        }
+        
+        // 2. Try substring match
+        for (const alias of lowerAliases) {
+          const partialMatch = keys.find(k => k.toLowerCase().includes(alias));
+          if (partialMatch !== undefined && row[partialMatch] !== undefined) return row[partialMatch];
+        }
+        
+        return null;
+      };
+
+      const parseNumber = (val: any) => {
+        if (val === null || val === undefined || val === '') return 0;
+        if (typeof val === 'number') return val;
+        // Strip everything except numbers and dots
+        const sanitized = String(val).replace(/[^0-9.]/g, '');
+        return parseFloat(sanitized) || 0;
+      };
+
+      const entries = adData.map(d => {
+        const spend = parseNumber(findValue(d, ['Amount Spent', 'Spend', 'Cost']));
+        const purchases = parseNumber(findValue(d, ['Results', 'Purchases', 'Returns']));
+        const roas = parseNumber(findValue(d, ['ROAS', 'Return on Ad Spend']));
+        const reach = parseNumber(findValue(d, ['Reach']));
+        const impressions = parseNumber(findValue(d, ['Impressions']));
+        const name = (findValue(d, ['Ad Set Name', 'Campaign Name', 'Ad Name', 'Name']) || 'Unknown').trim();
+        const status = findValue(d, ['Delivery Status', 'Delivery', 'Status']) || 'active';
+        
+        // Try to find a date in the row, default to provided date or today
+        let rawRowDate = findValue(d, ['Reporting starts', 'Reporting ends', 'Day', 'Date', 'Month', 'Starts', 'Ends']);
+        let finalDate = date || new Date().toISOString().split('T')[0];
+        
+        if (rawRowDate) {
+          try {
+            // Meta reports often have ranges like "Mar 1, 2026 - Mar 1, 2026" or "2026-03-01 to 2026-03-01"
+            const firstDatePart = String(rawRowDate).split(/ [-–to] /)[0].trim();
+            const dObj = new Date(firstDatePart);
+            if (!isNaN(dObj.getTime())) {
+              finalDate = dObj.toISOString().split('T')[0];
+            }
+          } catch (e) { /* fallback to finalDate */ }
+        }
+
+        return {
+          date: finalDate,
+          level: level || (findValue(d, ['Ad Name']) ? 'ad' : findValue(d, ['Ad Set Name']) ? 'adset' : 'campaign'),
+          name,
+          status,
+          spend,
+          purchases,
+          roas,
+          reach,
+          impressions,
+        };
+      });
+
+      // Filter out 'Unknown' if valid data exists, or just keep as is
+      await MetaAdPerformance.insertMany(entries);
+
+      res.json({ success: true, count: entries.length });
+    } catch (error) {
+      console.error('Save Ads Performance Error:', error);
+      res.status(500).json({ success: false, error: 'Failed to save ads performance' });
+    }
+  });
+
+  /**
+   * POST /api/admin/sales/analyze-ads
+   */
+  router.post('/analyze-ads', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      let { adData } = req.body;
+      
+      // If no data is provided (e.g., after refresh), fetch the most recent data from DB
+      if (!adData || !Array.isArray(adData) || adData.length === 0) {
+        const latestEntry = await MetaAdPerformance.findOne({}).sort({ date: -1 });
+        if (latestEntry) {
+          adData = await MetaAdPerformance.find({ date: latestEntry.date });
+        }
+      }
+
+      if (!adData || adData.length === 0) {
+        return res.status(400).json({ success: false, error: 'No ad data available for analysis. Please upload first.' });
+      }
+
+      // Filter only for 'adset' level to avoid duplication from Campaign and Ad level reports
+      // The user wants actionable results specifically for ad sets.
+      let filteredAdData = adData.filter((d: any) => d.level === 'adset');
+      
+      // If we filtered out everything, fallback to the original list but warn in logs
+      if (filteredAdData.length === 0) {
+        console.warn('No adset-level data found, falling back to all data.');
+        filteredAdData = adData;
+      }
+
+      // Clean up names in current adData and define date
+      filteredAdData = filteredAdData.map((d: any) => ({
+        ...d,
+        name: (typeof d.name === 'string' ? d.name.trim() : d.name || 'Unknown')
+      }));
+      
+      // Remove duplicates by name if any exist in the same level
+      const seenNames = new Set();
+      filteredAdData = filteredAdData.filter((d: any) => {
+        if (seenNames.has(d.name)) return false;
+        seenNames.add(d.name);
+        return true;
+      });
+
+      adData = filteredAdData; // Resign back for the loop
+
+      const latestDate = adData?.[0]?.date || new Date().toISOString().split('T')[0];
+
+      const BATCH_SIZE = 50;
+      const allRecommendations: any[] = [];
+      let overallStrategies: string[] = [];
+
+      // Process in batches to avoid OpenAI output token limits
+      for (let i = 0; i < adData.length; i += BATCH_SIZE) {
+        const batch = adData.slice(i, i + BATCH_SIZE);
+        const batchNames = batch.map((d: any) => d.name).filter(Boolean);
+        
+        // Fetch history ONLY for the current batch's ad sets
+        const batchHistoricalData = await MetaAdPerformance.find({
+          name: { $in: batchNames },
+          date: { $ne: latestDate }
+        })
+        .sort({ date: -1 })
+        .limit(1000); // 1000 points of history for 50 adsets is plenty (~20 days each)
+
+        console.log(`Analyzing Batch ${Math.floor(i / BATCH_SIZE) + 1}... (${batch.length} adsets)`);
+        
+        const result = await aiService.analyzeAdsData(batch, batchHistoricalData);
+        if (result.recommendations) {
+          allRecommendations.push(...result.recommendations);
+        }
+        if (result.overallStrategy) {
+          overallStrategies.push(result.overallStrategy);
+        }
+      }
+
+      console.log(`Total Final Recommendations: ${allRecommendations.length}`);
+      
+      // PERSIST the analysis: Overwrite existing one for this date
+      if (allRecommendations.length > 0) {
+        await MetaAdAnalysis.findOneAndUpdate(
+          { date: latestDate },
+          { 
+            date: latestDate,
+            recommendations: allRecommendations,
+            overallStrategy: Array.from(new Set(overallStrategies)).join(' | ') 
+          },
+          { upsert: true, new: true }
+        );
+      }
+
+      res.json({ 
+        success: true, 
+        recommendations: allRecommendations,
+        overallStrategy: Array.from(new Set(overallStrategies)).join(' | ') 
+      });
+    } catch (error: any) {
+      console.error('AI Ads Analysis Error Stack:', error);
+      res.status(500).json({ success: false, error: `AI Ads Analysis failed: ${error.message || 'Unknown error'}` });
+    }
+  });
+
+  // Fetch a saved analysis by date
+  router.get('/ads-analysis/:date', async (req, res) => {
+    try {
+      const { date } = req.params;
+      const analysis = await MetaAdAnalysis.findOne({ date });
+      res.json({ success: true, data: analysis });
+    } catch (error) {
+      res.status(500).json({ success: false, error: 'Failed to fetch analysis' });
+    }
+  });
+
+  // Fetch the LATEST saved analysis
+  router.get('/ads-analysis-latest', async (req, res) => {
+    try {
+      const latest = await MetaAdAnalysis.findOne({}).sort({ date: -1 });
+      res.json({ success: true, data: latest });
+    } catch (error) {
+      res.status(500).json({ success: false, error: 'Failed to fetch latest analysis' });
+    }
+  });
+
+  // Get all dates that have an analysis/chat
+  router.get('/ads-analysis-dates', async (req, res) => {
+    try {
+      const dates = await MetaAdAnalysis.find({}, { date: 1 }).sort({ date: -1 });
+      res.json({ success: true, dates: dates.map(d => d.date) });
+    } catch (error) {
+      res.status(500).json({ success: false, error: 'Failed to fetch analysis dates' });
+    }
+  });
+
+  // Fetch raw performance data for a date
+  router.get('/ads-performance/:date', async (req, res) => {
+    try {
+      const { date } = req.params;
+      const performanceData = await MetaAdPerformance.find({ date });
+      res.json({ success: true, count: performanceData.length, data: performanceData });
+    } catch (error) {
+       res.status(500).json({ success: false, error: 'Failed' });
+    }
+  });
+
+  // Fetch ALL historic performance data across all dates
+  router.get('/ads-performance-all', async (req, res) => {
+    try {
+      const performanceData = await MetaAdPerformance.find({}).sort({ date: -1 });
+      res.json({ success: true, count: performanceData.length, data: performanceData });
+    } catch (error) {
+       res.status(500).json({ success: false, error: 'Failed to fetch all-time performance data' });
+    }
+  });
+
+  // Chat about ads strategy
+  router.post('/ads-chat', async (req, res) => {
+    try {
+      const { userQuestion, date } = req.body;
+      if (!userQuestion || !date) {
+        return res.status(400).json({ success: false, error: 'Question and date are required' });
+      }
+
+      // Fetch the analysis for this date
+      let analysis = await MetaAdAnalysis.findOne({ date });
+      if (!analysis) {
+        // Create an empty one if it doesn't exist
+         analysis = new MetaAdAnalysis({ date, recommendations: [], overallStrategy: 'Chat-initiated session' });
+      }
+
+      // Fetch ad data for context
+      const adData = await MetaAdPerformance.find({ date });
+      const adSetNames = adData.filter(d => d.level === 'adset').map(d => d.name);
+      
+      // Fetch history for those adsets
+      const historicalData = await MetaAdPerformance.find({
+        name: { $in: adSetNames },
+        date: { $lt: date }
+      }).limit(500);
+
+      // Call AI Chat
+      const aiResponse = await aiService.chatWithAdsStrategist(
+        userQuestion,
+        adData,
+        historicalData,
+        analysis.chat || []
+      );
+
+      // Persist the messages
+      if (!analysis.chat) analysis.chat = [];
+      analysis.chat.push({ role: 'user', content: userQuestion, timestamp: new Date() });
+      analysis.chat.push({ role: 'assistant', content: aiResponse, timestamp: new Date() });
+      
+      await analysis.save();
+
+      res.json({ success: true, aiResponse, chat: analysis.chat });
+    } catch (error: any) {
+      console.error('Ads Chat Error:', error);
+      res.status(500).json({ success: false, error: error.message });
     }
   });
 

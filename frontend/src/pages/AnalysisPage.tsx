@@ -7,6 +7,7 @@ import { PinCodesAnalysis } from './analysis/PinCodesAnalysis';
 import { StuckOrdersAnalysis } from './analysis/StuckOrdersAnalysis';
 import { TicketsAnalysis } from './analysis/TicketsAnalysis';
 import { CreateTicketForm } from './analysis/CreateTicketForm';
+import { AdsAnalysis } from './analysis/AdsAnalysis';
 import styles from './AnalysisPage.module.css';
 
 export function AnalysisPage() {
@@ -20,6 +21,7 @@ export function AnalysisPage() {
     const isPinCodes = currentPath.includes('/admin/analysis/pin-codes');
     const isStuckOrders = currentPath.includes('/admin/analysis/stuck-orders');
     const isTickets = currentPath.includes('/admin/analysis/tickets');
+    const isAds = currentPath.includes('/admin/analysis/ads');
 
     useEffect(() => {
         loadUser();
@@ -113,6 +115,12 @@ export function AnalysisPage() {
                     >
                         Tickets
                     </Link>
+                    <Link
+                        to="/admin/analysis/ads"
+                        className={`${styles['analysis-nav-item']} ${isAds ? styles.active : ''}`}
+                    >
+                        Ads Analysis
+                    </Link>
                 </div>
 
                 <Routes>
@@ -121,6 +129,7 @@ export function AnalysisPage() {
                     <Route path="stuck-orders" element={<StuckOrdersAnalysis />} />
                     <Route path="tickets" element={<TicketsAnalysis />} />
                     <Route path="tickets/new" element={<CreateTicketForm />} />
+                    <Route path="ads" element={<AdsAnalysis />} />
                     <Route path="*" element={<Navigate to="failed-orders" replace />} />
                 </Routes>
             </main>

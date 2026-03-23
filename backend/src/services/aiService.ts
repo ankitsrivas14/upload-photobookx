@@ -307,6 +307,163 @@ class AIService {
             throw err;
         }
     }
+    async analyzeAdsData(adData: any[], historicalData: any[] = []) {
+        if (!this.openai) {
+            throw new Error('OpenAI API key is missing.');
+        }
+
+        const inputCount = adData.length;
+
+        // Group history by name for easier AI consumption
+        const historyMap: Record<string, any[]> = {};
+        historicalData.slice(0, 1000).forEach(h => {
+            if (!h || !h.name || typeof h.name !== 'string') return;
+            const trimmedName = h.name.trim();
+            if (!historyMap[trimmedName]) historyMap[trimmedName] = [];
+            historyMap[trimmedName].push({
+                date: h.date,
+                spend: h.spend,
+                roas: h.roas,
+                purchases: h.purchases,
+                reach: h.reach,
+                impressions: h.impressions
+            });
+        });
+
+        const prompt = `
+            Task: Ultimate Performance Marketing Architect
+            
+            You are a world-class performance marketing consultant with a track record of scaling multi-million dollar e-commerce brands. 
+            
+            Analyze the provided performance data for ${inputCount} ad sets and provide a surgical recommendation for EVERY SINGLE ONE.
+                 OBJECTIVE:
+            Use your internal expertise, pattern recognition, and deep understanding of the Meta Ads auction to maximize long-term profitability and scale.
+            
+            HORIZONTAL SCALING RULE:
+            - Max risk per ad set is 2,000 INR.
+            - If an ad set is performing exceptionally well but is already near or at the 2,000 INR daily budget cap, do NOT suggest vertical scaling (raising budget further). 
+            - Instead, suggest "DUPLICATE" to create a fresh copy and scale horizontally, spreading the risk.
+            
+            DATA CONTEXT:
+            1. Current Performance: ${inputCount} ad sets from the most recent day.
+            2. Historical Performance: Historical data grouped by name to help you see trends, momentum, and fatigue.
+            
+            CRITICAL REQUIREMENTS:
+            - Analyze ALL ${inputCount} ad sets. Do not skip any.
+            - Provide exactly ${inputCount} recommendations in your JSON "recommendations" array.
+            
+            DECISIONS:
+            - Choose from: "SCALE", "CONTINUE", "MONITOR", "CLOSE", or "DUPLICATE".
+            - "SCALE": Vertical scaling if budget is < 2,000 INR.
+            - "DUPLICATE": Horizontal scaling if budget is already >= 2,000 INR and performance warrants more spend.
+            - Use your total autonomy. Consider trends, CPA stability, purchase volume, and ad fatigue signals over the last 30 days.
+            
+            CURRENT DATA:
+            ${JSON.stringify(adData.map(d => ({ ...d, name: (typeof d.name === 'string' ? d.name.trim() : d.name || 'Unknown') })))}
+            
+            HISTORICAL CONTEXT:
+            ${JSON.stringify(historyMap)}
+            
+            Instructions:
+            1. Provide a recommendation for every item in the "current" dataset.
+            2. "targetSpend" (INR): If suggesting SCALE, MONITOR, CONTINUE, or DUPLICATE, suggest the next 24-hour budget allocation.
+            3. "Rationale": A concise, expert insight comparing the current performance to the historical narrative, explicitly mentioning why you chose SCALE or DUPLICATE based on the 2,000 INR cap rule.
+            
+            Return ONLY a valid JSON object:
+            {
+              "recommendations": [
+                {
+                  "name": "string",
+                  "decision": "SCALE | CONTINUE | MONITOR | CLOSE | DUPLICATE",
+                  "rationale": "string",
+                  "targetSpend": number | "N/A",
+                  "stats": { "spend": number, "roas": number, "purchases": number, "cpa": number }
+                }
+              ],
+              "overallStrategy": "string"
+            }
+        `;
+
+        try {
+            const response = await this.openai.chat.completions.create({
+                model: 'gpt-4o',
+                messages: [
+                    { role: 'system', content: 'You are an elite performance marketer who prioritizes historical trends over single-day fluctuations.' },
+                    { role: 'user', content: prompt }
+                ],
+                response_format: { type: 'json_object' }
+            });
+            const result = JSON.parse(response.choices[0].message.content || '{}');
+            return result;
+        } catch (err: any) {
+            console.error('AIService Ads Analysis Error:', err);
+            throw err;
+        }
+    }
+
+    async chatWithAdsStrategist(userQuestion: string, adData: any[], historicalData: any[] = [], chatHistory: any[] = []) {
+        if (!this.openai) {
+            throw new Error('OpenAI API key is missing.');
+        }
+
+        const historyMap: Record<string, any[]> = {};
+        historicalData.slice(0, 1000).forEach(h => {
+            const trimmedName = h.name.trim();
+            if (!historyMap[trimmedName]) historyMap[trimmedName] = [];
+            historyMap[trimmedName].push({
+                date: h.date,
+                spend: h.spend,
+                roas: h.roas,
+                purchases: h.purchases,
+                reach: h.reach,
+                impressions: h.impressions
+            });
+        });
+
+        const prompt = `
+            Task: Meta Ads Strategy Consultant
+            
+            Context: You are talking to an e-commerce brand owner. You have full access to their Meta Ads performance data.
+            
+            CONSULTATION GOAL:
+            Answer the user's question with surgical precision. Use the provided data to back up your strategy.
+            
+            RELEVANT DATA:
+            ${JSON.stringify(adData.map(d => ({ ...d, name: (typeof d.name === 'string' ? d.name.trim() : d.name || 'Unknown') })))}
+            
+            HISTORICAL TRENDS:
+            ${JSON.stringify(historyMap)}
+            
+            PREVIOUS CONVERSATION:
+            ${JSON.stringify(chatHistory.slice(-5))}
+            
+            USER QUESTION:
+            ${userQuestion}
+            
+            Instructions:
+            1. Be punchy, strategic, and concise. 
+            2. Refer to specific ad set names if applicable.
+            3. Prioritize high-level architecture: scaling winners, cutting losers, and risk management (2k cap rule).
+            4. **CRITICAL**: Use Markdown formatting for readability. Use bolding (e.g. **Ad Set Name**), bulleted lists, and clear spacing between paragraphs.
+            
+            Return the response in structured Markdown.
+        `;
+
+        try {
+            const response = await this.openai.chat.completions.create({
+                model: 'gpt-4o',
+                messages: [
+                    { role: 'system', content: 'You are a high-level performance marketing architect.' },
+                    { role: 'user', content: prompt }
+                ]
+            });
+
+            return response.choices[0].message.content || "I'm sorry, I couldn't process that strategy request.";
+        } catch (err: any) {
+            console.error('AIService Ad Strategy Chat Error:', err);
+            throw err;
+        }
+    }
 }
 
 export default new AIService();
