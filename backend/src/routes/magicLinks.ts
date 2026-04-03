@@ -325,10 +325,41 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
     // Check if we want all orders or just printed photos orders
     const allOrders = req.query.all === 'true';
     const createdAtMin = typeof req.query.created_at_min === 'string' ? req.query.created_at_min : undefined;
+    const monthStr = typeof req.query.month === 'string' ? req.query.month : undefined;
 
-    const orders = allOrders
+    const allFetchedOrders = allOrders
       ? await shopifyService.getAllOrders(limit, createdAtMin)
       : await shopifyService.getRecentOrders(limit);
+
+    // Compute available months before filtering
+    const availableMonthsSet = new Set<string>();
+    allFetchedOrders.forEach((o: any) => {
+      if (!o.created_at) return;
+      const dateKey = new Date(o.created_at).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }).substring(0, 7);
+      availableMonthsSet.add(dateKey);
+    });
+    const availableMonths = Array.from(availableMonthsSet).sort().reverse();
+
+    // Filter orders by month parameter if requested
+    let orders = allFetchedOrders;
+    if (monthStr && monthStr !== 'all') {
+      if (monthStr === 'last30') {
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        thirtyDaysAgo.setHours(0, 0, 0, 0);
+        orders = allFetchedOrders.filter((o: any) => new Date(o.created_at) >= thirtyDaysAgo);
+      } else {
+        let targetMonth = monthStr;
+        if (monthStr === 'current') {
+          targetMonth = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }).substring(0, 7);
+        }
+        orders = allFetchedOrders.filter((o: any) => {
+          if (!o.created_at) return false;
+          const dateKey = new Date(o.created_at).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }).substring(0, 7);
+          return dateKey === targetMonth;
+        });
+      }
+    }
 
     // Fetch delivery dates from database for all orders
     const orderNumbers = orders.map(o => o.name);
@@ -370,6 +401,7 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
 
     res.json({
       success: true,
+      availableMonths,
       orders: orders.map(order => {
         // Get delivery status from multiple sources
         let deliveryStatus = null;

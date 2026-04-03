@@ -125,7 +125,7 @@ class AIService {
 
         try {
             const response = await this.openai.chat.completions.create({
-                model: 'gpt-4o',
+                model: 'gpt-5.4',
                 messages: [
                     { role: 'system', content: 'You are a data-driven e-commerce strategist. You output precise projections in JSON.' },
                     { role: 'user', content: prompt }
@@ -182,7 +182,7 @@ class AIService {
 
         try {
             const response = await this.openai.chat.completions.create({
-                model: 'gpt-4o',
+                model: 'gpt-5.4',
                 messages: [
                     { role: 'system', content: 'You are an inventory planning expert. You output precise stock requirements in JSON.' },
                     { role: 'user', content: prompt }
@@ -248,7 +248,7 @@ class AIService {
 
         try {
             const response = await this.openai.chat.completions.create({
-                model: 'gpt-4o',
+                model: 'gpt-5.4',
                 messages: [
                     { role: 'system', content: 'You are an e-commerce data analyst. You predict hourly sales trends in JSON.' },
                     { role: 'user', content: prompt }
@@ -294,7 +294,7 @@ class AIService {
 
         try {
             const response = await this.openai.chat.completions.create({
-                model: 'gpt-4o',
+                model: 'gpt-5.4',
                 messages: [
                     { role: 'system', content: 'You are a professional customer support assistant for PhotoBookX.' },
                     { role: 'user', content: prompt }
@@ -326,7 +326,15 @@ class AIService {
                 roas: h.roas,
                 purchases: h.purchases,
                 reach: h.reach,
-                impressions: h.impressions
+                impressions: h.impressions,
+                cpc: h.cpc,
+                ctr: h.ctr,
+                cpa: h.cpa,
+                clicks: h.clicks,
+                cpm: h.cpm,
+                frequency: h.frequency,
+                addsToCart: h.addsToCart,
+                outboundClicks: h.outboundClicks
             });
         });
 
@@ -335,7 +343,7 @@ class AIService {
             
             You are a world-class performance marketing consultant with a track record of scaling multi-million dollar e-commerce brands. 
             
-            Analyze the provided performance data for ${inputCount} ad sets and provide a surgical recommendation for EVERY SINGLE ONE.
+            Analyze the provided performance data for ${inputCount} entities (campaigns, ad sets, or ads) and provide a surgical recommendation for EVERY SINGLE ONE.
                  OBJECTIVE:
             Use your internal expertise, pattern recognition, and deep understanding of the Meta Ads auction to maximize long-term profitability and scale.
             
@@ -348,36 +356,44 @@ class AIService {
             1. Current Performance: ${inputCount} ad sets from the most recent day.
             2. Historical Performance: Historical data grouped by name to help you see trends, momentum, and fatigue.
             
+            UNBIASED ANALYSIS PROTOCOL:
+            - **Rule**: Act entirely objectively based on the statistics (spend, purchases, ROAS, reach, impressions, CPA).
+            - **Rule**: There is NO bias. If the stats dictate that an ad set should be closed—even if it is new—you must recommend "CLOSE". If it is performing well and scaling is logical, suggest "SCALE" or "DUPLICATE". Suggest exact budgets based on logic.
+            
             CRITICAL REQUIREMENTS:
-            - Analyze ALL ${inputCount} ad sets. Do not skip any.
-            - Provide exactly ${inputCount} recommendations in your JSON "recommendations" array.
+            - Analyze ALL ${inputCount} entities. Do not skip any. Even if an entity has 0 spend or 0 activity, you MUST provide a recommendation for it.
+            - Provide exactly ${inputCount} actionable recommendations in your JSON "recommendations" array.
             
             DECISIONS:
             - Choose from: "SCALE", "CONTINUE", "MONITOR", "CLOSE", or "DUPLICATE".
             - "SCALE": Vertical scaling if budget is < 2,000 INR.
             - "DUPLICATE": Horizontal scaling if budget is already >= 2,000 INR and performance warrants more spend.
-            - Use your total autonomy. Consider trends, CPA stability, purchase volume, and ad fatigue signals over the last 30 days.
+            - "CLOSE": Use this aggressively if the metrics are poor and not improving, DO NOT hesitate to kill bad ads.
+            - Use your total autonomy. Consider trends, CPA stability, purchase volume, and ad fatigue signals.
             
             CURRENT DATA:
-            ${JSON.stringify(adData.map(d => ({ ...d, name: (typeof d.name === 'string' ? d.name.trim() : d.name || 'Unknown') })))}
+            ${JSON.stringify(adData.map((d, index) => ({ id: `entity_${index+1}`, ...d, name: (typeof d.name === 'string' ? d.name.trim() : d.name || 'Unknown') })))}
             
             HISTORICAL CONTEXT:
             ${JSON.stringify(historyMap)}
             
             Instructions:
-            1. Provide a recommendation for every item in the "current" dataset.
+            1. Provide a recommendation for EVERY entity in the "CURRENT DATA" block, without exception. Treat identically named entities as separate items based on their unique 'id'.
             2. "targetSpend" (INR): If suggesting SCALE, MONITOR, CONTINUE, or DUPLICATE, suggest the next 24-hour budget allocation.
-            3. "Rationale": A concise, expert insight comparing the current performance to the historical narrative, explicitly mentioning why you chose SCALE or DUPLICATE based on the 2,000 INR cap rule.
+            3. "Rationale": A surgical, expert insight comparing the current performance to the historical narrative and current parameters (min 30-40 words). 
+               - State clearly why you made this specific decision purely based on the stats provided. No generic fluff.
+            4. USE MARKDOWN: Use bolding (**Ad Name**, **₹Amount**, etc.) and clear vertical spacing within "overallStrategy" and "rationale".
             
             Return ONLY a valid JSON object:
             {
               "recommendations": [
                 {
+                  "id": "string (MUST match the id provided in CURRENT DATA)",
                   "name": "string",
                   "decision": "SCALE | CONTINUE | MONITOR | CLOSE | DUPLICATE",
                   "rationale": "string",
                   "targetSpend": number | "N/A",
-                  "stats": { "spend": number, "roas": number, "purchases": number, "cpa": number }
+                  "stats": { "spend": number, "roas": number, "purchases": number, "cpa": number, "cpc": number, "ctr": number, "clicks": number, "cpm": number, "addsToCart": number }
                 }
               ],
               "overallStrategy": "string"
@@ -386,11 +402,12 @@ class AIService {
 
         try {
             const response = await this.openai.chat.completions.create({
-                model: 'gpt-4o',
+                model: 'gpt-5.4',
                 messages: [
                     { role: 'system', content: 'You are an elite performance marketer who prioritizes historical trends over single-day fluctuations.' },
                     { role: 'user', content: prompt }
                 ],
+                max_completion_tokens: 128000,
                 response_format: { type: 'json_object' }
             });
             const result = JSON.parse(response.choices[0].message.content || '{}');
@@ -416,7 +433,15 @@ class AIService {
                 roas: h.roas,
                 purchases: h.purchases,
                 reach: h.reach,
-                impressions: h.impressions
+                impressions: h.impressions,
+                cpc: h.cpc,
+                ctr: h.ctr,
+                cpa: h.cpa,
+                clicks: h.clicks,
+                cpm: h.cpm,
+                frequency: h.frequency,
+                addsToCart: h.addsToCart,
+                outboundClicks: h.outboundClicks
             });
         });
 
@@ -451,7 +476,7 @@ class AIService {
 
         try {
             const response = await this.openai.chat.completions.create({
-                model: 'gpt-4o',
+                model: 'gpt-5.4',
                 messages: [
                     { role: 'system', content: 'You are a high-level performance marketing architect.' },
                     { role: 'user', content: prompt }

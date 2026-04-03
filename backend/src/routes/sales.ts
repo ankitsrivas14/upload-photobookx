@@ -498,12 +498,38 @@ router.post('/predict', requireAdmin, async (req: AuthenticatedRequest, res: Res
   });
 
   /**
+   * DELETE /api/admin/sales/ads-performance/:date
+   * Delete ad performance data and analysis for a specific date
+   */
+  router.delete('/ads-performance/:date', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { date } = req.params;
+      if (!date) {
+        return res.status(400).json({ success: false, error: 'Date is required' });
+      }
+
+      await Promise.all([
+        MetaAdPerformance.deleteMany({ date }),
+        MetaAdAnalysis.deleteMany({ date })
+      ]);
+
+      res.json({ success: true, message: `Ad performance data for ${date} cleared` });
+    } catch (error) {
+      console.error('Delete Ads Performance Date Error:', error);
+      res.status(500).json({ success: false, error: 'Failed' });
+    }
+  });
+
+  /**
    * DELETE /api/admin/sales/ads-performance
    * Clear all archived data to start from scratch
    */
   router.delete('/ads-performance', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      await MetaAdPerformance.deleteMany({});
+      await Promise.all([
+        MetaAdPerformance.deleteMany({}),
+        MetaAdAnalysis.deleteMany({})
+      ]);
       res.json({ success: true, message: 'All ad performance data cleared' });
     } catch (error) {
       console.error('Clear Ads Performance Error:', error);
@@ -527,16 +553,28 @@ router.post('/predict', requireAdmin, async (req: AuthenticatedRequest, res: Res
         const keys = Object.keys(row);
         const lowerAliases = aliases.map(a => a.toLowerCase());
         
+        const cleanValue = (val: any) => {
+          if (val === undefined || val === null) return null;
+          const s = String(val).trim();
+          return s === '' ? null : val;
+        };
+
         // 1. Try exact match (case-insensitive)
         for (const alias of lowerAliases) {
           const exactMatch = keys.find(k => k.toLowerCase() === alias);
-          if (exactMatch !== undefined && row[exactMatch] !== undefined) return row[exactMatch];
+          if (exactMatch !== undefined) {
+            const v = cleanValue(row[exactMatch]);
+            if (v !== null) return v;
+          }
         }
         
         // 2. Try substring match
         for (const alias of lowerAliases) {
           const partialMatch = keys.find(k => k.toLowerCase().includes(alias));
-          if (partialMatch !== undefined && row[partialMatch] !== undefined) return row[partialMatch];
+          if (partialMatch !== undefined) {
+             const v = cleanValue(row[partialMatch]);
+             if (v !== null) return v;
+          }
         }
         
         return null;
@@ -556,6 +594,15 @@ router.post('/predict', requireAdmin, async (req: AuthenticatedRequest, res: Res
         const roas = parseNumber(findValue(d, ['ROAS', 'Return on Ad Spend']));
         const reach = parseNumber(findValue(d, ['Reach']));
         const impressions = parseNumber(findValue(d, ['Impressions']));
+        const cpc = parseNumber(findValue(d, ['cpc', 'cost per link click']));
+        const ctr = parseNumber(findValue(d, ['ctr', 'link click-through rate']));
+        let cpa = parseNumber(findValue(d, ['cost per result', 'cost per purchase', 'cpa']));
+        if (!cpa && purchases > 0) cpa = spend / purchases;
+        const clicks = parseNumber(findValue(d, ['link clicks', 'clicks (all)', 'clicks']));
+        const cpm = parseNumber(findValue(d, ['cost per 1,000 impressions', 'cpm']));
+        const frequency = parseNumber(findValue(d, ['frequency']));
+        const addsToCart = parseNumber(findValue(d, ['adds to cart', 'addToCart', 'addsToCart']));
+        const outboundClicks = parseNumber(findValue(d, ['outbound clicks', 'outboundClicks']));
         const name = (findValue(d, ['Ad Set Name', 'Campaign Name', 'Ad Name', 'Name']) || 'Unknown').trim();
         const status = findValue(d, ['Delivery Status', 'Delivery', 'Status']) || 'active';
         
@@ -584,6 +631,14 @@ router.post('/predict', requireAdmin, async (req: AuthenticatedRequest, res: Res
           roas,
           reach,
           impressions,
+          cpc,
+          ctr,
+          cpa,
+          clicks,
+          cpm,
+          frequency,
+          addsToCart,
+          outboundClicks
         };
       });
 
@@ -616,14 +671,12 @@ router.post('/predict', requireAdmin, async (req: AuthenticatedRequest, res: Res
         return res.status(400).json({ success: false, error: 'No ad data available for analysis. Please upload first.' });
       }
 
-      // Filter only for 'adset' level to avoid duplication from Campaign and Ad level reports
-      // The user wants actionable results specifically for ad sets.
-      let filteredAdData = adData.filter((d: any) => d.level === 'adset');
+      let filteredAdData = adData;
+      const adsetOnly = adData.filter((d: any) => d.level === 'adset');
       
-      // If we filtered out everything, fallback to the original list but warn in logs
-      if (filteredAdData.length === 0) {
-        console.warn('No adset-level data found, falling back to all data.');
-        filteredAdData = adData;
+      // If we have mixed data, prioritize adsets if that's the dominant set requested
+      if (adsetOnly.length > 0) {
+        filteredAdData = adsetOnly;
       }
 
       // Clean up names in current adData and define date
@@ -632,11 +685,12 @@ router.post('/predict', requireAdmin, async (req: AuthenticatedRequest, res: Res
         name: (typeof d.name === 'string' ? d.name.trim() : d.name || 'Unknown')
       }));
       
-      // Remove duplicates by name if any exist in the same level
+      // Remove true duplicates by checking level, name, AND stats
       const seenNames = new Set();
       filteredAdData = filteredAdData.filter((d: any) => {
-        if (seenNames.has(d.name)) return false;
-        seenNames.add(d.name);
+        const key = `${d.level}:${d.name}:${d.spend}:${d.reach}`;
+        if (seenNames.has(key)) return false;
+        seenNames.add(key);
         return true;
       });
 
@@ -644,7 +698,7 @@ router.post('/predict', requireAdmin, async (req: AuthenticatedRequest, res: Res
 
       const latestDate = adData?.[0]?.date || new Date().toISOString().split('T')[0];
 
-      const BATCH_SIZE = 50;
+      const BATCH_SIZE = 12;
       const allRecommendations: any[] = [];
       let overallStrategies: string[] = [];
 
@@ -661,7 +715,7 @@ router.post('/predict', requireAdmin, async (req: AuthenticatedRequest, res: Res
         .sort({ date: -1 })
         .limit(1000); // 1000 points of history for 50 adsets is plenty (~20 days each)
 
-        console.log(`Analyzing Batch ${Math.floor(i / BATCH_SIZE) + 1}... (${batch.length} adsets)`);
+        console.log(`Analyzing Batch ${Math.floor(i / BATCH_SIZE) + 1}... (${batch.length} items)`);
         
         const result = await aiService.analyzeAdsData(batch, batchHistoricalData);
         if (result.recommendations) {

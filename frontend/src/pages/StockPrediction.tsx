@@ -39,7 +39,7 @@ export function StockPrediction() {
       setPredictionResults([]);
 
       // Fetch all orders
-      const response = await api.getOrders(1000, true);
+      const response = await api.getOrders(10000, true);
       
       if (!response.success || !response.orders) {
         setError('Failed to fetch orders');

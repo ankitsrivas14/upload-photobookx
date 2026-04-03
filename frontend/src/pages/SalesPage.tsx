@@ -75,6 +75,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
   const [selectedOrders, setSelectedOrders] = useState<Set<number>>(new Set());
   const [selectAll, setSelectAll] = useState(false);
   const [selectedMonthFilter, setSelectedMonthFilter] = useState<string>(initialFilter?.period || 'current'); // 'all', 'current', 'last30', or 'YYYY-MM'
+  const [availableMonthsList, setAvailableMonthsList] = useState<string[]>([]);
   const [showBulkMenu, setShowBulkMenu] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -162,10 +163,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
   const [isPredicting, setIsPredicting] = useState(false);
 
   useEffect(() => {
-    loadData();
-  }, []);
-
-  useEffect(() => {
+    loadData(selectedMonthFilter);
     if (selectedMonthFilter !== 'all') {
       fetchCurrentPrediction();
     }
@@ -275,11 +273,12 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showDelayDropdown]);
 
-  const loadData = async () => {
+  const loadData = async (monthArg?: string) => {
     setIsLoading(true);
+    const targetMonth = monthArg || selectedMonthFilter;
     try {
       const [ordersResponse, discardedResponse, rtoResponse, cogsConfigResponse, adSpendResponse] = await Promise.all([
-        api.getOrders(1000, true), // Fetch ALL orders (no date filter)
+        api.getOrders(10000, true, undefined, targetMonth), // Fetch ONLY segmented orders natively from backend!
         api.getDiscardedOrderIds(),
         api.getRTOOrderIds(),
         api.getCOGSConfiguration(),
@@ -351,6 +350,9 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
         // Orders already include shipping breakdown from AWB data
         // (Wallet transactions API not available for this account)
         setOrders(ordersResponse.orders);
+        if (ordersResponse.availableMonths) {
+          setAvailableMonthsList(ordersResponse.availableMonths);
+        }
       }
 
       if (discardedResponse.success) {
@@ -409,7 +411,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
 
       // Step 2: Load fresh orders from DB/cache
       setRefreshStatus(syncedCount > 0 ? `Found ${syncedCount} updated orders. Loading all orders...` : 'No new orders. Loading order list...');
-      const response = await api.getOrders(1000, true);
+      const response = await api.getOrders(10000, true, undefined, selectedMonthFilter);
 
       // Step 3: Bulk sync shipping charges in chunks to show exactly how much progress is made
       if (response.success && response.orders) {
@@ -485,7 +487,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
 
       // Step 4: Reload to get updated data with shipping breakdown
       setRefreshStatus('Refreshing display...');
-      await loadData();
+      await loadData(selectedMonthFilter);
     } catch (err) {
       console.error('Failed to refresh data:', err);
       toast.error('Failed to refresh data. Please try again.');
@@ -516,16 +518,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
   };
 
   // Get available months from orders (store timezone)
-  const getAvailableMonths = () => {
-    const monthsSet = new Set<string>();
-    orders.forEach(order => {
-      const dateKey = getOrderDateKey(order.createdAt);
-      monthsSet.add(dateKey.substring(0, 7)); // YYYY-MM
-    });
-    return Array.from(monthsSet).sort().reverse();
-  };
-
-  const availableMonths = getAvailableMonths();
+  const availableMonths = availableMonthsList;
 
   // Helper function to check order status
   const getOrderStatus = (order: ShopifyOrder) => {

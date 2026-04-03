@@ -65,7 +65,7 @@ export function FailedOrdersAnalysis() {
         setError(null);
         try {
             const [res, discardedResponse, rtoResponse] = await Promise.all([
-                api.getOrders(1000, true),
+                api.getOrders(10000, true),
                 api.getDiscardedOrderIds(),
                 api.getRTOOrderIds(),
             ]);

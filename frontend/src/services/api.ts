@@ -123,6 +123,7 @@ interface ShopifyOrder {
 interface OrdersResponse {
   success: boolean;
   orders?: ShopifyOrder[];
+  availableMonths?: string[];
   error?: string;
 }
 
@@ -292,10 +293,11 @@ class ApiService {
   }
 
   // Shopify Orders
-  async getOrders(limit = 50, allOrders = false, createdAtMin?: string): Promise<OrdersResponse> {
+  async getOrders(limit = 50, allOrders = false, createdAtMin?: string, month?: string): Promise<OrdersResponse> {
     const allParam = allOrders ? '&all=true' : '';
     const dateParam = createdAtMin ? `&created_at_min=${encodeURIComponent(createdAtMin)}` : '';
-    return this.request<OrdersResponse>(`/api/admin/magic-links/shopify/orders?limit=${limit}${allParam}${dateParam}`);
+    const monthParam = month ? `&month=${encodeURIComponent(month)}` : '';
+    return this.request<OrdersResponse>(`/api/admin/magic-links/shopify/orders?limit=${limit}${allParam}${dateParam}${monthParam}`);
   }
 
   async getOrder(orderNumber: string): Promise<{ success: boolean; order?: ShopifyOrder; error?: string }> {
@@ -916,6 +918,10 @@ class ApiService {
 
   async clearAdsPerformance(): Promise<{ success: boolean; message: string; error?: string }> {
     return this.request('/api/admin/sales/ads-performance', { method: 'DELETE' });
+  }
+
+  async deleteAdsPerformanceByDate(date: string): Promise<{ success: boolean; message: string; error?: string }> {
+    return this.request(`/api/admin/sales/ads-performance/${date}`, { method: 'DELETE' });
   }
 
   async getAdsPerformanceDaily(): Promise<{ success: boolean; data: any[]; error?: string }> {

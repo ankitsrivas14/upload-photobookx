@@ -106,7 +106,7 @@ export function CreateTicketForm() {
     const handleSyncOrders = async () => {
         setIsSearching(true);
         try {
-            await api.getOrders(1000, true);
+            await api.getOrders(10000, true);
             toast.success('Shopify Sync Complete!');
             if (orderNumber.length >= 2) {
                 await handleSearchOrder(orderNumber);

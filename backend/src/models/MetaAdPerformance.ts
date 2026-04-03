@@ -12,6 +12,12 @@ export interface IMetaAdPerformance extends Document {
   impressions: number;
   cpc?: number;
   ctr?: number;
+  cpa?: number;
+  clicks?: number;
+  cpm?: number;
+  frequency?: number;
+  addsToCart?: number;
+  outboundClicks?: number;
   updatedAt: Date;
 }
 
@@ -27,6 +33,12 @@ const MetaAdPerformanceSchema: Schema = new Schema({
   impressions: { type: Number, default: 0 },
   cpc: { type: Number },
   ctr: { type: Number },
+  cpa: { type: Number },
+  clicks: { type: Number },
+  cpm: { type: Number },
+  frequency: { type: Number },
+  addsToCart: { type: Number },
+  outboundClicks: { type: Number },
 }, { 
   timestamps: true 
 });

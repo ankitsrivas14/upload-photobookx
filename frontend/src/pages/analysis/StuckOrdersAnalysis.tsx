@@ -415,7 +415,7 @@ export function StuckOrdersAnalysis() {
         setError(null);
         try {
             const [ordersRes, ticketsRes] = await Promise.all([
-                api.getOrders(1000, true),
+                api.getOrders(10000, true),
                 api.getTickets()
             ]);
 

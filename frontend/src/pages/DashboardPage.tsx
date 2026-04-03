@@ -114,7 +114,7 @@ export function DashboardPage() {
   const loadDailyPnl = useCallback(async () => {
     try {
       const [ordersRes, adSpendRes, cogsRes, rtoRes] = await Promise.all([
-        api.getOrders(1000, true),
+        api.getOrders(10000, true),
         api.getDailyAdSpend(),
         api.getCOGSConfiguration(),
         api.getRTOOrderIds(),
@@ -1466,9 +1466,10 @@ export function DashboardPage() {
                 dot={(props: any) => {
                   const { cx, cy, payload } = props;
                   const date = new Date(payload.dateKey);
-                  // 1 is Monday
-                  const isMonday = date.getDay() === 1;
-                  if (isMonday) {
+                  const todayIdx = new Date().getDay();
+                  const isMatchingDay = date.getDay() === todayIdx;
+                  
+                  if (isMatchingDay) {
                     return (
                       <g key={payload.dateKey}>
                         <circle cx={cx} cy={cy} r={5} fill="#8b5cf6" stroke="#fff" strokeWidth={2} />
@@ -1480,7 +1481,7 @@ export function DashboardPage() {
                           fontWeight="700" 
                           fill="#7c3aed"
                         >
-                          {payload.roas?.toFixed(1)}
+                          {payload.roas !== null ? payload.roas.toFixed(1) : ''}
                         </text>
                       </g>
                     );
@@ -1539,15 +1540,16 @@ export function DashboardPage() {
             </span>
           </div>
           <div className={styles.chartStatBlock}>
-            <span className={styles.chartStatLabel}>Monday Average ROAS</span>
+            <span className={styles.chartStatLabel}>{new Date().toLocaleDateString('en-IN', { weekday: 'long' })} Average ROAS</span>
             <span className={styles.chartStatValue} style={{ fontSize: '1.5rem', fontWeight: 600, color: '#7c3aed' }}>
               {(() => {
-                const mondays = roasChartData.filter(d => {
+                const todayIdx = new Date().getDay();
+                const matchingDays = roasChartData.filter(d => {
                   const date = new Date(d.dateKey);
-                  return date.getDay() === 1 && d.roas !== null && d.roas > 0;
+                  return date.getDay() === todayIdx && d.roas !== null && d.roas > 0;
                 });
-                if (mondays.length === 0) return 'N/A';
-                const avgRoas = mondays.reduce((sum, d) => sum + (d.roas || 0), 0) / mondays.length;
+                if (matchingDays.length === 0) return 'N/A';
+                const avgRoas = matchingDays.reduce((sum, d) => sum + (d.roas || 0), 0) / matchingDays.length;
                 return avgRoas.toFixed(2);
               })()}
             </span>
