@@ -1,5 +1,5 @@
 import express, { Response } from 'express';
-import { DiscardedOrder, RTOOrder, ProfitPrediction, DailyPerformancePrediction, ShippingCharge, OrderDeliveryDate, ShopifyOrderCache, MetaAdPerformance, MetaAdAnalysis } from '../models';
+import { DiscardedOrder, RTOOrder, ProfitPrediction, DailyPerformancePrediction, ShippingCharge, OrderDeliveryDate, ShopifyOrderCache, MetaAdPerformance, MetaAdAnalysis, AcknowledgedOrder, TicketRaisedOrder } from '../models';
 import { requireAdmin } from './adminAuth';
 import { AuthenticatedRequest } from '../types';
 import aiService from '../services/aiService';
@@ -9,6 +9,182 @@ const router = express.Router();
 /**
  * GET /api/admin/sales/discarded-orders
  * Get all discarded order IDs
+ */
+router.get('/acknowledged-orders', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const acknowledgedOrders = await AcknowledgedOrder.find({}, { shopifyOrderId: 1, _id: 0 });
+    const orderIds = acknowledgedOrders.map((order: any) => order.shopifyOrderId);
+    
+    res.json({
+      success: true,
+      acknowledgedOrderIds: orderIds,
+    });
+  } catch (error) {
+    console.error('Error fetching acknowledged orders:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch acknowledged orders' });
+  }
+});
+
+/**
+ * POST /api/admin/sales/acknowledge-orders
+ * Bulk acknowledge orders
+ */
+router.post('/acknowledge-orders', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { orderIds, orderNames } = req.body;
+    
+    if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
+      res.status(400).json({ success: false, error: 'Order IDs are required' });
+      return;
+    }
+    
+    const userId = req.user!.userId;
+    
+    // Create a map of orderIds to orderNames
+    const orderNameMap = new Map<number, string>();
+    if (orderNames && Array.isArray(orderNames) && orderNames.length === orderIds.length) {
+      orderIds.forEach((id, idx) => {
+        orderNameMap.set(id, orderNames[idx]);
+      });
+    }
+    
+    // Bulk insert (ignore duplicates)
+    const acknowledgedOrders = orderIds.map(orderId => ({
+      shopifyOrderId: orderId,
+      orderName: orderNameMap.get(orderId) || `Order ${orderId}`,
+      acknowledgedBy: userId,
+      acknowledgedAt: new Date(),
+    }));
+    
+    await AcknowledgedOrder.insertMany(acknowledgedOrders, { ordered: false });
+    
+    res.json({
+      success: true,
+      message: `${orderIds.length} order(s) acknowledged`,
+    });
+  } catch (error: any) {
+    // Handle duplicate key errors gracefully
+    if (error.code === 11000) {
+      res.json({
+        success: true,
+        message: 'Orders acknowledged (some were already acknowledged)',
+      });
+      return;
+    }
+    
+    console.error('Error acknowledging orders:', error);
+    res.status(500).json({ success: false, error: 'Failed to acknowledge orders' });
+  }
+});
+
+/**
+ * DELETE /api/admin/sales/acknowledge-orders
+ * Unacknowledge orders
+ */
+router.delete('/acknowledge-orders', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { orderIds } = req.body;
+    
+    if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
+      res.status(400).json({ success: false, error: 'Order IDs are required' });
+      return;
+    }
+    
+    await AcknowledgedOrder.deleteMany({ shopifyOrderId: { $in: orderIds } });
+    
+    res.json({
+      success: true,
+      message: `${orderIds.length} order(s) unacknowledged`,
+    });
+  } catch (error) {
+    console.error('Error unacknowledging orders:', error);
+    res.status(500).json({ success: false, error: 'Failed to unacknowledge orders' });
+  }
+});
+
+router.get('/ticket-raised-orders', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const ticketOrders = await TicketRaisedOrder.find({}, { shopifyOrderId: 1, _id: 0 });
+    const orderIds = ticketOrders.map((order: any) => order.shopifyOrderId);
+    
+    res.json({
+      success: true,
+      ticketRaisedOrderIds: orderIds,
+    });
+  } catch (error) {
+    console.error('Error fetching ticket orders:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch ticket orders' });
+  }
+});
+
+router.post('/ticket-raised-orders', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { orderIds, orderNames } = req.body;
+    
+    if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
+      res.status(400).json({ success: false, error: 'Order IDs are required' });
+      return;
+    }
+    
+    const userId = req.user!.userId;
+    
+    const orderNameMap = new Map<number, string>();
+    if (orderNames && Array.isArray(orderNames) && orderNames.length === orderIds.length) {
+      orderIds.forEach((id, idx) => {
+        orderNameMap.set(id, orderNames[idx]);
+      });
+    }
+    
+    const ticketOrders = orderIds.map(orderId => ({
+      shopifyOrderId: orderId,
+      orderName: orderNameMap.get(orderId) || `Order ${orderId}`,
+      markedBy: userId,
+      markedAt: new Date(),
+    }));
+    
+    await TicketRaisedOrder.insertMany(ticketOrders, { ordered: false });
+    
+    res.json({
+      success: true,
+      message: `${orderIds.length} order(s) marked as ticket raised`,
+    });
+  } catch (error: any) {
+    if (error.code === 11000) {
+      res.json({
+        success: true,
+        message: 'Orders marked as ticket raised (some were already marked)',
+      });
+      return;
+    }
+    
+    console.error('Error marking orders as ticket raised:', error);
+    res.status(500).json({ success: false, error: 'Failed to mark orders as ticket' });
+  }
+});
+
+router.delete('/ticket-raised-orders', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { orderIds } = req.body;
+    
+    if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
+      res.status(400).json({ success: false, error: 'Order IDs are required' });
+      return;
+    }
+    
+    await TicketRaisedOrder.deleteMany({ shopifyOrderId: { $in: orderIds } });
+    
+    res.json({
+      success: true,
+      message: `${orderIds.length} order(s) unmarked as ticket raised`,
+    });
+  } catch (error) {
+    console.error('Error unmarking orders as ticket raised:', error);
+    res.status(500).json({ success: false, error: 'Failed to unmark orders as ticket raised' });
+  }
+});
+
+/**
+ * GET /api/admin/sales/discarded-orders
  */
 router.get('/discarded-orders', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {

@@ -4,6 +4,7 @@ import magicLinkService from '../services/magicLinkService';
 import shopifyService from '../services/shopifyService';
 import shiprocketService from '../services/shiprocketService';
 import aiService from '../services/aiService';
+import { automatedTaggingService } from '../services/automatedTaggingService';
 import type { AuthenticatedRequest } from '../types';
 import config from '../config';
 import { UploadedImage } from '../models';
@@ -301,10 +302,18 @@ router.delete('/:token', requireAdmin, async (req: AuthenticatedRequest, res: Re
 router.post('/shopify/orders/clear-cache', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
   try {
     // Instead of completely dropping the cache, incrementally sync newly updated orders
-    const syncedCount = await shopifyService.syncOrders(1000);
+    // The explicit fetch limit requested by the UI is 10000 so we must sync the same cache key
+    const syncedCount = await shopifyService.syncOrders(10000);
+
+    // Run automated tagging job after sync
+    console.log('触发后端标注任务...');
+    automatedTaggingService.runTaggingJob().catch(err => {
+      console.error('Error running tagging job after sync:', err);
+    });
+
     res.json({
       success: true,
-      message: `Orders synced successfully (${syncedCount} updated)`,
+      message: `Orders synced successfully (${syncedCount} updated). Tagging job started in background.`,
       syncedCount
     });
   } catch (error) {

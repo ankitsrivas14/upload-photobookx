@@ -77,6 +77,4 @@ app.listen(config.port, () => {
   console.log(`🚀 Server running on http://localhost:${config.port}`);
   console.log(`📦 Environment: ${config.nodeEnv}`);
 
-  // Start automated background jobs
-  automatedTaggingService.start();
 });

@@ -25,6 +25,10 @@ interface OrdersTableBodyProps {
   globalNdrRate: number;
   onUpdateDeliveryStatus?: (orderId: number, orderName: string) => void;
   onAddCustomerTag?: (customerId: number, tag: string) => void;
+  onAcknowledgeOrder?: (orderId: number, orderName: string) => void;
+  acknowledgedOrderIds: Set<number>;
+  onMarkTicketRaised?: (orderId: number, orderName: string) => void;
+  ticketRaisedOrderIds: Set<number>;
 }
 
 export const OrdersTableBody: React.FC<OrdersTableBodyProps> = ({
@@ -43,6 +47,10 @@ export const OrdersTableBody: React.FC<OrdersTableBodyProps> = ({
   globalNdrRate,
   onUpdateDeliveryStatus,
   onAddCustomerTag,
+  onAcknowledgeOrder,
+  acknowledgedOrderIds,
+  onMarkTicketRaised,
+  ticketRaisedOrderIds,
 }) => {
   if (hasStatusFilter) {
     // Filtered view: flat list, no day headers
@@ -74,6 +82,10 @@ export const OrdersTableBody: React.FC<OrdersTableBodyProps> = ({
             handleOpenCogsModal={handleOpenCogsModal}
             onUpdateDeliveryStatus={onUpdateDeliveryStatus}
             onAddCustomerTag={onAddCustomerTag}
+            onAcknowledgeOrder={onAcknowledgeOrder}
+            acknowledgedOrderIds={acknowledgedOrderIds}
+            onMarkTicketRaised={onMarkTicketRaised}
+            ticketRaisedOrderIds={ticketRaisedOrderIds}
           />
         ))}
       </tbody>
@@ -161,6 +173,10 @@ export const OrdersTableBody: React.FC<OrdersTableBodyProps> = ({
                 handleOpenCogsModal={handleOpenCogsModal}
                 onUpdateDeliveryStatus={onUpdateDeliveryStatus}
                 onAddCustomerTag={onAddCustomerTag}
+                onAcknowledgeOrder={onAcknowledgeOrder}
+                acknowledgedOrderIds={acknowledgedOrderIds}
+                onMarkTicketRaised={onMarkTicketRaised}
+                ticketRaisedOrderIds={ticketRaisedOrderIds}
               />
             ))}
           </React.Fragment>

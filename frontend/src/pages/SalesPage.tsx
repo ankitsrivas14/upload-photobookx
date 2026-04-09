@@ -72,6 +72,8 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
   const [orders, setOrders] = useState<ShopifyOrder[]>([]);
   const [discardedOrderIds, setDiscardedOrderIds] = useState<Set<number>>(new Set());
   const [rtoOrderIds, setRTOOrderIds] = useState<Set<number>>(new Set());
+  const [acknowledgedOrderIds, setAcknowledgedOrderIds] = useState<Set<number>>(new Set());
+  const [ticketRaisedOrderIds, setTicketRaisedOrderIds] = useState<Set<number>>(new Set());
   const [selectedOrders, setSelectedOrders] = useState<Set<number>>(new Set());
   const [selectAll, setSelectAll] = useState(false);
   const [selectedMonthFilter, setSelectedMonthFilter] = useState<string>(initialFilter?.period || 'current'); // 'all', 'current', 'last30', or 'YYYY-MM'
@@ -89,6 +91,8 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
   const [showInTransit, setShowInTransit] = useState(false);
   const [showOutForDelivery, setShowOutForDelivery] = useState(false);
   const [showConfirmed, setShowConfirmed] = useState(false);
+  const [showNotAcknowledged, setShowNotAcknowledged] = useState(false);
+  const [filterOperator, setFilterOperator] = useState<'AND' | 'OR'>('OR');
 
   // Payment filters
   const [showPrepaid, setShowPrepaid] = useState(false);
@@ -105,6 +109,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       setShowInTransit(false);
       setShowOutForDelivery(false);
       setShowConfirmed(false);
+      setShowNotAcknowledged(false);
       setShowPrepaid(false);
       setShowCOD(false);
 
@@ -277,12 +282,14 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
     setIsLoading(true);
     const targetMonth = monthArg || selectedMonthFilter;
     try {
-      const [ordersResponse, discardedResponse, rtoResponse, cogsConfigResponse, adSpendResponse] = await Promise.all([
+      const [ordersResponse, discardedResponse, rtoResponse, cogsConfigResponse, adSpendResponse, acknowledgedResponse, ticketRaisedResponse] = await Promise.all([
         api.getOrders(10000, true, undefined, targetMonth), // Fetch ONLY segmented orders natively from backend!
         api.getDiscardedOrderIds(),
         api.getRTOOrderIds(),
         api.getCOGSConfiguration(),
         api.getDailyAdSpend(),
+        api.getAcknowledgedOrderIds(),
+        api.getTicketRaisedOrderIds(),
       ]);
 
       if (ordersResponse.success && ordersResponse.orders) {
@@ -361,6 +368,14 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
 
       if (rtoResponse.success) {
         setRTOOrderIds(new Set(rtoResponse.rtoOrderIds));
+      }
+
+      if (acknowledgedResponse.success) {
+        setAcknowledgedOrderIds(new Set(acknowledgedResponse.acknowledgedOrderIds));
+      }
+
+      if (ticketRaisedResponse && ticketRaisedResponse.success) {
+        setTicketRaisedOrderIds(new Set(ticketRaisedResponse.ticketRaisedOrderIds));
       }
 
       if (cogsConfigResponse && cogsConfigResponse.fields) {
@@ -611,18 +626,25 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
     }
 
     // Apply status filters (works with month filter via AND, multiple status filters use OR)
-    if (showUnfulfilled || showDelivered || showFailed || showAttemptedDelivery || showInTransit || showOutForDelivery || showConfirmed) {
+    if (showUnfulfilled || showDelivered || showFailed || showAttemptedDelivery || showInTransit || showOutForDelivery || showConfirmed || showNotAcknowledged) {
       filtered = filtered.filter(order => {
         const { isFailed, isDelivered, isUnfulfilled, isAttemptedDelivery, isInTransit, isOutForDelivery, isConfirmed } = getOrderStatus(order);
-        const matchesUnfulfilled = showUnfulfilled && isUnfulfilled;
-        const matchesDelivered = showDelivered && isDelivered;
-        const matchesFailed = showFailed && isFailed;
-        const matchesAttemptedDelivery = showAttemptedDelivery && isAttemptedDelivery;
-        const matchesInTransit = showInTransit && isInTransit;
-        const matchesOutForDelivery = showOutForDelivery && isOutForDelivery;
-        const matchesConfirmed = showConfirmed && isConfirmed; // Confirmed filter strictly for confirmed/label created status
+        const conditions = [];
 
-        return matchesUnfulfilled || matchesDelivered || matchesFailed || matchesAttemptedDelivery || matchesInTransit || matchesOutForDelivery || matchesConfirmed;
+        if (showUnfulfilled) conditions.push(isUnfulfilled);
+        if (showDelivered) conditions.push(isDelivered);
+        if (showFailed) conditions.push(isFailed);
+        if (showAttemptedDelivery) conditions.push(isAttemptedDelivery);
+        if (showInTransit) conditions.push(isInTransit);
+        if (showOutForDelivery) conditions.push(isOutForDelivery);
+        if (showConfirmed) conditions.push(isConfirmed);
+        if (showNotAcknowledged) conditions.push(!acknowledgedOrderIds.has(order.id));
+
+        if (conditions.length === 0) return true; // Should ideally never hit this due to outer wrapper
+        
+        return filterOperator === 'AND' 
+          ? conditions.every(c => c)
+          : conditions.some(c => c);
       });
     }
     return filtered;
@@ -631,7 +653,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
   const filteredOrders = getFilteredOrders();
 
   const hasStatusFilter =
-    showUnfulfilled || showDelivered || showFailed || showAttemptedDelivery || showInTransit || showOutForDelivery || showConfirmed;
+    showUnfulfilled || showDelivered || showFailed || showAttemptedDelivery || showInTransit || showOutForDelivery || showConfirmed || showNotAcknowledged;
 
   // Whether a date (YYYY-MM-DD) falls within the selected month filter
   const isDateInSelectedMonth = (dateKey: string): boolean => {
@@ -735,7 +757,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
   useEffect(() => {
     setSelectedOrders(new Set());
     setSelectAll(false);
-  }, [selectedMonthFilter, showUnfulfilled, showDelivered, showFailed, showAttemptedDelivery, showInTransit, showOutForDelivery, showConfirmed, showPrepaid, showCOD]);
+  }, [selectedMonthFilter, showUnfulfilled, showDelivered, showFailed, showAttemptedDelivery, showInTransit, showOutForDelivery, showConfirmed, showNotAcknowledged, showPrepaid, showCOD, filterOperator]);
 
   // Calculate pending products from unfulfilled orders
   const getPendingProducts = () => {
@@ -1524,6 +1546,36 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
     }
   };
 
+  const handleAcknowledgeOrder = async (orderId: number, orderName: string) => {
+    try {
+      const response = await api.acknowledgeOrders([orderId], [orderName]);
+      if (response.success) {
+        setAcknowledgedOrderIds(new Set([...acknowledgedOrderIds, orderId]));
+        toast.success(`Order ${orderName} acknowledged`);
+      } else {
+        toast.error(`Error: ${response.error || 'Failed to acknowledge order'}`);
+      }
+    } catch (error) {
+      console.error('Error acknowledging order:', error);
+      toast.error('Failed to acknowledge order');
+    }
+  };
+
+  const handleMarkTicketRaised = async (orderId: number, orderName: string) => {
+    try {
+      const response = await api.markTicketRaisedOrders([orderId], [orderName]);
+      if (response.success) {
+        setTicketRaisedOrderIds(new Set([...ticketRaisedOrderIds, orderId]));
+        toast.success(`Order ${orderName} marked as Ticket Raised`);
+      } else {
+        toast.error(`Error: ${response.error || 'Failed to mark ticket raised'}`);
+      }
+    } catch (error) {
+      console.error('Error marking order as ticket raised:', error);
+      toast.error('Failed to mark ticket raised');
+    }
+  };
+
   const handleBulkAddNoCOD = async () => {
     if (selectedOrders.size === 0) return;
 
@@ -2132,7 +2184,16 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
             </svg>
             Out for Delivery
           </button>
-          {(showUnfulfilled || showDelivered || showFailed || showAttemptedDelivery || showInTransit || showOutForDelivery || showConfirmed) && (
+          <button
+            onClick={() => setShowNotAcknowledged(!showNotAcknowledged)}
+            className={`${styles['filter-chip']} ${showNotAcknowledged ? styles.active : ''}`}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+            </svg>
+            Not Acknowledged
+          </button>
+          {(showUnfulfilled || showDelivered || showFailed || showAttemptedDelivery || showInTransit || showOutForDelivery || showConfirmed || showNotAcknowledged) && (
             <button
               onClick={() => {
                 setShowUnfulfilled(false);
@@ -2142,10 +2203,38 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
                 setShowInTransit(false);
                 setShowOutForDelivery(false);
                 setShowConfirmed(false);
+                setShowNotAcknowledged(false);
               }}
               className={styles['clear-filters-btn']}
             >
               Clear filters
+            </button>
+          )}
+          {hasStatusFilter && (
+            <button
+              onClick={() => setFilterOperator(prev => prev === 'OR' ? 'AND' : 'OR')}
+              className={styles['filter-operator-toggle']}
+              title={`Currently showing orders matching ${filterOperator === 'OR' ? 'ANY' : 'ALL'} selected filters`}
+              style={{
+                marginLeft: 'auto',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 12px',
+                borderRadius: '6px',
+                background: filterOperator === 'AND' ? '#3b82f6' : '#e2e8f0',
+                color: filterOperator === 'AND' ? 'white' : '#475569',
+                border: 'none',
+                cursor: 'pointer',
+                fontWeight: 600,
+                fontSize: '0.875rem',
+                transition: 'all 0.2s'
+              }}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
+                <path d="M4 12h16M4 6h16M4 18h16" />
+              </svg>
+              {filterOperator === 'OR' ? 'OR' : 'AND'}
             </button>
           )}
         </div>
@@ -2193,6 +2282,10 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
               globalNdrRate={globalNdrRate}
               onUpdateDeliveryStatus={handleUpdateDeliveryStatus}
               onAddCustomerTag={handleAddCustomerTag}
+              onAcknowledgeOrder={handleAcknowledgeOrder}
+              acknowledgedOrderIds={acknowledgedOrderIds}
+              onMarkTicketRaised={handleMarkTicketRaised}
+              ticketRaisedOrderIds={ticketRaisedOrderIds}
             />
           </table>
         </div>

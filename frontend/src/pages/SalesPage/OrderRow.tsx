@@ -1,5 +1,5 @@
 import React from 'react';
-import { MoreVertical, CheckCircle, Tag, LifeBuoy } from 'lucide-react';
+import { MoreVertical, CheckCircle, Tag, LifeBuoy, Bookmark } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import {
   DropdownMenu,
@@ -23,6 +23,10 @@ interface OrderRowProps {
   handleOpenCogsModal: (order: ShopifyOrder) => void;
   onUpdateDeliveryStatus?: (orderId: number, orderName: string) => void;
   onAddCustomerTag?: (customerId: number, tag: string) => void;
+  onAcknowledgeOrder?: (orderId: number, orderName: string) => void;
+  acknowledgedOrderIds: Set<number>;
+  onMarkTicketRaised?: (orderId: number, orderName: string) => void;
+  ticketRaisedOrderIds: Set<number>;
 }
 
 export const OrderRow: React.FC<OrderRowProps> = ({
@@ -36,6 +40,10 @@ export const OrderRow: React.FC<OrderRowProps> = ({
   handleOpenCogsModal,
   onUpdateDeliveryStatus,
   onAddCustomerTag,
+  onAcknowledgeOrder,
+  acknowledgedOrderIds,
+  onMarkTicketRaised,
+  ticketRaisedOrderIds,
 }) => {
   const navigate = useNavigate();
   const handleMarkDeliveryStatus = () => {
@@ -48,6 +56,16 @@ export const OrderRow: React.FC<OrderRowProps> = ({
       onAddCustomerTag(order.customerId, 'no-cod');
     } else if (!order.customerId) {
       alert('Customer ID not found for this order');
+    }
+  };
+  const handleAcknowledge = () => {
+    if (onAcknowledgeOrder) {
+      onAcknowledgeOrder(order.id, order.name);
+    }
+  };
+  const handleMarkTicket = () => {
+    if (onMarkTicketRaised) {
+      onMarkTicketRaised(order.id, order.name);
     }
   };
 
@@ -121,13 +139,18 @@ export const OrderRow: React.FC<OrderRowProps> = ({
           {rtoOrderIds.has(order.id) && (
             <span className={`${styles['tag-badge']} ${styles.rto}`}>RTO</span>
           )}
-          {order.hasTicket && (
+          {(order.hasTicket || ticketRaisedOrderIds.has(order.id)) && (
             <span 
               className={`${styles['tag-badge']}`} 
               style={{ backgroundColor: '#e0f2fe', color: '#0369a1', cursor: 'pointer' }}
               onClick={() => navigate('/admin/analysis/tickets')}
             >
               Ticket
+            </span>
+          )}
+          {acknowledgedOrderIds.has(order.id) && (
+            <span className={`${styles['tag-badge']}`} style={{ backgroundColor: '#dcfce7', color: '#166534' }}>
+              Acknowledged
             </span>
           )}
         </div>
@@ -199,13 +222,18 @@ export const OrderRow: React.FC<OrderRowProps> = ({
                 <Tag />
                 <span>Mark as no-cod</span>
               </DropdownMenuItem>
-              <DropdownMenuItem 
-                onClick={() => navigate('/admin/analysis/tickets/new', { state: { orderNumber: order.name } })} 
-                className={styles['action-dropdown-item']}
-              >
-                <LifeBuoy />
-                <span>Support Ticket</span>
-              </DropdownMenuItem>
+              {!ticketRaisedOrderIds.has(order.id) && !order.hasTicket && (
+                <DropdownMenuItem onClick={handleMarkTicket} className={styles['action-dropdown-item']}>
+                  <LifeBuoy />
+                  <span>Ticket Raised</span>
+                </DropdownMenuItem>
+              )}
+              {!acknowledgedOrderIds.has(order.id) && (
+                <DropdownMenuItem onClick={handleAcknowledge} className={styles['action-dropdown-item']}>
+                  <Bookmark />
+                  <span>Acknowledge</span>
+                </DropdownMenuItem>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>

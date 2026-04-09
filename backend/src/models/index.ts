@@ -17,3 +17,7 @@ export { default as DailyPerformancePrediction } from './DailyPerformancePredict
 export { default as ShippingCharge } from './ShippingCharge';
 export { default as OrderDeliveryDate } from './OrderDeliveryDate';
 export { MetaAdPerformance, IMetaAdPerformance, MetaAdAnalysis, IMetaAdAnalysis } from './MetaAdPerformance';
+export { default as AcknowledgedOrder, IAcknowledgedOrder } from './AcknowledgedOrder';
+export { default as TicketRaisedOrder, ITicketRaisedOrder } from './TicketRaisedOrder';
+export { default as ProcessedNoCodOrder, IProcessedNoCodOrder } from './ProcessedNoCodOrder';
+export { default as TaggingJobLog } from './TaggingJobLog';

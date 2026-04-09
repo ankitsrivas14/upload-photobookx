@@ -102,7 +102,7 @@ export function PinCodesAnalysis() {
         setError(null);
         try {
             const [res, rtoResponse] = await Promise.all([
-                api.getOrders(5000, true), // fetch quite a few orders to get a good sample size
+                api.getOrders(10000, true), // fetch quite a few orders to get a good sample size
                 api.getRTOOrderIds(),
             ]);
 

@@ -388,6 +388,60 @@ class ApiService {
     );
   }
 
+  // Sales - Acknowledged Orders
+  async getAcknowledgedOrderIds(): Promise<{ success: boolean; acknowledgedOrderIds: number[] }> {
+    return this.request<{ success: boolean; acknowledgedOrderIds: number[] }>(
+      '/api/admin/sales/acknowledged-orders'
+    );
+  }
+
+  async acknowledgeOrders(orderIds: number[], orderNames: string[]): Promise<{ success: boolean; message?: string; error?: string }> {
+    return this.request<{ success: boolean; message?: string; error?: string }>(
+      '/api/admin/sales/acknowledge-orders',
+      {
+        method: 'POST',
+        body: JSON.stringify({ orderIds, orderNames }),
+      }
+    );
+  }
+
+  async unacknowledgeOrders(orderIds: number[]): Promise<{ success: boolean; message?: string; error?: string }> {
+    return this.request<{ success: boolean; message?: string; error?: string }>(
+      '/api/admin/sales/acknowledge-orders',
+      {
+        method: 'DELETE',
+        body: JSON.stringify({ orderIds }),
+      }
+    );
+  }
+  
+  // Sales - Ticket Raised Orders
+  async getTicketRaisedOrderIds(): Promise<{ success: boolean; ticketRaisedOrderIds: number[] }> {
+    return this.request<{ success: boolean; ticketRaisedOrderIds: number[] }>(
+      '/api/admin/sales/ticket-raised-orders'
+    );
+  }
+
+  async markTicketRaisedOrders(orderIds: number[], orderNames: string[]): Promise<{ success: boolean; message?: string; error?: string }> {
+    return this.request<{ success: boolean; message?: string; error?: string }>(
+      '/api/admin/sales/ticket-raised-orders',
+      {
+        method: 'POST',
+        body: JSON.stringify({ orderIds, orderNames }),
+      }
+    );
+  }
+
+  async unmarkTicketRaisedOrders(orderIds: number[]): Promise<{ success: boolean; message?: string; error?: string }> {
+    return this.request<{ success: boolean; message?: string; error?: string }>(
+      '/api/admin/sales/ticket-raised-orders',
+      {
+        method: 'DELETE',
+        body: JSON.stringify({ orderIds }),
+      }
+    );
+  }
+
   // Sales - Discarded Orders
   async getDiscardedOrderIds(): Promise<{ success: boolean; discardedOrderIds: number[] }> {
     return this.request<{ success: boolean; discardedOrderIds: number[] }>(
