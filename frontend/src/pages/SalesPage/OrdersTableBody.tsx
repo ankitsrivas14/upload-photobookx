@@ -29,6 +29,7 @@ interface OrdersTableBodyProps {
   acknowledgedOrderIds: Set<number>;
   onMarkTicketRaised?: (orderId: number, orderName: string) => void;
   ticketRaisedOrderIds: Set<number>;
+  showAWBColumn?: boolean;
 }
 
 export const OrdersTableBody: React.FC<OrdersTableBodyProps> = ({
@@ -51,6 +52,7 @@ export const OrdersTableBody: React.FC<OrdersTableBodyProps> = ({
   acknowledgedOrderIds,
   onMarkTicketRaised,
   ticketRaisedOrderIds,
+  showAWBColumn = false,
 }) => {
   if (hasStatusFilter) {
     // Filtered view: flat list, no day headers
@@ -58,7 +60,7 @@ export const OrdersTableBody: React.FC<OrdersTableBodyProps> = ({
       return (
         <tbody>
           <tr>
-            <td colSpan={6} className={styles['empty-state']}>
+            <td colSpan={showAWBColumn ? 7 : 6} className={styles['empty-state']}>
               <div className={styles['empty-icon']}>📦</div>
               <div className={styles['empty-text']}>No orders found</div>
             </td>
@@ -86,6 +88,7 @@ export const OrdersTableBody: React.FC<OrdersTableBodyProps> = ({
             acknowledgedOrderIds={acknowledgedOrderIds}
             onMarkTicketRaised={onMarkTicketRaised}
             ticketRaisedOrderIds={ticketRaisedOrderIds}
+            showAWBColumn={showAWBColumn}
           />
         ))}
       </tbody>
@@ -97,7 +100,7 @@ export const OrdersTableBody: React.FC<OrdersTableBodyProps> = ({
     return (
       <tbody>
         <tr>
-          <td colSpan={6} className={styles['empty-state']}>
+          <td colSpan={showAWBColumn ? 7 : 6} className={styles['empty-state']}>
             <div className={styles['empty-icon']}>📦</div>
             <div className={styles['empty-text']}>No orders found</div>
           </td>
@@ -135,7 +138,7 @@ export const OrdersTableBody: React.FC<OrdersTableBodyProps> = ({
         return (
           <React.Fragment key={`day-${dateKey}`}>
             <tr className={styles['day-header-row']}>
-              <td colSpan={6} className={styles['day-header-cell']}>
+              <td colSpan={showAWBColumn ? 7 : 6} className={styles['day-header-cell']}>
                 <div className={styles['day-header-inner']}>
                   <span className={styles['day-header-date']}>{dateLabel}</span>
                   <span className={styles['day-header-ad-spend']}>
@@ -177,6 +180,7 @@ export const OrdersTableBody: React.FC<OrdersTableBodyProps> = ({
                 acknowledgedOrderIds={acknowledgedOrderIds}
                 onMarkTicketRaised={onMarkTicketRaised}
                 ticketRaisedOrderIds={ticketRaisedOrderIds}
+                showAWBColumn={showAWBColumn}
               />
             ))}
           </React.Fragment>

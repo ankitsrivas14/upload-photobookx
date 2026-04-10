@@ -82,6 +82,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshStatus, setRefreshStatus] = useState<string | null>(null);
+  const [showAWBColumn, setShowAWBColumn] = useState(false);
 
   // Status filters (AND filters)
   const [showUnfulfilled, setShowUnfulfilled] = useState(false);
@@ -92,6 +93,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
   const [showOutForDelivery, setShowOutForDelivery] = useState(false);
   const [showConfirmed, setShowConfirmed] = useState(false);
   const [showNotAcknowledged, setShowNotAcknowledged] = useState(false);
+  const [showTicketRaised, setShowTicketRaised] = useState(false);
   const [filterOperator, setFilterOperator] = useState<'AND' | 'OR'>('OR');
 
   // Payment filters
@@ -110,6 +112,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       setShowOutForDelivery(false);
       setShowConfirmed(false);
       setShowNotAcknowledged(false);
+      setShowTicketRaised(false);
       setShowPrepaid(false);
       setShowCOD(false);
 
@@ -639,6 +642,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
         if (showOutForDelivery) conditions.push(isOutForDelivery);
         if (showConfirmed) conditions.push(isConfirmed);
         if (showNotAcknowledged) conditions.push(!acknowledgedOrderIds.has(order.id));
+        if (showTicketRaised) conditions.push(ticketRaisedOrderIds.has(order.id) || order.hasTicket);
 
         if (conditions.length === 0) return true; // Should ideally never hit this due to outer wrapper
         
@@ -653,7 +657,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
   const filteredOrders = getFilteredOrders();
 
   const hasStatusFilter =
-    showUnfulfilled || showDelivered || showFailed || showAttemptedDelivery || showInTransit || showOutForDelivery || showConfirmed || showNotAcknowledged;
+    showUnfulfilled || showDelivered || showFailed || showAttemptedDelivery || showInTransit || showOutForDelivery || showConfirmed || showNotAcknowledged || showTicketRaised;
 
   // Whether a date (YYYY-MM-DD) falls within the selected month filter
   const isDateInSelectedMonth = (dateKey: string): boolean => {
@@ -1619,6 +1623,38 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
     }
   };
 
+  const handleBulkAcknowledge = async () => {
+    if (selectedOrders.size === 0) return;
+
+    const selectedOrderIds = Array.from(selectedOrders);
+    const selectedOrdersData = selectedOrderIds
+      .map(id => orders.find(o => o.id === id))
+      .filter((o): o is ShopifyOrder => !!o);
+      
+    const orderNames = selectedOrdersData.map(o => o.name);
+
+    if (!window.confirm(`Acknowledge ${selectedOrderIds.length} order(s)?`)) return;
+
+    setIsProcessing(true);
+    try {
+      const response = await api.acknowledgeOrders(selectedOrderIds, orderNames);
+      if (response.success) {
+        setAcknowledgedOrderIds(new Set([...Array.from(acknowledgedOrderIds), ...selectedOrderIds]));
+        setSelectedOrders(new Set());
+        setSelectAll(false);
+        setShowBulkMenu(false);
+        toast.success(`Successfully acknowledged ${selectedOrderIds.length} orders`);
+      } else {
+        toast.error(`Error: ${response.error || 'Failed to acknowledge orders'}`);
+      }
+    } catch (err) {
+      console.error('Failed to acknowledge orders:', err);
+      toast.error('An error occurred during bulk operation');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const calculateCogsBreakdown = (
     fields: COGSField[],
     salePrice: number,
@@ -1734,6 +1770,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
                   <th className={styles['checkbox-cell']} />
                   <th>Order</th>
                   <th>Items</th>
+                  {showAWBColumn && <th>AWB</th>}
                   <th>Tags</th>
                   <th>P/L</th>
                   <th>Date</th>
@@ -1746,6 +1783,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
                     <td><span className={`${styles['loading-skeleton']} ${styles['skeleton-check']}`} /></td>
                     <td><span className={`${styles['loading-skeleton']} ${styles['skeleton-order']}`} /></td>
                     <td><span className={`${styles['loading-skeleton']} ${styles['skeleton-items']}`} /></td>
+                    {showAWBColumn && <td><span className={`${styles['loading-skeleton']} ${styles['skeleton-awb']}`} /></td>}
                     <td><span className={`${styles['loading-skeleton']} ${styles['skeleton-tags']}`} /></td>
                     <td><span className={`${styles['loading-skeleton']} ${styles['skeleton-pl']}`} /></td>
                     <td><span className={`${styles['loading-skeleton']} ${styles['skeleton-date']}`} /></td>
@@ -1859,6 +1897,16 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
                             <path d="M6 6l12 12" />
                           </svg>
                           Unmark RTO
+                        </button>
+                        <div className={styles['menu-divider']}></div>
+                        <button
+                          className={`${styles['bulk-menu-item']} ${styles['acknowledge']}`}
+                          onClick={handleBulkAcknowledge}
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+                          </svg>
+                          Acknowledge
                         </button>
                         <div className={styles['menu-divider']}></div>
                         <button
@@ -2193,7 +2241,16 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
             </svg>
             Not Acknowledged
           </button>
-          {(showUnfulfilled || showDelivered || showFailed || showAttemptedDelivery || showInTransit || showOutForDelivery || showConfirmed || showNotAcknowledged) && (
+          <button
+            onClick={() => setShowTicketRaised(!showTicketRaised)}
+            className={`${styles['filter-chip']} ${showTicketRaised ? styles.active : ''}`}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            </svg>
+            Ticket Created
+          </button>
+          {(showUnfulfilled || showDelivered || showFailed || showAttemptedDelivery || showInTransit || showOutForDelivery || showConfirmed || showNotAcknowledged || showTicketRaised) && (
             <button
               onClick={() => {
                 setShowUnfulfilled(false);
@@ -2204,6 +2261,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
                 setShowOutForDelivery(false);
                 setShowConfirmed(false);
                 setShowNotAcknowledged(false);
+                setShowTicketRaised(false);
               }}
               className={styles['clear-filters-btn']}
             >
@@ -2240,11 +2298,30 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
         </div>
 
         {/* Filtered Order Count */}
-        {hasStatusFilter && (
-          <div className={styles['filtered-count']}>
-            {filteredOrders.length} {filteredOrders.length === 1 ? 'order' : 'orders'}
+        <div className={styles['table-settings-row']}>
+          {hasStatusFilter && (
+            <div className={styles['filtered-count']} style={{ margin: 0 }}>
+              {filteredOrders.length} {filteredOrders.length === 1 ? 'order' : 'orders'}
+            </div>
+          )}
+          <div style={{ marginLeft: 'auto' }}>
+            <div 
+              className={`${styles['switch-container']} ${showAWBColumn ? styles.active : ''}`}
+              onClick={() => setShowAWBColumn(!showAWBColumn)}
+            >
+              <span className={styles['switch-label']}>AWB Column</span>
+              <label className={styles['switch']}>
+                <input 
+                  type="checkbox" 
+                  className={styles['switch-input']}
+                  checked={showAWBColumn}
+                  readOnly
+                />
+                <span className={styles['slider']}></span>
+              </label>
+            </div>
           </div>
-        )}
+        </div>
 
         {/* Orders Table */}
         <div className={styles['orders-table-container']}>
@@ -2261,6 +2338,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
                 </th>
                 <th>Order</th>
                 <th>Items</th>
+                {showAWBColumn && <th>AWB</th>}
                 <th>Tags</th>
                 <th>P/L</th>
                 <th className={styles['actions-header']}>Details</th>
@@ -2286,6 +2364,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
               acknowledgedOrderIds={acknowledgedOrderIds}
               onMarkTicketRaised={handleMarkTicketRaised}
               ticketRaisedOrderIds={ticketRaisedOrderIds}
+              showAWBColumn={showAWBColumn}
             />
           </table>
         </div>

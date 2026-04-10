@@ -27,6 +27,7 @@ interface OrderRowProps {
   acknowledgedOrderIds: Set<number>;
   onMarkTicketRaised?: (orderId: number, orderName: string) => void;
   ticketRaisedOrderIds: Set<number>;
+  showAWBColumn?: boolean;
 }
 
 export const OrderRow: React.FC<OrderRowProps> = ({
@@ -44,6 +45,7 @@ export const OrderRow: React.FC<OrderRowProps> = ({
   acknowledgedOrderIds,
   onMarkTicketRaised,
   ticketRaisedOrderIds,
+  showAWBColumn = false,
 }) => {
   const navigate = useNavigate();
   const handleMarkDeliveryStatus = () => {
@@ -115,6 +117,20 @@ export const OrderRow: React.FC<OrderRowProps> = ({
           '—'
         )}
       </td>
+      {showAWBColumn && (
+        <td className={styles['awb-cell']}>
+          {(() => {
+            const displayAWB = order.awbCode || (order.trackingUrl ? order.trackingUrl.split('/').filter(Boolean).pop() : null);
+            return displayAWB ? (
+              <span className={styles['awb-badge']}>
+                {displayAWB}
+              </span>
+            ) : (
+              <span className={styles['no-awb']}>—</span>
+            );
+          })()}
+        </td>
+      )}
       <td className={styles['order-tags']}>
         <div className={styles['tags-wrapper']}>
           {(() => {
