@@ -79,10 +79,15 @@ class ShiprocketService {
   private token: string | null = null;
   private tokenExpiry: Date | null = null;
 
+  // Cache for bulk order map (last 5 minutes)
+  private cachedOrderMap: Map<string, ShiprocketOrder> | null = null;
+  private orderMapFetchedAt: Date | null = null;
+
   constructor() {
     this.email = config.shiprocket.email;
     this.password = config.shiprocket.password;
   }
+
 
   /**
    * Authenticate and get access token
@@ -258,6 +263,12 @@ class ShiprocketService {
    * Much faster than fetching orders one by one
    */
   async getAllRecentOrdersMap(maxOrders: number = 500): Promise<Map<string, ShiprocketOrder>> {
+    // Check if we have a valid cache (5 minutes)
+    if (this.cachedOrderMap && this.orderMapFetchedAt && (Date.now() - this.orderMapFetchedAt.getTime() < 5 * 60 * 1000)) {
+      console.log(`[Shiprocket] Using cached order map (${this.cachedOrderMap.size} keys)`);
+      return this.cachedOrderMap;
+    }
+
     const orderMap = new Map<string, ShiprocketOrder>();
 
     try {
@@ -300,12 +311,18 @@ class ShiprocketService {
       }
 
       console.log(`[Shiprocket] Fetched ${totalFetched} orders, mapped ${orderMap.size} lookup keys`);
+      
+      // Update cache
+      this.cachedOrderMap = orderMap;
+      this.orderMapFetchedAt = new Date();
+      
       return orderMap;
     } catch (error) {
       console.error(`Error fetching bulk Shiprocket orders:`, error);
       return orderMap;
     }
   }
+
 
   /**
    * Get order details by channel order ID (Shopify order number)

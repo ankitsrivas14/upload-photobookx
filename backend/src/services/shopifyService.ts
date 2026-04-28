@@ -223,10 +223,13 @@ class ShopifyService {
       // Set expiresAt to 100 years in the future (effectively infinite)
       const expiresAt = new Date(now.getTime() + (100 * 365 * 24 * 60 * 60 * 1000));
 
+      // Trim orders to keep only necessary fields to avoid MongoDB 16MB document limit
+      const trimmedOrders = orders.map(order => this.trimOrderForCache(order));
+
       await ShopifyOrderCache.findOneAndUpdate(
         { cacheKey },
         {
-          orders,
+          orders: trimmedOrders,
           cachedAt: now,
           expiresAt,
         },
@@ -238,6 +241,65 @@ class ShopifyService {
       // Don't throw - caching is not critical
     }
   }
+
+  /**
+   * Trims a Shopify order object to keep only the fields used by our application.
+   * This is critical to keep the cache size under MongoDB's 16MB limit.
+   */
+  private trimOrderForCache(order: any): any {
+    if (!order) return order;
+
+    return {
+      id: order.id,
+      name: order.name,
+      email: order.email,
+      created_at: order.created_at,
+      createdAt: order.created_at, // Map for frontend
+      fulfillment_status: order.fulfillment_status,
+      cancelled_at: order.cancelled_at,
+      total_price: order.total_price,
+      current_total_price: order.current_total_price,
+      total_price_set: order.total_price_set,
+      gateway: order.gateway,
+      payment_gateway_names: order.payment_gateway_names,
+      tags: order.tags,
+      customer: order.customer ? {
+        id: order.customer.id,
+        email: order.customer.email,
+        first_name: order.customer.first_name,
+        last_name: order.customer.last_name,
+        tags: order.customer.tags
+      } : undefined,
+      line_items: Array.isArray(order.line_items) ? order.line_items.map((li: any) => ({
+        id: li.id,
+        title: li.title,
+        quantity: li.quantity,
+        variant_title: li.variant_title,
+        price: li.price,
+        product_id: li.product_id,
+        sku: li.sku
+      })) : [],
+      shipping_address: order.shipping_address ? {
+        first_name: order.shipping_address.first_name,
+        last_name: order.shipping_address.last_name,
+        name: order.shipping_address.name,
+        address1: order.shipping_address.address1,
+        city: order.shipping_address.city,
+        province: order.shipping_address.province,
+        zip: order.shipping_address.zip,
+        phone: order.shipping_address.phone
+      } : undefined,
+      fulfillments: Array.isArray(order.fulfillments) ? order.fulfillments.map((f: any) => ({
+        id: f.id,
+        status: f.status,
+        shipment_status: f.shipment_status,
+        tracking_company: f.tracking_company,
+        tracking_number: f.tracking_number,
+        tracking_url: f.tracking_url
+      })) : []
+    };
+  }
+
 
   /**
    * Clear all cached orders
@@ -407,9 +469,10 @@ class ShopifyService {
 
         page++;
 
-        // Safety: max 10 pages (2500 orders)
-        if (page > 10) {
-          console.log('Reached max pages limit (10)');
+        // Safety: max pages based on limit
+        const maxPages = Math.ceil(limit / perPage);
+        if (page > maxPages || page > 40) { // Hard limit 40 pages (10000 orders)
+          console.log(`Reached max pages limit (${page-1})`);
           break;
         }
       }
@@ -458,7 +521,16 @@ class ShopifyService {
       }
 
       const existingOrders: ShopifyOrder[] = cachedData.orders;
-      const latestOrder = existingOrders[0]; // Assuming sorted by created_at desc
+      
+      // Find the order with the highest ID to use as since_id
+      // Don't assume index 0 is the latest ID, although it should be if sorted by date
+      let maxId = BigInt(0);
+      existingOrders.forEach(o => {
+        try {
+          const id = BigInt(o.id);
+          if (id > maxId) maxId = id;
+        } catch (e) { /* ignore NaN */ }
+      });
       
       // Step 1: Identify "Pending" orders to re-sync
       const pendingIds = existingOrders
@@ -471,14 +543,41 @@ class ShopifyService {
 
       // Step 2: Fetch "Head" (New orders)
       // We use since_id to get orders created AFTER the latest one we have
-      if (latestOrder) {
-        console.log(`[Sync] Fetching new orders since ID ${latestOrder.id} (#${latestOrder.name})...`);
-        const { data } = await this.makeRequestWithHeaders<ShopifyOrdersResponse>(
-          `/orders.json?since_id=${latestOrder.id}&status=any&limit=250`
-        );
-        if (data.orders && data.orders.length > 0) {
-          console.log(`[Sync] Found ${data.orders.length} new orders.`);
-          updatedOrders.push(...data.orders);
+      // Loop to fetch all new orders if there are more than 250
+      if (maxId > 0n) {
+        let lastIdFetched = maxId.toString();
+        let hasMore = true;
+        let headCount = 0;
+
+        console.log(`[Sync] Fetching new orders since ID ${lastIdFetched}...`);
+        
+        while (hasMore) {
+          const { data } = await this.makeRequestWithHeaders<ShopifyOrdersResponse>(
+            `/orders.json?since_id=${lastIdFetched}&status=any&limit=250`
+          );
+          
+          if (data.orders && data.orders.length > 0) {
+            console.log(`[Sync] Found ${data.orders.length} new orders in this batch.`);
+            updatedOrders.push(...data.orders);
+            headCount += data.orders.length;
+            
+            // Get the last ID from this batch to use for next since_id
+            lastIdFetched = data.orders[data.orders.length - 1].id.toString();
+            
+            // If we got less than 250, we've reached the end
+            if (data.orders.length < 250) {
+              hasMore = false;
+            }
+          } else {
+            hasMore = false;
+          }
+
+          // Safety: max 10 batches (2500 new orders)
+          if (updatedOrders.length > 2500) break;
+        }
+        
+        if (headCount > 0) {
+          console.log(`[Sync] Total new orders fetched: ${headCount}`);
         }
       }
 
@@ -511,12 +610,13 @@ class ShopifyService {
 
         const finalOrders = mergedOrdersList.slice(0, limit);
         await this.updateCache(cacheKey, finalOrders);
-        console.log(`[Sync] Successfully updated ${updatedOrders.length} orders in cache.`);
+        console.log(`[Sync] Successfully updated ${updatedOrders.length} orders in cache (Final count: ${finalOrders.length}).`);
         return updatedOrders.length;
       }
 
       console.log(`[Sync] No updates found.`);
       return 0;
+
     } catch (error) {
       console.error('Error syncing orders:', error);
       throw error;
