@@ -281,15 +281,15 @@ class AIService {
             - Order Number: ${data.orderNumber}
             
             Requirements:
-            1. Keep it very short and professional (max 2-3 sentences).
-            2. Greet the customer by their first name (e.g. "Hello Ankit,") if available.
-            3. Ask the customer to provide their complete address (including House No, Area, Landmark, and Pincode) so we can ship their photobook.
+            1. Keep it concise but VERY warm, polite, and respectful.
+            2. Greet the customer warmly by their first name (e.g. "Dear Ankit," or "Hi Ankit,") if available.
+            3. Kindly request the customer to provide their complete address (including House No, Area, Landmark, and Pincode) so we can ensure their photobook reaches them safely and quickly. Use words like "please" or "kindly".
             4. Mention the order number for reference.
-            5. Always end the message with "- PhotobookX team".
+            5. End with a warm closing like "Thank you," followed by "- PhotobookX team".
             6. Do not use placeholders.
             7. Return only the message text.
             
-            Language: English (Professional but friendly).
+            Tone: Very polite, respectful, warm, and customer-first.
         `;
 
         try {
@@ -304,6 +304,49 @@ class AIService {
             return response.choices[0].message.content || '';
         } catch (err: any) {
             console.error('AIService Incomplete Address Message Error:', err);
+            throw err;
+        }
+    }
+
+    async generateMultipleOrdersMessage(data: {
+        customerName: string;
+        orderNumber: string;
+    }) {
+        if (!this.openai) {
+            throw new Error('OpenAI API key is missing.');
+        }
+
+        const prompt = `
+            Task: Draft a concise, professional WhatsApp message for a customer who has placed multiple identical or similar orders.
+            
+            Context:
+            - Customer Name: ${data.customerName}
+            - Main Order Number: ${data.orderNumber}
+            
+            Requirements:
+            1. Keep it concise but VERY warm, polite, and respectful.
+            2. Greet the customer warmly by their first name (e.g. "Dear Ankit," or "Hi Ankit,") if available.
+            3. Politely inform them that we noticed they have placed multiple orders.
+            4. Kindly ask them to confirm exactly how many quantities of the photobook they need, so we can process their order perfectly. Use words like "please" or "kindly".
+            5. End with a warm closing like "Thank you," followed by "- PhotobookX team".
+            6. Do not use placeholders.
+            7. Return only the message text.
+            
+            Tone: Very polite, respectful, warm, and customer-first.
+        `;
+
+        try {
+            const response = await this.openai.chat.completions.create({
+                model: 'gpt-5.4',
+                messages: [
+                    { role: 'system', content: 'You are a professional customer support assistant for PhotoBookX.' },
+                    { role: 'user', content: prompt }
+                ]
+            });
+
+            return response.choices[0].message.content || '';
+        } catch (err: any) {
+            console.error('AIService Multiple Orders Message Error:', err);
             throw err;
         }
     }

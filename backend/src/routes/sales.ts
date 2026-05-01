@@ -633,6 +633,17 @@ router.post('/predict', requireAdmin, async (req: AuthenticatedRequest, res: Res
     }
   });
 
+  router.post('/generate-multiple-orders-message', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { customerName, orderNumber } = req.body;
+      const message = await aiService.generateMultipleOrdersMessage({ customerName, orderNumber });
+      res.json({ success: true, message });
+    } catch (error) {
+      console.error('Generate Multiple Orders Message Error:', error);
+      res.status(500).json({ success: false, error: 'Failed to generate message' });
+    }
+  });
+
   /**
    * GET /api/admin/sales/ads-performance/status
    * Check if any historical ad data exists

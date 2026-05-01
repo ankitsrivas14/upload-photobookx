@@ -909,6 +909,13 @@ class ApiService {
     });
   }
 
+  async generateMultipleOrdersMessage(customerName: string, orderNumber: string): Promise<{ success: boolean; message?: string; error?: string }> {
+    return this.request('/api/admin/sales/generate-multiple-orders-message', {
+      method: 'POST',
+      body: JSON.stringify({ customerName, orderNumber }),
+    });
+  }
+
   async searchOrders(query: string): Promise<{ success: boolean; orders: any[]; error?: string }> {
     return this.request(`/api/admin/sales/search-orders?query=${encodeURIComponent(query)}`);
   }

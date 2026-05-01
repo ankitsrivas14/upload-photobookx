@@ -18,7 +18,7 @@ export function CreateTicketForm() {
     const [orderNumber, setOrderNumber] = useState('');
     const [suggestions, setSuggestions] = useState<OrderSuggestion[]>([]);
     const [selectedOrder, setSelectedOrder] = useState<OrderSuggestion | null>(null);
-    const [issueType, setIssueType] = useState('incomplete_address');
+    const [issueType, setIssueType] = useState('');
     const [aiMessage, setAiMessage] = useState('');
     
     const [isSearching, setIsSearching] = useState(false);
@@ -37,26 +37,53 @@ export function CreateTicketForm() {
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
-    const handleSearchOrder = async (val: string) => {
-        setOrderNumber(val);
-        if (val.length < 2) {
-            setSuggestions([]);
-            setShowSuggestions(false);
+    const handleFetchOrder = async () => {
+        const query = orderNumber.trim();
+        if (query.length < 2) {
+            toast.error('Please enter a valid order number or name');
             return;
         }
 
         setIsSearching(true);
+        setSelectedOrder(null);
+        setSuggestions([]);
+        setShowSuggestions(false);
+
         try {
-            const res = await api.searchOrders(val);
-            if (res.success && res.orders) {
+            // First try direct fetch from Shopify (best for exact order numbers to avoid cache misses)
+            const isLikelyOrderNumber = /^#?\d+$/.test(query);
+            
+            if (isLikelyOrderNumber) {
+                const res = await api.getOrder(query);
+                if (res.success && res.order) {
+                    const fetchedOrder = {
+                        name: res.order.name,
+                        customerName: res.order.customerName || 'N/A',
+                        customerPhone: res.order.customerPhone || '',
+                        shopifyOrderId: res.order.id
+                    };
+                    setSelectedOrder(fetchedOrder);
+                    if (fetchedOrder.customerPhone && fetchedOrder.customerPhone !== 'xxxxxxxxxx') {
+                        setCustomerPhone(fetchedOrder.customerPhone);
+                    } else {
+                        setCustomerPhone('');
+                    }
+                    setIsSearching(false);
+                    return;
+                }
+            }
+
+            // Fallback to search (for names or if direct fetch fails)
+            const res = await api.searchOrders(query);
+            if (res.success && res.orders && res.orders.length > 0) {
                 setSuggestions(res.orders);
                 setShowSuggestions(true);
             } else {
-                setSuggestions([]);
-                setShowSuggestions(true);
+                toast.error('No orders found');
             }
         } catch (err) {
-            console.error('Search error:', err);
+            console.error('Search/Fetch error:', err);
+            toast.error('Error fetching order');
         } finally {
             setIsSearching(false);
         }
@@ -108,8 +135,8 @@ export function CreateTicketForm() {
         try {
             await api.getOrders(10000, true);
             toast.success('Shopify Sync Complete!');
-            if (orderNumber.length >= 2) {
-                await handleSearchOrder(orderNumber);
+            if (orderNumber.trim().length >= 2) {
+                await handleFetchOrder();
             }
         } catch (e) {
             toast.error('Sync failed');
@@ -139,10 +166,18 @@ export function CreateTicketForm() {
                 }
             }
 
-            const res = await api.generateIncompleteAddressMessage(selectedOrder.customerName, selectedOrder.name);
-            if (res.success && res.message) {
+            let res;
+            if (issueType === 'multiple_orders') {
+                res = await api.generateMultipleOrdersMessage(selectedOrder.customerName, selectedOrder.name);
+            } else if (issueType === 'incomplete_address') {
+                res = await api.generateIncompleteAddressMessage(selectedOrder.customerName, selectedOrder.name);
+            }
+
+            if (res && res.success && res.message) {
                 setAiMessage(res.message);
                 toast.success('AI Message Generated');
+            } else {
+                toast.error('Failed to generate AI message');
             }
         } catch (err) {
             toast.error('Failed to generate AI message');
@@ -228,23 +263,45 @@ export function CreateTicketForm() {
                                 🔄 Sync from Shopify
                             </button>
                         </div>
-                        <div style={{ position: 'relative' }}>
+                        <div style={{ display: 'flex', gap: '0.5rem', position: 'relative' }}>
                             <input
                                 type="text"
                                 value={orderNumber}
-                                onChange={(e) => handleSearchOrder(e.target.value)}
+                                onChange={(e) => setOrderNumber(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleFetchOrder()}
                                 onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
                                 placeholder="Order Number or Customer Name"
                                 style={{ 
-                                    width: '100%', padding: '0.75rem 1rem', borderRadius: '8px', 
+                                    flex: 1, padding: '0.75rem 1rem', borderRadius: '8px', 
                                     border: '1px solid #e2e8f0', fontSize: '0.95rem', outline: 'none'
                                 }}
                             />
-                            {isSearching && (
-                                <div style={{ position: 'absolute', right: '12px', top: '10px' }}>
-                                    <div className={styles.spinner} style={{ width: '20px', height: '20px', borderWidth: '2px' }}></div>
-                                </div>
-                            )}
+                            <button
+                                onClick={handleFetchOrder}
+                                disabled={isSearching}
+                                style={{
+                                    padding: '0 1.5rem',
+                                    backgroundColor: '#0f172a',
+                                    color: '#fff',
+                                    borderRadius: '8px',
+                                    border: 'none',
+                                    fontWeight: 600,
+                                    fontSize: '0.95rem',
+                                    cursor: isSearching ? 'default' : 'pointer',
+                                    opacity: isSearching ? 0.7 : 1,
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    minWidth: '100px',
+                                    transition: 'background-color 0.2s'
+                                }}
+                                onMouseEnter={(e) => { if(!isSearching) e.currentTarget.style.backgroundColor = '#1e293b' }}
+                                onMouseLeave={(e) => { if(!isSearching) e.currentTarget.style.backgroundColor = '#0f172a' }}
+                            >
+                                {isSearching ? (
+                                    <div className={styles.spinner} style={{ width: '18px', height: '18px', borderTopColor: '#fff', borderWidth: '2px' }}></div>
+                                ) : 'Fetch'}
+                            </button>
                         </div>
 
                         {selectedOrder && !showSuggestions && (
@@ -357,14 +414,16 @@ export function CreateTicketForm() {
                                 backgroundColor: '#fff'
                             }}
                         >
+                            <option value="" disabled>Select Issue Type</option>
                             <option value="incomplete_address">Incomplete Address</option>
+                            <option value="multiple_orders">Multiple Orders</option>
                         </select>
                     </div>
 
                     {/* AI Generator Button */}
                     <button
                         onClick={handleGenerateAiMessage}
-                        disabled={!selectedOrder || isGenerating}
+                        disabled={!selectedOrder || isGenerating || !issueType}
                         style={{ 
                             alignSelf: 'flex-start', padding: '0.6rem 1.2rem', borderRadius: '8px',
                             backgroundColor: selectedOrder ? '#7c3aed' : '#f1f5f9',
@@ -382,9 +441,28 @@ export function CreateTicketForm() {
                     {/* AI Message Preview */}
                     {aiMessage && (
                         <div>
-                            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: '#475569', marginBottom: '0.5rem' }}>
-                                WhatsApp Message Preview
-                            </label>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: '#475569', margin: 0 }}>
+                                    WhatsApp Message Preview
+                                </label>
+                                <button
+                                    onClick={() => {
+                                        navigator.clipboard.writeText(aiMessage);
+                                        toast.success('Message copied to clipboard');
+                                    }}
+                                    style={{ 
+                                        background: 'none', border: 'none', color: '#7c3aed', 
+                                        fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', padding: 0,
+                                        display: 'flex', alignItems: 'center', gap: '0.25rem'
+                                    }}
+                                >
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                                    </svg>
+                                    Copy Message
+                                </button>
+                            </div>
                             <textarea
                                 value={aiMessage}
                                 onChange={(e) => setAiMessage(e.target.value)}
