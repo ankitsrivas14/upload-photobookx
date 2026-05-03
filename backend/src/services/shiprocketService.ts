@@ -557,22 +557,8 @@ class ShiprocketService {
         try {
           const normalizedOrderNumber = orderNumber.replace(/^#/, '');
           
-          // Check if already exists in DB and has reached a terminal state
+          // Remove premature skipping - frontend explicitly requested this order to be synced.
           const existing = await ShippingCharge.findOne({ orderNumber });
-          if (existing) {
-            const hasDelivered = !!existing.deliveredDate;
-            const statusStr = existing.status?.toString().toLowerCase() || '';
-            const isTerminal = hasDelivered || terminalStatuses.includes(statusStr);
-
-            // Skip terminal orders if they have a good charge OR were recently fetched
-            const FIX_DATE = new Date('2026-03-21T00:00:00Z');
-            const wasFetchedAfterFix = existing.fetchedAt && new Date(existing.fetchedAt) >= FIX_DATE;
-            
-            if (isTerminal && (existing.shippingCharge > 0 || wasFetchedAfterFix)) {
-              skipped++;
-              return;
-            }
-          }
 
           // Get from pre-fetched map or fetch individually if older
           let shiprocketOrder = shiprocketOrdersMap.get(orderNumber) || shiprocketOrdersMap.get(normalizedOrderNumber);
@@ -732,6 +718,7 @@ class ShiprocketService {
         customerPincode: charge.customerPincode,
         customerPhone: charge.customerPhone,
         fetchedAt: charge.fetchedAt,
+        status: charge.status,
       });
     });
 

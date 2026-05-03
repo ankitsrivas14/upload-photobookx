@@ -582,10 +582,10 @@ class ShopifyService {
       }
 
       // Step 3: Fetch "Pending" updates by ID list
-      // Shopify allows up to 250 IDs in one request
+      // Shopify allows a strict maximum of 50 IDs in one request via the ids parameter
       if (pendingIds.length > 0) {
-        for (let i = 0; i < pendingIds.length; i += 250) {
-          const batch = pendingIds.slice(i, i + 250);
+        for (let i = 0; i < pendingIds.length; i += 50) {
+          const batch = pendingIds.slice(i, i + 50);
           console.log(`[Sync] Fetching batch of ${batch.length} pending updates...`);
           const { data } = await this.makeRequestWithHeaders<ShopifyOrdersResponse>(
             `/orders.json?ids=${batch.join(',')}&status=any`

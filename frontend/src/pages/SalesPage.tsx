@@ -427,9 +427,9 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       const shopifySyncResponse = await api.clearOrdersCache();
       const syncedCount = (shopifySyncResponse as any).syncedCount || 0;
 
-      // Step 2: Load fresh orders from DB/cache
+      // Step 2: Load ALL fresh orders from DB/cache to find any pending syncs across all months
       setRefreshStatus(syncedCount > 0 ? `Found ${syncedCount} updated orders. Loading all orders...` : 'No new orders. Loading order list...');
-      const response = await api.getOrders(10000, true, undefined, selectedMonthFilter);
+      const response = await api.getOrders(10000, true, undefined, 'all');
 
       // Step 3: Bulk sync shipping charges in chunks to show exactly how much progress is made
       if (response.success && response.orders) {
@@ -442,9 +442,9 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
           .filter((o: any) => {
             if (o.cancelledAt) return false;
             
-            // Ignore unfulfilled orders - we only sync if there is a shipment
+            // Ignore unfulfilled orders only if they don't have a Shiprocket status yet
             const isUnfulfilled = !o.fulfillmentStatus || o.fulfillmentStatus === 'unfulfilled';
-            if (isUnfulfilled) return false;
+            if (isUnfulfilled && !o.deliveryStatus) return false;
 
             // Date cutoff per user request
             if (new Date(o.createdAt) < SYNC_CUTOFF_DATE) return false;
@@ -565,10 +565,10 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
     // Out for delivery: explicitly out_for_delivery status
     const isOutForDelivery = deliveryStatus === 'out_for_delivery';
 
-    // Unfulfilled: Check fulfillmentStatus first (null, '', or 'unfulfilled' means not fulfilled)
-    const isUnfulfilled = !fulfillmentStatus ||
+    // Unfulfilled: Check fulfillmentStatus first, BUT override if Shiprocket gave us a status!
+    const isUnfulfilled = (!fulfillmentStatus ||
       fulfillmentStatus === '' ||
-      fulfillmentStatus === 'unfulfilled';
+      fulfillmentStatus === 'unfulfilled') && !deliveryStatus;
 
     // In transit: explicit keywords check
     const isInTransit = !isUnfulfilled && !isDelivered && !isFailed &&
@@ -887,9 +887,9 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
         deliveryStatus.includes('rto');
 
       // Check if order has been fulfilled (shipped)
-      // Use fulfillment_status - if it's 'fulfilled' or 'partial', the order has been fulfilled
+      // Use fulfillment_status OR if we have any valid delivery status from Shiprocket
       const fulfillmentStatus = order.fulfillmentStatus?.toLowerCase() || '';
-      const isFulfilledStatus = fulfillmentStatus === 'fulfilled' || fulfillmentStatus === 'partial';
+      const isFulfilledStatus = fulfillmentStatus === 'fulfilled' || fulfillmentStatus === 'partial' || !!deliveryStatus;
 
       if (isFulfilledStatus) {
         fulfilledCount++;

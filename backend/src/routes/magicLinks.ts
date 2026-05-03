@@ -435,6 +435,8 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
           deliveryStatus = order.fulfillment_status;
         }
 
+        // No longer overriding with Shiprocket status, relying strictly on Shopify
+        // (Other portals also report to Shopify, so Shopify is the universal source of truth)
         // Determine payment method (Prepaid or COD)
         let paymentMethod = 'Prepaid'; // Default to prepaid
 
