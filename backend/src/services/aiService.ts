@@ -70,11 +70,13 @@ class AIService {
         totalDays: number,
         currentOrders: number,
         currentPL: number,
-        historicalData: any[], // Daily breakdown of sales/expenses/orders
         pendingOrdersCount: number,
         avgPLPerDay: number,
         avgOrdersPerDay: number,
-        ndrRate: number
+        ndrRate: number,
+        stats?: any,
+        sixMonthsStats: any[],
+        sixMonthsDailyData: any[]
     }) {
         console.log('--- Calling AIService.predictMonthEnd ---');
         if (!this.openai) {
@@ -91,22 +93,25 @@ class AIService {
             - Realized P/L: ₹${data.currentPL.toFixed(2)} (Avg: ₹${data.avgPLPerDay.toFixed(2)}/day)
             - Current NDR Rate: ${data.ndrRate.toFixed(2)}%
             - Pending Orders awaiting delivery results: ${data.pendingOrdersCount} (These are COD orders in-transit)
+            - Payment Mix: ${JSON.stringify((data as any).stats || {})}
             
-            Deep Granular Stats Provided:
-            - Payment Mix: ${JSON.stringify((data as any).stats)}
-            - Historical Daily Breakdown (last 90 days): 
-            ${JSON.stringify(data.historicalData)}
+            Deep Granular Historical Stats Provided (Last 6 Months, oldest Feb 2026):
+            1. Monthly Breakdown (Total Orders, NDR Rate [% of COD and % of Prepaid], Total P/L): 
+            ${JSON.stringify(data.sixMonthsStats)}
+            
+            2. Daily Breakdown (Orders Placed, Delivered, Failed): 
+            ${JSON.stringify(data.sixMonthsDailyData)}
             
             Analytics Context:
             - "Realized P/L" is current profit from Delivered + Prepaid orders, MINUS Ad Spend and Shipping.
             - "Pending Orders" are COD orders not yet Delivered or Failed.
-            - Historical Daily "pl" is Combined (Accrued) - it includes realized profit + potential profit from pending orders placed that day.
             - High COD ratio usually leads to higher final NDR.
             
             Task:
+            Look at the rate of the current month in comparison to the 6-month historic data. Based on these historical trends:
             1. Predict FINAL TOTAL ORDERS for the month (Current + projected for remaining days).
-            2. Predict FINAL NDR RATE (%) - adjust based on recent trend and COD/Prepaid ratio.
-            3. Predict FINAL PROFIT (₹) - account for current margins and expected NDR impact on pending orders.
+            2. Predict FINAL NDR RATE (%) - adjust based on historic trends and current COD/Prepaid ratio.
+            3. Predict FINAL PROFIT (₹) - account for historic margins, current performance, and expected NDR impact.
             4. Provide a "Master Insight" - a short, actionable sentence for the business owner.
             
             Return ONLY a valid JSON object with:
@@ -114,7 +119,7 @@ class AIService {
               "predictedOrders": number,
               "predictedNDR": number,
               "predictedFinalProfit": number,
-              "reasoning": "Detailed 2-3 sentence logic accounting for payment mix and accrued profit",
+              "reasoning": "Detailed 2-3 sentence logic accounting for historical trends, payment mix and accrued profit",
               "insight": "1 short punchy actionable line"
             }
         `;

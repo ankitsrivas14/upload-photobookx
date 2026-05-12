@@ -395,11 +395,13 @@ router.post('/predict', requireAdmin, async (req: AuthenticatedRequest, res: Res
       totalDays, 
       currentOrders,
       currentPL, 
-      historicalData, 
+      sixMonthsStats, 
+      sixMonthsDailyData,
       pendingOrdersCount, 
       avgPLPerDay, 
       avgOrdersPerDay,
-      ndrRate 
+      ndrRate,
+      stats
     } = req.body;
     
     // Call AI to predict
@@ -409,11 +411,13 @@ router.post('/predict', requireAdmin, async (req: AuthenticatedRequest, res: Res
       totalDays,
       currentOrders,
       currentPL,
-      historicalData,
+      sixMonthsStats,
+      sixMonthsDailyData,
       pendingOrdersCount,
       avgPLPerDay,
       avgOrdersPerDay,
-      ndrRate
+      ndrRate,
+      stats
     });
 
     // Archive old prediction

@@ -205,35 +205,88 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
 
     setIsPredicting(true);
     try {
-      // Prepare historical data for AI (last 90 days of P/L, cutoff Jan 28, 2026)
-      const CUTOFF_DATE = new Date('2026-01-28');
-      const historicalData = ordersGroupedByDate
-        .filter(g => new Date(g.dateKey) >= CUTOFF_DATE)
-        .map(g => {
-          // Calculate REALIZED vs ACCRUED (Pending) for the day
-          let realizedPL = -g.adSpend;
-          let pendingOrdersInGroup = 0;
+      // 1. Fetch ALL orders to build 6-month history (Feb 2026 onwards)
+      const allOrdersRes = await api.getOrders(10000, true, undefined, 'all');
+      const allOrdersList = allOrdersRes.success && allOrdersRes.orders ? allOrdersRes.orders : [];
+      
+      const CUTOFF_DATE = new Date('2026-02-01T00:00:00Z');
+      const sixMonthsOrders = allOrdersList.filter(o => new Date(o.createdAt) >= CUTOFF_DATE && !o.cancelledAt && !discardedOrderIds.has(o.id));
+
+      const monthlyStatsMap = new Map<string, any>();
+      const dailyDataMap = new Map<string, any>();
+
+      sixMonthsOrders.forEach(o => {
+        const dateKey = getOrderDateKey(o.createdAt);
+        const monthKey = dateKey.substring(0, 7); // YYYY-MM
+        
+        if (!monthlyStatsMap.has(monthKey)) {
+          monthlyStatsMap.set(monthKey, { totalOrders: 0, codOrders: 0, prepaidOrders: 0, codFailed: 0, prepaidFailed: 0, codDelivered: 0, prepaidDelivered: 0, totalPL: 0 });
+        }
+        if (!dailyDataMap.has(dateKey)) {
+          dailyDataMap.set(dateKey, { placed: 0, delivered: 0, failed: 0 });
+        }
+        
+        const mStat = monthlyStatsMap.get(monthKey);
+        const dStat = dailyDataMap.get(dateKey);
+        
+        mStat.totalOrders++;
+        dStat.placed++;
+        
+        const isPrepaid = o.paymentMethod?.toLowerCase() === 'prepaid';
+        const status = o.deliveryStatus?.toLowerCase() || '';
+        const isFailed = rtoOrderIds.has(o.id) || status === 'failure' || status.includes('failed') || status.includes('rto');
+        const isDelivered = status === 'delivered';
+        
+        if (isPrepaid) mStat.prepaidOrders++;
+        else mStat.codOrders++;
+        
+        if (isFailed) {
+          dStat.failed++;
+          if (isPrepaid) mStat.prepaidFailed++;
+          else mStat.codFailed++;
+        } else if (isDelivered) {
+          dStat.delivered++;
+          if (isPrepaid) mStat.prepaidDelivered++;
+          else mStat.codDelivered++;
+        }
+        
+        if (isDelivered || isPrepaid) {
+          mStat.totalPL += orderProfitLoss.get(o.id) ?? expectedProfit.avgPLPerDeliveredOrder;
+        } else if (isFailed && !isPrepaid) {
+          mStat.totalPL -= (expectedProfit as any).avgLossPerFailedOrder || 0;
+        }
+      });
+      
+      Object.entries(adSpendByDate).forEach(([dateStr, spend]) => {
+        const d = new Date(dateStr);
+        if (d >= CUTOFF_DATE) {
+          const monthKey = dateStr.substring(0, 7);
+          if (monthlyStatsMap.has(monthKey)) {
+            monthlyStatsMap.get(monthKey).totalPL -= spend;
+          }
+        }
+      });
+
+      const sixMonthsStats = Array.from(monthlyStatsMap.entries()).map(([month, s]) => {
+        const codNdr = s.codFailed + s.codDelivered > 0 ? (s.codFailed / (s.codFailed + s.codDelivered) * 100).toFixed(1) : '0.0';
+        const prepaidNdr = s.prepaidFailed + s.prepaidDelivered > 0 ? (s.prepaidFailed / (s.prepaidFailed + s.prepaidDelivered) * 100).toFixed(1) : '0.0';
+        const totalNdr = s.codFailed + s.prepaidFailed + s.codDelivered + s.prepaidDelivered > 0 ? 
+          ((s.codFailed + s.prepaidFailed) / (s.codFailed + s.prepaidFailed + s.codDelivered + s.prepaidDelivered) * 100).toFixed(1) : '0.0';
           
-          g.orders.forEach(o => {
-            const isFinal = isOrderDelivered(o) || (o.paymentMethod?.toLowerCase() === 'prepaid');
-            if (isFinal) {
-              realizedPL += (orderProfitLoss.get(o.id) ?? 0);
-            } else {
-              pendingOrdersInGroup++;
-            }
-          });
-
-          // Accurate Combined Trend: Realized + potential from pending
-          const combinedPL = realizedPL + (pendingOrdersInGroup * expectedProfit.avgPLPerDeliveredOrder * (1 - globalNdrRate/100));
-
-          return { 
-            date: g.dateKey, 
-            pl: combinedPL,
-            realizedPL,
-            ordersPlaced: g.orders.length,
-            adSpend: g.adSpend
-          };
-        }).slice(0, 90);
+        return {
+          month,
+          totalOrders: s.totalOrders,
+          ndrRateTotal: parseFloat(totalNdr),
+          ndrRateCOD: parseFloat(codNdr),
+          ndrRatePrepaid: parseFloat(prepaidNdr),
+          totalPL: Math.round(s.totalPL)
+        };
+      }).sort((a, b) => a.month.localeCompare(b.month));
+      
+      const sixMonthsDailyData = Array.from(dailyDataMap.entries()).map(([date, d]) => ({
+        date,
+        ...d
+      })).sort((a, b) => a.date.localeCompare(b.date));
 
       const res = await api.predictProfit({
         monthYear,
@@ -241,7 +294,8 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
         totalDays: expectedProfit.totalDays,
         currentOrders: stats.totalOrders,
         currentPL: expectedProfit.currentPL,
-        historicalData,
+        sixMonthsStats,
+        sixMonthsDailyData,
         pendingOrdersCount: expectedProfit.pendingOrdersCount,
         avgPLPerDay: expectedProfit.avgPLPerDay,
         avgOrdersPerDay: stats.totalOrders / expectedProfit.daysElapsed,
