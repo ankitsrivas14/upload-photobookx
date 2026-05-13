@@ -445,12 +445,15 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
         const paymentGateways = order.payment_gateway_names?.map(g => g.toLowerCase()) || [];
         const tags = order.tags?.toLowerCase() || '';
 
-        // Check if it's COD
+        // Check if it's COD (Only if it's not already paid)
         if (
-          gateway.includes('cash on delivery') ||
-          gateway.includes('cod') ||
-          paymentGateways.some(g => g.includes('cash on delivery') || g.includes('cod')) ||
-          tags.includes('cod')
+          order.financial_status !== 'paid' &&
+          (
+            gateway.includes('cash on delivery') ||
+            gateway.includes('cod') ||
+            paymentGateways.some(g => g.includes('cash on delivery') || g.includes('cod')) ||
+            tags.includes('cod')
+          )
         ) {
           paymentMethod = 'COD';
         }

@@ -256,6 +256,7 @@ class ShopifyService {
       created_at: order.created_at,
       createdAt: order.created_at, // Map for frontend
       fulfillment_status: order.fulfillment_status,
+      financial_status: order.financial_status,
       cancelled_at: order.cancelled_at,
       total_price: order.total_price,
       current_total_price: order.current_total_price,
