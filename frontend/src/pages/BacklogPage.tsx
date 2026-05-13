@@ -87,9 +87,25 @@ export default function BacklogPage() {
         .filter(o => getOrderMonthKey(o.createdAt) === month.key)
         .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
         
+      const weeksMap = new Map<string, ShopifyOrder[]>();
+      ['Week 1 (1st - 7th)', 'Week 2 (8th - 14th)', 'Week 3 (15th - 21st)', 'Week 4 (22nd - 28th)', 'Week 5 (29th - end)'].forEach(w => weeksMap.set(w, []));
+      
+      monthOrders.forEach(o => {
+        const d = new Date(o.createdAt).getDate();
+        let w = 'Week 1 (1st - 7th)';
+        if (d > 7 && d <= 14) w = 'Week 2 (8th - 14th)';
+        else if (d > 14 && d <= 21) w = 'Week 3 (15th - 21st)';
+        else if (d > 21 && d <= 28) w = 'Week 4 (22nd - 28th)';
+        else if (d > 28) w = 'Week 5 (29th - end)';
+        weeksMap.get(w)!.push(o);
+      });
+      
+      const weeks = Array.from(weeksMap.entries()).map(([label, orders]) => ({ label, orders }));
+
       return {
         ...month,
-        orders: monthOrders
+        orders: monthOrders,
+        weeks: weeks.filter(w => w.orders.length > 0)
       };
     }).filter(m => m.orders.length > 0 || m.key === getOrderMonthKey(new Date().toISOString()));
   }, [filteredOrdersByView, monthsRange]);
@@ -155,34 +171,42 @@ export default function BacklogPage() {
                   <h2 className={styles['month-title']}>{section.label}</h2>
                   <span className={styles['month-count']}>{section.orders.length}</span>
                 </div>
-                <div className={styles['orders-grid']}>
-                  {section.orders.map(order => (
-                    <div 
-                      key={order.id} 
-                      className={`${styles['order-box']} ${getStatusClass(order)}`}
-                    >
-                      <div className={styles['box-hover-card']}>
-                         <div className={styles['card-name']}>{order.name}</div>
-                         <div className={styles['card-customer']}>{order.customerName}</div>
-                         <div className={styles['card-status']}>{order.deliveryStatus || order.fulfillmentStatus || 'Pending'}</div>
-                         <div className={styles['card-items']}>
-                           {order.lineItems && order.lineItems.length > 0 ? (
-                             order.lineItems.map((item, idx) => (
-                               <div key={idx} className={styles['item-row']}>
-                                 <span className={styles['item-qty']}>{item.quantity}x</span>
-                                 <div className={styles['item-details']}>
-                                   <span className={styles['item-title']}>{item.title}</span>
-                                   {item.variantTitle && (
-                                     <span className={styles['item-variant']}>{item.variantTitle}</span>
-                                   )}
-                                 </div>
+                <div className={styles['month-weeks']}>
+                  {section.weeks.map(week => (
+                    <div key={week.label} className={styles['week-block']}>
+                      <h3 className={styles['week-title']}>{week.label} <span className={styles['week-count']}>({week.orders.length})</span></h3>
+                      <div className={styles['orders-grid']}>
+                        {week.orders.map(order => (
+                          <div 
+                            key={order.id} 
+                            className={`${styles['order-box']} ${getStatusClass(order)}`}
+                            onClick={() => window.open(`https://admin.shopify.com/store/c3532f-a9/orders/${order.id}`, '_blank')}
+                          >
+                            <div className={styles['box-hover-card']}>
+                               <div className={styles['card-name']}>{order.name}</div>
+                               <div className={styles['card-customer']}>{order.customerName}</div>
+                               <div className={styles['card-status']}>{order.deliveryStatus || order.fulfillmentStatus || 'Pending'}</div>
+                               <div className={styles['card-items']}>
+                                 {order.lineItems && order.lineItems.length > 0 ? (
+                                   order.lineItems.map((item, idx) => (
+                                     <div key={idx} className={styles['item-row']}>
+                                       <span className={styles['item-qty']}>{item.quantity}x</span>
+                                       <div className={styles['item-details']}>
+                                         <span className={styles['item-title']}>{item.title}</span>
+                                         {item.variantTitle && (
+                                           <span className={styles['item-variant']}>{item.variantTitle}</span>
+                                         )}
+                                       </div>
+                                     </div>
+                                   ))
+                                 ) : (
+                                   <div className={styles['item-row']}>No items listed</div>
+                                 )}
                                </div>
-                             ))
-                           ) : (
-                             <div className={styles['item-row']}>No items listed</div>
-                           )}
-                         </div>
-                         <div className={styles['card-date']}>{new Date(order.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
+                               <div className={styles['card-date']}>{new Date(order.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
                   ))}

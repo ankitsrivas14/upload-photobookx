@@ -193,6 +193,32 @@
   color: #cbd5e1;
 }
 
+.month-weeks {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.week-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.week-title {
+  margin: 0;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: #94a3b8;
+  letter-spacing: 0.05em;
+  padding-left: 2rem;
+}
+
+.week-count {
+  font-weight: 500;
+  color: #cbd5e1;
+}
+
 .orders-grid {
   display: flex;
   flex-wrap: wrap;
