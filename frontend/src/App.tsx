@@ -8,7 +8,6 @@ import { SalesManagementPage } from './pages/SalesManagementPage';
 import { ToolsPage } from './pages/ToolsPage';
 import { MagicLinksPage } from './pages/MagicLinksPage';
 import { AnalysisPage } from './pages/AnalysisPage';
-import { LogsPage } from './pages/LogsPage';
 import BacklogPage from './pages/BacklogPage';
 import AbandonedCheckoutsPage from './pages/AbandonedCheckoutsPage';
 import { AdminLayout } from './layouts/AdminLayout';
@@ -53,7 +52,6 @@ function App() {
             <Route path="abandoned-checkouts" element={<AbandonedCheckoutsPage />} />
             <Route path="expenses/*" element={<ExpensesPage />} />
             <Route path="analysis/*" element={<AnalysisPage />} />
-            <Route path="logs/*" element={<LogsPage />} />
             <Route path="tools/*" element={<ToolsPage />} />
             <Route path="magic-links/*" element={<MagicLinksPage />} />
 

@@ -33,7 +33,6 @@ export function AdminLayout() {
     if (href === '/admin/expenses/meta-ads' || href === '/admin/expenses') return path.startsWith('/admin/expenses');
     if (href === '/admin/magic-links') return path.startsWith('/admin/magic-links');
     if (href === '/admin/analysis') return path.startsWith('/admin/analysis');
-    if (href === '/admin/logs') return path.startsWith('/admin/logs');
     if (href === '/admin/abandoned-checkouts') return path === '/admin/abandoned-checkouts';
     if (href === '/admin/tools') return path.startsWith('/admin/tools');
     if (href.startsWith('/admin/')) return path === href || (href !== '/admin' && path.startsWith(href + '/'));
@@ -138,18 +137,6 @@ export function AdminLayout() {
             {!sidebarCollapsed && <span>Analysis</span>}
           </Link>
 
-          <Link
-            to="/admin/logs"
-            className={`${styles['nav-item']} ${isActive('/admin/logs') ? styles.active : ''}`}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="4" width="18" height="16" rx="2" ry="2" />
-              <line x1="8" y1="10" x2="16" y2="10" />
-              <line x1="8" y1="14" x2="16" y2="14" />
-              <line x1="8" y1="18" x2="12" y2="18" />
-            </svg>
-            {!sidebarCollapsed && <span>Logs</span>}
-          </Link>
 
           <Link
             to="/admin/tools"
