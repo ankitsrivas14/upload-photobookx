@@ -21,3 +21,5 @@ export { default as AcknowledgedOrder, IAcknowledgedOrder } from './Acknowledged
 export { default as TicketRaisedOrder, ITicketRaisedOrder } from './TicketRaisedOrder';
 export { default as ProcessedNoCodOrder, IProcessedNoCodOrder } from './ProcessedNoCodOrder';
 export { default as TaggingJobLog } from './TaggingJobLog';
+export { AbandonedCheckout, IAbandonedCheckout } from './AbandonedCheckout';
+export { WhatsAppTemplate, IWhatsAppTemplate } from './WhatsAppTemplate';

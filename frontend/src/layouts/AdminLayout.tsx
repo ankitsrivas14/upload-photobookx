@@ -34,6 +34,7 @@ export function AdminLayout() {
     if (href === '/admin/magic-links') return path.startsWith('/admin/magic-links');
     if (href === '/admin/analysis') return path.startsWith('/admin/analysis');
     if (href === '/admin/logs') return path.startsWith('/admin/logs');
+    if (href === '/admin/abandoned-checkouts') return path === '/admin/abandoned-checkouts';
     if (href === '/admin/tools') return path.startsWith('/admin/tools');
     if (href.startsWith('/admin/')) return path === href || (href !== '/admin' && path.startsWith(href + '/'));
     return path === href;
@@ -75,6 +76,19 @@ export function AdminLayout() {
               <line x1="9" y1="22" x2="9" y2="10" />
             </svg>
             {!sidebarCollapsed && <span>Backlog</span>}
+          </Link>
+
+          <Link
+            to="/admin/abandoned-checkouts"
+            className={`${styles['nav-item']} ${isActive('/admin/abandoned-checkouts') ? styles.active : ''}`}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H5c-1.1 0-2 .9-2 2v2" />
+              <circle cx="8.5" cy="7" r="4" />
+              <line x1="20" y1="8" x2="20" y2="14" />
+              <line x1="23" y1="11" x2="17" y2="11" />
+            </svg>
+            {!sidebarCollapsed && <span>Abandoned Checkouts</span>}
           </Link>
 
           <Link

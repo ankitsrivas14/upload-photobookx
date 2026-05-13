@@ -1015,6 +1015,45 @@ class ApiService {
       body: JSON.stringify({ userQuestion, date })
     });
   }
+
+  // Abandoned Checkouts
+  async getAbandonedCheckouts(): Promise<{ success: boolean; checkouts?: any[]; error?: string }> {
+    return this.request<{ success: boolean; checkouts?: any[]; error?: string }>('/api/admin/abandoned-checkouts');
+  }
+
+  async getWhatsAppTemplate(): Promise<{ success: boolean; message?: string; error?: string }> {
+    return this.request<{ success: boolean; message?: string; error?: string }>('/api/admin/abandoned-checkouts/template');
+  }
+
+  async saveWhatsAppTemplate(message: string): Promise<{ success: boolean; message?: string; error?: string }> {
+    return this.request<{ success: boolean; message?: string; error?: string }>(
+      '/api/admin/abandoned-checkouts/template',
+      {
+        method: 'POST',
+        body: JSON.stringify({ message }),
+      }
+    );
+  }
+
+  async submitAbandonedCheckoutsData(textData: string): Promise<{ success: boolean; message?: string; records?: any[]; error?: string }> {
+    return this.request<{ success: boolean; message?: string; records?: any[]; error?: string }>(
+      '/api/admin/abandoned-checkouts',
+      {
+        method: 'POST',
+        body: JSON.stringify({ textData }),
+      }
+    );
+  }
+
+  async updateAbandonedCheckoutStatus(id: string, status: 'pending' | 'message_sent' | 'not_required'): Promise<{ success: boolean; checkout?: any; error?: string }> {
+    return this.request<{ success: boolean; checkout?: any; error?: string }>(
+      `/api/admin/abandoned-checkouts/${id}/status`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ status }),
+      }
+    );
+  }
 }
 
 
