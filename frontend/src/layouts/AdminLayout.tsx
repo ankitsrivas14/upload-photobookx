@@ -31,7 +31,6 @@ export function AdminLayout() {
     if (href === '/admin/dashboard') return path === '/admin/dashboard';
     if (href === '/admin/sales-management') return path === '/admin/sales-management';
     if (href === '/admin/expenses/meta-ads' || href === '/admin/expenses') return path.startsWith('/admin/expenses');
-    if (href === '/admin/magic-links') return path.startsWith('/admin/magic-links');
     if (href === '/admin/analysis') return path.startsWith('/admin/analysis');
     if (href === '/admin/abandoned-checkouts') return path === '/admin/abandoned-checkouts';
     if (href === '/admin/tools') return path.startsWith('/admin/tools');
@@ -88,17 +87,6 @@ export function AdminLayout() {
               <line x1="23" y1="11" x2="17" y2="11" />
             </svg>
             {!sidebarCollapsed && <span>Abandoned Checkouts</span>}
-          </Link>
-
-          <Link
-            to="/admin/magic-links"
-            className={`${styles['nav-item']} ${isActive('/admin/magic-links') ? styles.active : ''}`}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-            </svg>
-            {!sidebarCollapsed && <span>Magic Links</span>}
           </Link>
 
           <Link

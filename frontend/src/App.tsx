@@ -6,7 +6,6 @@ import { ExpensesPage } from './pages/ExpensesPage';
 import { UploadPage } from './pages/UploadPage';
 import { SalesManagementPage } from './pages/SalesManagementPage';
 import { ToolsPage } from './pages/ToolsPage';
-import { MagicLinksPage } from './pages/MagicLinksPage';
 import { AnalysisPage } from './pages/AnalysisPage';
 import BacklogPage from './pages/BacklogPage';
 import AbandonedCheckoutsPage from './pages/AbandonedCheckoutsPage';
@@ -53,10 +52,8 @@ function App() {
             <Route path="expenses/*" element={<ExpensesPage />} />
             <Route path="analysis/*" element={<AnalysisPage />} />
             <Route path="tools/*" element={<ToolsPage />} />
-            <Route path="magic-links/*" element={<MagicLinksPage />} />
 
             {/* Redirects for moved pages */}
-            <Route path="orders" element={<Navigate to="magic-links/orders" replace />} />
             <Route path="products" element={<Navigate to="tools/products" replace />} />
             <Route path="gst-reports/*" element={<Navigate to="tools/gst-reports" replace />} />
           </Route>
