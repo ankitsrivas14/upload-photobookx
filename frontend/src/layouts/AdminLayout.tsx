@@ -33,6 +33,7 @@ export function AdminLayout() {
     if (href === '/admin/expenses/meta-ads' || href === '/admin/expenses') return path.startsWith('/admin/expenses');
     if (href === '/admin/analysis') return path.startsWith('/admin/analysis');
     if (href === '/admin/abandoned-checkouts') return path === '/admin/abandoned-checkouts';
+    if (href === '/admin/attendance') return path.startsWith('/admin/attendance');
     if (href === '/admin/tools') return path.startsWith('/admin/tools');
     if (href.startsWith('/admin/')) return path === href || (href !== '/admin' && path.startsWith(href + '/'));
     return path === href;
@@ -100,6 +101,19 @@ export function AdminLayout() {
               <path d="M8 17v-3" />
             </svg>
             {!sidebarCollapsed && <span>Sales Management</span>}
+          </Link>
+
+          <Link
+            to="/admin/attendance"
+            className={`${styles['nav-item']} ${isActive('/admin/attendance') ? styles.active : ''}`}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+            </svg>
+            {!sidebarCollapsed && <span>Staff Attendance</span>}
           </Link>
 
           <Link

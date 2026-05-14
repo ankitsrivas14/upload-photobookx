@@ -21,3 +21,8 @@ export { default as AcknowledgedOrder, IAcknowledgedOrder } from './Acknowledged
 export { default as TicketRaisedOrder, ITicketRaisedOrder } from './TicketRaisedOrder';
 export { AbandonedCheckout, IAbandonedCheckout } from './AbandonedCheckout';
 export { WhatsAppTemplate, IWhatsAppTemplate } from './WhatsAppTemplate';
+export { Employee, IEmployee } from './Employee';
+export { Attendance, IAttendance } from './Attendance';
+export { SalaryAdvance, ISalaryAdvance } from './SalaryAdvance';
+export { SalaryPayment, ISalaryPayment } from './SalaryPayment';
+export { AttendanceAuditLog, IAttendanceAuditLog } from './AttendanceAuditLog';

@@ -1054,6 +1054,52 @@ class ApiService {
       }
     );
   }
+  async getEmployeesStats(month: string): Promise<{ success: boolean; employees?: any[]; error?: string }> {
+    return this.request(`/api/admin/attendance/employees/stats?month=${month}`);
+  }
+
+  async addEmployee(name: string, monthlySalary: number, joiningDate: string): Promise<{ success: boolean; employee?: any; error?: string }> {
+    return this.request('/api/admin/attendance/employees', {
+      method: 'POST',
+      body: JSON.stringify({ name, monthlySalary, joiningDate }),
+    });
+  }
+
+  async updateEmployee(id: string, data: any): Promise<{ success: boolean; employee?: any; error?: string }> {
+    return this.request(`/api/admin/attendance/employees/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getAttendanceRecords(dateStr: string): Promise<{ success: boolean; records?: any[]; error?: string }> {
+    return this.request(`/api/admin/attendance/records?dateStr=${dateStr}`);
+  }
+
+  async getMonthlyAttendance(month: string): Promise<{ success: boolean; records?: any[]; error?: string }> {
+    return this.request(`/api/admin/attendance/records/month/${month}`);
+  }
+
+  async markAttendance(employeeId: string, dateStr: string, status: string, notes?: string): Promise<{ success: boolean; record?: any; error?: string }> {
+    return this.request('/api/admin/attendance/records', {
+      method: 'POST',
+      body: JSON.stringify({ employeeId, dateStr, status, notes }),
+    });
+  }
+
+  async addSalaryAdvance(employeeId: string, date: string, amount: number, reason: string): Promise<{ success: boolean; advance?: any; error?: string }> {
+    return this.request('/api/admin/attendance/advances', {
+      method: 'POST',
+      body: JSON.stringify({ employeeId, date, amount, reason }),
+    });
+  }
+
+  async markSalaryPaid(employeeId: string, month: string, amountPaid: number): Promise<{ success: boolean; payment?: any; error?: string }> {
+    return this.request('/api/admin/attendance/payments', {
+      method: 'POST',
+      body: JSON.stringify({ employeeId, month, amountPaid }),
+    });
+  }
 }
 
 

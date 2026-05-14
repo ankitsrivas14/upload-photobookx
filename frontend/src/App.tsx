@@ -7,6 +7,7 @@ import { UploadPage } from './pages/UploadPage';
 import { SalesManagementPage } from './pages/SalesManagementPage';
 import { ToolsPage } from './pages/ToolsPage';
 import { AnalysisPage } from './pages/AnalysisPage';
+import { AttendancePage } from './pages/AttendancePage';
 import BacklogPage from './pages/BacklogPage';
 import AbandonedCheckoutsPage from './pages/AbandonedCheckoutsPage';
 import { AdminLayout } from './layouts/AdminLayout';
@@ -51,6 +52,7 @@ function App() {
             <Route path="abandoned-checkouts" element={<AbandonedCheckoutsPage />} />
             <Route path="expenses/*" element={<ExpensesPage />} />
             <Route path="analysis/*" element={<AnalysisPage />} />
+            <Route path="attendance/*" element={<AttendancePage />} />
             <Route path="tools/*" element={<ToolsPage />} />
 
             {/* Redirects for moved pages */}
