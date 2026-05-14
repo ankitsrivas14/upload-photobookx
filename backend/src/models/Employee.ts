@@ -2,7 +2,9 @@ import mongoose, { Document, Schema } from 'mongoose';
 
 export interface IEmployee extends Document {
   name: string;
+  employeeType: 'monthly' | 'hourly';
   monthlySalary: number;
+  hourlyRate: number;
   joiningDate: Date;
   isActive: boolean;
   createdAt: Date;
@@ -11,7 +13,9 @@ export interface IEmployee extends Document {
 
 const employeeSchema = new Schema<IEmployee>({
   name: { type: String, required: true },
-  monthlySalary: { type: Number, required: true },
+  employeeType: { type: String, enum: ['monthly', 'hourly'], default: 'monthly' },
+  monthlySalary: { type: Number, default: 0 },
+  hourlyRate: { type: Number, default: 0 },
   joiningDate: { type: Date, required: true },
   isActive: { type: Boolean, default: true },
 }, {

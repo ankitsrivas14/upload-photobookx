@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { requireAdmin } from './adminAuth';
-import { Employee, Attendance, SalaryAdvance, SalaryPayment, AttendanceAuditLog } from '../models';
+import { Employee, Attendance, SalaryAdvance, SalaryPayment, AttendanceAuditLog, HourlyLog } from '../models';
 import type { AuthenticatedRequest } from '../types';
 
 async function logAudit(action: string, details: string, employeeId?: string, req?: AuthenticatedRequest) {
@@ -19,15 +19,20 @@ const router = Router();
 // Add new employee
 router.post('/employees', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { name, monthlySalary, joiningDate } = req.body;
+    const { name, employeeType, monthlySalary, hourlyRate, joiningDate } = req.body;
     const employee = new Employee({
       name,
-      monthlySalary,
+      employeeType: employeeType || 'monthly',
+      monthlySalary: employeeType === 'hourly' ? 0 : (monthlySalary || 0),
+      hourlyRate: employeeType === 'hourly' ? (hourlyRate || 0) : 0,
       joiningDate: new Date(joiningDate)
     });
     await employee.save();
     
-    await logAudit('ADD_EMPLOYEE', `Added employee ${name} with salary ${monthlySalary}`, employee._id.toString(), req);
+    const details = employeeType === 'hourly' 
+      ? `Added hourly employee ${name} at ₹${hourlyRate}/hr` 
+      : `Added employee ${name} with salary ₹${monthlySalary}/month`;
+    await logAudit('ADD_EMPLOYEE', details, employee._id.toString(), req);
 
     res.json({ success: true, employee });
   } catch (error: any) {
@@ -241,3 +246,89 @@ router.post('/payments', requireAdmin, async (req: AuthenticatedRequest, res: Re
 });
 
 export default router;
+
+// ================= HOURLY LOGS =================
+
+// Log or update hours worked for an hourly employee
+router.post('/hourly-logs', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { employeeId, dateStr, hoursWorked, notes } = req.body;
+    if (hoursWorked < 0 || hoursWorked > 24) {
+      return res.status(400).json({ success: false, error: 'Hours must be between 0 and 24' });
+    }
+    
+    const log = await HourlyLog.findOneAndUpdate(
+      { employeeId, dateStr },
+      { hoursWorked, notes },
+      { new: true, upsert: true }
+    );
+    
+    await logAudit('LOG_HOURS', `Logged ${hoursWorked}h for ${dateStr}`, employeeId, req);
+    
+    res.json({ success: true, log });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Delete a hourly log entry
+router.delete('/hourly-logs/:employeeId/:dateStr', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { employeeId, dateStr } = req.params;
+    await HourlyLog.deleteOne({ employeeId, dateStr });
+    await logAudit('DELETE_HOURS_LOG', `Deleted hours log for ${dateStr}`, employeeId as string, req);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Get monthly hourly logs for all hourly employees
+router.get('/hourly-logs/month/:month', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { month } = req.params; // YYYY-MM
+    const employees = await Employee.find({ isActive: true, employeeType: 'hourly' }).lean();
+    const logs = await HourlyLog.find({
+      dateStr: { $regex: new RegExp(`^${month}-`) }
+    }).lean();
+    
+    const payments = await SalaryPayment.find({
+      month,
+      employeeId: { $in: employees.map(e => e._id) }
+    }).lean();
+
+    const summary = employees.map(emp => {
+      const empLogs = logs.filter(l => l.employeeId.toString() === emp._id.toString());
+      const totalHours = empLogs.reduce((sum, l) => sum + l.hoursWorked, 0);
+      const totalEarnings = Math.round(totalHours * emp.hourlyRate);
+      const payment = payments.find(p => p.employeeId.toString() === emp._id.toString());
+
+      return {
+        ...emp,
+        logs: empLogs,
+        totalHours,
+        totalEarnings,
+        isPaid: !!payment,
+        paidAmount: payment?.amountPaid || 0,
+      };
+    });
+
+    res.json({ success: true, employees: summary });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Get all hourly logs (all time) grouped by employee, for the records table
+router.get('/hourly-logs/all', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const employees = await Employee.find({ isActive: true, employeeType: 'hourly' }).lean();
+    const logs = await HourlyLog.find({
+      employeeId: { $in: employees.map(e => e._id) }
+    }).sort({ dateStr: -1 }).lean();
+
+    res.json({ success: true, employees, logs });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});

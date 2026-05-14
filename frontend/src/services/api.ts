@@ -1058,10 +1058,10 @@ class ApiService {
     return this.request(`/api/admin/attendance/employees/stats?month=${month}`);
   }
 
-  async addEmployee(name: string, monthlySalary: number, joiningDate: string): Promise<{ success: boolean; employee?: any; error?: string }> {
+  async addEmployee(name: string, joiningDate: string, employeeType: 'monthly' | 'hourly', monthlySalary?: number, hourlyRate?: number): Promise<{ success: boolean; employee?: any; error?: string }> {
     return this.request('/api/admin/attendance/employees', {
       method: 'POST',
-      body: JSON.stringify({ name, monthlySalary, joiningDate }),
+      body: JSON.stringify({ name, monthlySalary, hourlyRate, joiningDate, employeeType }),
     });
   }
 
@@ -1099,6 +1099,27 @@ class ApiService {
       method: 'POST',
       body: JSON.stringify({ employeeId, month, amountPaid }),
     });
+  }
+
+  async logHours(employeeId: string, dateStr: string, hoursWorked: number, notes?: string): Promise<{ success: boolean; log?: any; error?: string }> {
+    return this.request('/api/admin/attendance/hourly-logs', {
+      method: 'POST',
+      body: JSON.stringify({ employeeId, dateStr, hoursWorked, notes }),
+    });
+  }
+
+  async deleteHourlyLog(employeeId: string, dateStr: string): Promise<{ success: boolean; error?: string }> {
+    return this.request(`/api/admin/attendance/hourly-logs/${employeeId}/${dateStr}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getMonthlyHourlyLogs(month: string): Promise<{ success: boolean; employees?: any[]; error?: string }> {
+    return this.request(`/api/admin/attendance/hourly-logs/month/${month}`);
+  }
+
+  async getAllHourlyLogs(): Promise<{ success: boolean; employees?: any[]; logs?: any[]; error?: string }> {
+    return this.request('/api/admin/attendance/hourly-logs/all');
   }
 }
 

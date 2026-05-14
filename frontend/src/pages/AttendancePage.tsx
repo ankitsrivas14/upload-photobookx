@@ -22,8 +22,9 @@ interface EmployeeStat {
   };
 }
 
+
 export function AttendancePage() {
-  const [activeTab, setActiveTab] = useState<'attendance' | 'salary' | 'employees'>('attendance');
+  const [activeTab, setActiveTab] = useState<'attendance' | 'salary' | 'employees' | 'hourly'>('attendance');
   const [monthStr, setMonthStr] = useState(() => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -32,9 +33,15 @@ export function AttendancePage() {
   // Monthly Attendance Grid State
   const [monthlyRecords, setMonthlyRecords] = useState<Record<string, Record<string, string>>>({});
 
-  // Employees & Stats
+  // Monthly Employees & Stats
   const [employees, setEmployees] = useState<EmployeeStat[]>([]);
   const [, setLoading] = useState(false);
+
+  // Hourly Employees State
+  const [hourlyEmployees, setHourlyEmployees] = useState<any[]>([]);
+  const [allHourlyLogs, setAllHourlyLogs] = useState<any[]>([]);
+  const [logForm, setLogForm] = useState({ employeeId: '', dateStr: new Date().toISOString().split('T')[0], hoursWorked: '', notes: '' });
+  const [submittingLog, setSubmittingLog] = useState(false);
 
   // Modals
   const [showEmployeeModal, setShowEmployeeModal] = useState(false);
@@ -42,7 +49,7 @@ export function AttendancePage() {
   const [selectedEmployee, setSelectedEmployee] = useState<string>('');
 
   // Form states
-  const [empForm, setEmpForm] = useState({ name: '', monthlySalary: '', joiningDate: '' });
+  const [empForm, setEmpForm] = useState({ name: '', employeeType: 'monthly' as 'monthly' | 'hourly', monthlySalary: '', hourlyRate: '', joiningDate: '' });
   const [advForm, setAdvForm] = useState({ amount: '', reason: '' });
 
   const loadData = useCallback(async () => {
@@ -58,6 +65,18 @@ export function AttendancePage() {
       setLoading(false);
     }
   }, [monthStr]);
+
+  const loadHourlyData = useCallback(async () => {
+    try {
+      const res = await api.getAllHourlyLogs();
+      if (res.success) {
+        setHourlyEmployees(res.employees || []);
+        setAllHourlyLogs(res.logs || []);
+      }
+    } catch (error) {
+      toast.error('Failed to load hourly logs');
+    }
+  }, []);
 
   const loadMonthlyData = useCallback(async () => {
     try {
@@ -77,10 +96,9 @@ export function AttendancePage() {
 
   useEffect(() => {
     loadData();
-    if (activeTab === 'attendance') {
-      loadMonthlyData();
-    }
-  }, [loadData, loadMonthlyData, activeTab]);
+    if (activeTab === 'attendance') loadMonthlyData();
+    if (activeTab === 'hourly') loadHourlyData();
+  }, [loadData, loadMonthlyData, loadHourlyData, activeTab]);
 
   const markMonthlyAttendance = async (empId: string, dateStr: string, currentStatus: string) => {
     const isSunday = new Date(dateStr).getDay() === 0;
@@ -109,13 +127,47 @@ export function AttendancePage() {
   const handleAddEmployee = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await api.addEmployee(empForm.name, Number(empForm.monthlySalary), empForm.joiningDate);
+      await api.addEmployee(
+        empForm.name,
+        empForm.joiningDate,
+        empForm.employeeType,
+        empForm.employeeType === 'monthly' ? Number(empForm.monthlySalary) : undefined,
+        empForm.employeeType === 'hourly' ? Number(empForm.hourlyRate) : undefined
+      );
       toast.success('Employee added');
       setShowEmployeeModal(false);
-      setEmpForm({ name: '', monthlySalary: '', joiningDate: '' });
+      setEmpForm({ name: '', employeeType: 'monthly', monthlySalary: '', hourlyRate: '', joiningDate: '' });
       loadData();
+      loadHourlyData();
     } catch (error) {
       toast.error('Failed to add employee');
+    }
+  };
+
+  const handleLogHours = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!logForm.employeeId || !logForm.dateStr || !logForm.hoursWorked) return;
+    setSubmittingLog(true);
+    try {
+      await api.logHours(logForm.employeeId, logForm.dateStr, Number(logForm.hoursWorked), logForm.notes);
+      toast.success(`${logForm.hoursWorked}h logged successfully`);
+      setLogForm(f => ({ ...f, hoursWorked: '', notes: '' }));
+      loadHourlyData();
+    } catch (error) {
+      toast.error('Failed to log hours');
+    } finally {
+      setSubmittingLog(false);
+    }
+  };
+
+  const handleDeleteLog = async (empId: string, dateStr: string) => {
+    if (!window.confirm('Delete this log entry?')) return;
+    try {
+      await api.deleteHourlyLog(empId, dateStr);
+      toast.success('Log deleted');
+      loadHourlyData();
+    } catch (error) {
+      toast.error('Failed to delete log');
     }
   };
 
@@ -203,6 +255,10 @@ export function AttendancePage() {
           className={`${styles.tab} ${activeTab === 'attendance' ? styles.active : ''}`}
           onClick={() => setActiveTab('attendance')}
         >Monthly Attendance Register</button>
+        <button 
+          className={`${styles.tab} ${activeTab === 'hourly' ? styles.active : ''}`}
+          onClick={() => setActiveTab('hourly')}
+        >Hourly Workers</button>
         <button 
           className={`${styles.tab} ${activeTab === 'salary' ? styles.active : ''}`}
           onClick={() => setActiveTab('salary')}
@@ -380,6 +436,177 @@ export function AttendancePage() {
         </div>
       )}
 
+      {activeTab === 'hourly' && (
+        <div>
+          {/* Log Entry Form */}
+          <div className={styles.card} style={{ marginBottom: '1.5rem' }}>
+            <div className={styles.cardHeader}>
+              <h2>Log Work Hours</h2>
+            </div>
+            {hourlyEmployees.length === 0 ? (
+              <p style={{ color: '#64748b', fontSize: '0.875rem', padding: '0.5rem 0' }}>
+                No hourly employees found. Add one from the "Manage Employees" tab first.
+              </p>
+            ) : (
+              <form onSubmit={handleLogHours} className={styles.logForm}>
+                <div className={styles.logFormRow}>
+                  <div className={styles.logFormField}>
+                    <label>Employee</label>
+                    <select
+                      required
+                      value={logForm.employeeId}
+                      onChange={e => setLogForm(f => ({ ...f, employeeId: e.target.value }))}
+                    >
+                      <option value="">Select employee...</option>
+                      {hourlyEmployees.map((emp: any) => (
+                        <option key={emp._id} value={emp._id}>
+                          {emp.name} (₹{emp.hourlyRate}/hr)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className={styles.logFormField}>
+                    <label>Date</label>
+                    <input
+                      type="date"
+                      required
+                      max={todayStr}
+                      value={logForm.dateStr}
+                      onChange={e => setLogForm(f => ({ ...f, dateStr: e.target.value }))}
+                    />
+                  </div>
+                  <div className={styles.logFormField}>
+                    <label>Hours Worked</label>
+                    <input
+                      type="number"
+                      required
+                      min="0.5"
+                      max="24"
+                      step="0.5"
+                      placeholder="e.g. 8"
+                      value={logForm.hoursWorked}
+                      onChange={e => setLogForm(f => ({ ...f, hoursWorked: e.target.value }))}
+                    />
+                  </div>
+                  <div className={styles.logFormField} style={{ flex: 2 }}>
+                    <label>Notes (optional)</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Overtime, special task..."
+                      value={logForm.notes}
+                      onChange={e => setLogForm(f => ({ ...f, notes: e.target.value }))}
+                    />
+                  </div>
+                  <div className={styles.logFormField} style={{ flex: 'none', justifyContent: 'flex-end' }}>
+                    <label style={{ opacity: 0 }}>Submit</label>
+                    <button type="submit" className={styles.btnPrimary} disabled={submittingLog}>
+                      {submittingLog ? 'Saving...' : 'Log Hours'}
+                    </button>
+                  </div>
+                </div>
+              </form>
+            )}
+          </div>
+
+          {/* Records Tables — grouped by Month then Employee */}
+          {(() => {
+            // Build: { 'YYYY-MM': { empId: { emp, logs[] } } }
+            const months: Record<string, Record<string, { emp: any; logs: any[] }>> = {};
+            allHourlyLogs.forEach((log: any) => {
+              const month = log.dateStr.substring(0, 7);
+              const emp = hourlyEmployees.find((e: any) => e._id === log.employeeId.toString() || e._id.toString() === log.employeeId.toString());
+              if (!emp) return;
+              if (!months[month]) months[month] = {};
+              if (!months[month][emp._id]) months[month][emp._id] = { emp, logs: [] };
+              months[month][emp._id].logs.push(log);
+            });
+
+            const sortedMonths = Object.keys(months).sort((a, b) => b.localeCompare(a));
+
+            if (sortedMonths.length === 0) {
+              return (
+                <div className={styles.card} style={{ padding: '2rem', textAlign: 'center', color: '#94a3b8' }}>
+                  No hours logged yet. Use the form above to add your first entry.
+                </div>
+              );
+            }
+
+            return sortedMonths.map(month => {
+              const monthLabel = new Date(month + '-01').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+              const empGroups = Object.values(months[month]);
+
+              return (
+                <div key={month} className={styles.card} style={{ marginBottom: '1.5rem' }}>
+                  <div className={styles.cardHeader}>
+                    <h2 style={{ fontSize: '1rem' }}>{monthLabel}</h2>
+                    <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                      {empGroups.reduce((t, g) => t + g.logs.reduce((s, l) => s + l.hoursWorked, 0), 0)}h total
+                    </div>
+                  </div>
+
+                  {empGroups.map(({ emp, logs }) => {
+                    const totalHours = logs.reduce((s, l) => s + l.hoursWorked, 0);
+                    const totalEarnings = Math.round(totalHours * emp.hourlyRate);
+
+                    return (
+                      <div key={emp._id} style={{ marginBottom: '1.5rem' }}>
+                        <div className={styles.hourlyEmpHeader}>
+                          <span className={styles.hourlyEmpName}>{emp.name}</span>
+                          <span className={styles.hourlyEmpRate}>₹{emp.hourlyRate}/hr</span>
+                          <span className={styles.hoursTotal}>{totalHours}h</span>
+                          <span className={styles.earningsTotal}>₹{totalEarnings.toLocaleString()}</span>
+                          {!emp.isPaid && (
+                            <button
+                              className={`${styles.actionBtn} ${styles.pay}`}
+                              style={{ marginLeft: 'auto' }}
+                              onClick={() => handleMarkPaid(emp._id, totalEarnings)}
+                            >
+                              Mark Paid
+                            </button>
+                          )}
+                          {emp.isPaid && <span className={`${styles.badge} ${styles.paid}`} style={{ marginLeft: 'auto' }}>Paid</span>}
+                        </div>
+
+                        <table className={styles.table} style={{ marginTop: '0.5rem' }}>
+                          <thead>
+                            <tr>
+                              <th>Date</th>
+                              <th>Day</th>
+                              <th>Hours</th>
+                              <th>Earnings</th>
+                              <th>Notes</th>
+                              <th></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {logs.sort((a, b) => a.dateStr.localeCompare(b.dateStr)).map(log => (
+                              <tr key={log.dateStr}>
+                                <td>{new Date(log.dateStr).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}</td>
+                                <td style={{ color: '#64748b' }}>{new Date(log.dateStr).toLocaleDateString('en-US', { weekday: 'short' })}</td>
+                                <td><span className={styles.hoursBadge}>{log.hoursWorked}h</span></td>
+                                <td style={{ color: '#16a34a', fontWeight: 600 }}>₹{Math.round(log.hoursWorked * emp.hourlyRate).toLocaleString()}</td>
+                                <td style={{ color: '#64748b', fontSize: '0.8125rem' }}>{log.notes || '—'}</td>
+                                <td>
+                                  <button
+                                    className={styles.deleteBtn}
+                                    onClick={() => handleDeleteLog(emp._id, log.dateStr)}
+                                    title="Delete entry"
+                                  >✕</button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            });
+          })()}
+        </div>
+      )}
+
       {activeTab === 'employees' && (
         <div className={styles.card}>
           <div className={styles.cardHeader}>
@@ -422,9 +649,31 @@ export function AttendancePage() {
                 <input required type="text" value={empForm.name} onChange={e => setEmpForm({...empForm, name: e.target.value})} />
               </div>
               <div className={styles.formGroup}>
-                <label>Monthly Salary (₹)</label>
-                <input required type="number" min="0" value={empForm.monthlySalary} onChange={e => setEmpForm({...empForm, monthlySalary: e.target.value})} />
+                <label>Employee Type</label>
+                <div className={styles.typeToggle}>
+                  <button type="button"
+                    className={empForm.employeeType === 'monthly' ? styles.typeActive : styles.typeInactive}
+                    onClick={() => setEmpForm({...empForm, employeeType: 'monthly'})}>
+                    Monthly
+                  </button>
+                  <button type="button"
+                    className={empForm.employeeType === 'hourly' ? styles.typeActive : styles.typeInactive}
+                    onClick={() => setEmpForm({...empForm, employeeType: 'hourly'})}>
+                    Hourly
+                  </button>
+                </div>
               </div>
+              {empForm.employeeType === 'monthly' ? (
+                <div className={styles.formGroup}>
+                  <label>Monthly Salary (₹)</label>
+                  <input required type="number" min="0" value={empForm.monthlySalary} onChange={e => setEmpForm({...empForm, monthlySalary: e.target.value})} />
+                </div>
+              ) : (
+                <div className={styles.formGroup}>
+                  <label>Hourly Rate (₹/hr)</label>
+                  <input required type="number" min="0" step="0.5" value={empForm.hourlyRate} onChange={e => setEmpForm({...empForm, hourlyRate: e.target.value})} />
+                </div>
+              )}
               <div className={styles.formGroup}>
                 <label>Joining Date</label>
                 <input required type="date" value={empForm.joiningDate} onChange={e => setEmpForm({...empForm, joiningDate: e.target.value})} />
