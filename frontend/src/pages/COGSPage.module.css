@@ -141,57 +141,41 @@
 }
 
 .name-cell {
-  font-weight: 500;
-  color: #475569;
+  min-width: 220px;
 }
 
-.calc-cell {
+.field-name {
+  display: block;
+  font-weight: 600;
+  color: #0f172a;
+  font-size: 0.875rem;
+  margin-bottom: 0.375rem;
+}
+
+.field-controls {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.375rem;
-  align-items: center;
 }
 
-.table-select {
-  width: 100%;
-  padding: 0.375rem 0.5rem;
-  font-size: 0.8125rem;
-  font-weight: 500;
-  color: #64748b;
-  background: white;
-  border: 1px solid #e2e8f0;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.table-select:hover {
-  border-color: #cbd5e1;
-}
-
-.table-select:focus {
-  outline: none;
-  border-color: #00B8D4;
-  box-shadow: 0 0 0 2px rgba(0, 184, 212, 0.1);
-}
-
-.table-select-small {
-  padding: 0.375rem 0.375rem;
+.control-select {
+  padding: 0.25rem 0.5rem;
   font-size: 0.75rem;
-  font-weight: 500;
-  color: #64748b;
-  background: white;
+  color: #475569;
+  background: #f8fafc;
   border: 1px solid #e2e8f0;
   border-radius: 4px;
   cursor: pointer;
   transition: all 0.15s ease;
-  min-width: 42px;
+  white-space: nowrap;
 }
 
-.table-select-small:hover {
+.control-select:hover {
   border-color: #cbd5e1;
+  background: #f1f5f9;
 }
 
-.table-select-small:focus {
+.control-select:focus {
   outline: none;
   border-color: #00B8D4;
   box-shadow: 0 0 0 2px rgba(0, 184, 212, 0.1);
@@ -199,13 +183,16 @@
 
 .table-input {
   width: 100%;
+  min-width: 90px;
   padding: 0.5rem 0.75rem;
-  font-size: 0.875rem;
+  font-size: 0.9375rem;
+  font-weight: 500;
   border: 1px solid #e2e8f0;
   border-radius: 4px;
   transition: all 0.15s ease;
   background: white;
   text-align: center;
+  color: #0f172a;
 }
 
 .table-input:focus {

@@ -130,8 +130,6 @@ function CostTable({ category, fields, onChange }: CostTableProps) {
           <thead>
             <tr>
               <th>Cost Field</th>
-              <th>Type</th>
-              <th>Calc</th>
               <th className={styles['value-header']}>Small Prepaid</th>
               <th className={styles['value-header']}>Small COD</th>
               <th className={styles['value-header']}>Large Prepaid</th>
@@ -142,36 +140,34 @@ function CostTable({ category, fields, onChange }: CostTableProps) {
           <tbody>
             {rows.map((field) => (
               <tr key={field.id}>
-                <td className={styles['name-cell']}>{field.name}</td>
-                <td>
-                  <select
-                    value={field.type}
-                    onChange={(e) => setField(field.id, { type: e.target.value as CostField['type'] })}
-                    className={styles['table-select']}
-                  >
-                    <option value="cogs">COGS</option>
-                    <option value="ndr">NDR</option>
-                    <option value="both">Both</option>
-                  </select>
-                </td>
-                <td>
-                  <div className={styles['calc-cell']}>
+                <td className={styles['name-cell']}>
+                  <span className={styles['field-name']}>{field.name}</span>
+                  <div className={styles['field-controls']}>
+                    <select
+                      value={field.type}
+                      onChange={(e) => setField(field.id, { type: e.target.value as CostField['type'] })}
+                      className={styles['control-select']}
+                    >
+                      <option value="cogs">COGS</option>
+                      <option value="ndr">NDR</option>
+                      <option value="both">Both</option>
+                    </select>
                     <select
                       value={field.calculationType}
                       onChange={(e) => setField(field.id, { calculationType: e.target.value as CostField['calculationType'] })}
-                      className={styles['table-select-small']}
+                      className={styles['control-select']}
                     >
-                      <option value="fixed">₹</option>
-                      <option value="percentage">%</option>
+                      <option value="fixed">Fixed (₹)</option>
+                      <option value="percentage">Percentage (%)</option>
                     </select>
                     {field.calculationType === 'percentage' && (
                       <select
                         value={field.percentageType}
                         onChange={(e) => setField(field.id, { percentageType: e.target.value as CostField['percentageType'] })}
-                        className={styles['table-select-small']}
+                        className={styles['control-select']}
                       >
-                        <option value="excluded">Ex</option>
-                        <option value="included">In</option>
+                        <option value="excluded">Excl. of price</option>
+                        <option value="included">Incl. in price</option>
                       </select>
                     )}
                   </div>
@@ -199,7 +195,7 @@ function CostTable({ category, fields, onChange }: CostTableProps) {
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={8} style={{ textAlign: 'center', padding: '1.5rem', color: '#94a3b8', fontSize: '0.875rem' }}>
+                <td colSpan={6} style={{ textAlign: 'center', padding: '1.5rem', color: '#94a3b8', fontSize: '0.875rem' }}>
                   No fields yet. Add one above.
                 </td>
               </tr>
@@ -207,7 +203,7 @@ function CostTable({ category, fields, onChange }: CostTableProps) {
           </tbody>
           <tfoot>
             <tr>
-              <td colSpan={3} className={styles['totals-label']}>{title} Total</td>
+              <td className={styles['totals-label']}>{title} Total</td>
               <td className={styles['totals-cell']}>₹{total('smallPrepaidValue').toFixed(0)}</td>
               <td className={styles['totals-cell']}>₹{total('smallCODValue').toFixed(0)}</td>
               <td className={styles['totals-cell']}>₹{total('largePrepaidValue').toFixed(0)}</td>
