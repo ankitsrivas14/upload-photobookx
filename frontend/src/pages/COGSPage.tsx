@@ -315,123 +315,97 @@ export function COGSPage() {
 
   return (
     <div className={styles['cogs-page']}>
+      {/* Page header */}
       <div className={styles['page-header']}>
         <div>
           <h2>COGS Configuration</h2>
-          <p>Version-based cost config — Pre Cost + Post Cost combine into the final COGS per order</p>
+          <p>Version-based — Pre Cost + Post Cost combine into the final COGS per order</p>
+        </div>
+        <div className={styles['editor-actions']}>
+          {!isNewDraft && selectedId && versions.length > 1 && (
+            <button className={styles['delete-version-btn']} onClick={() => handleDelete(selectedId)}>
+              Delete version
+            </button>
+          )}
+          <button className={styles['save-btn']} onClick={handleSave} disabled={isSaving || !editorOpen}>
+            {isSaving ? 'Saving…' : isNewDraft ? 'Create Version' : 'Save Changes'}
+          </button>
         </div>
       </div>
 
-      <div className={styles['layout']}>
-        {/* Version sidebar */}
-        <div className={styles['version-sidebar']}>
-          <div className={styles['sidebar-header']}>
-            <h3>Versions</h3>
-            <button className={styles['new-version-btn']} onClick={startNewVersion}>+ New</button>
-          </div>
-          <ul className={styles['version-list']}>
-            {isNewDraft && (
-              <li className={`${styles['version-item']} ${styles['new-draft']} ${styles['selected']}`}>
-                <span className={`${styles['version-badge']} ${styles['badge-draft']}`}>Draft</span>
-                <span className={styles['version-date']}>New version</span>
-                <span className={styles['version-meta']}>Unsaved</span>
-              </li>
-            )}
-            {versions.map((v) => {
-              const isActive = v._id === currentVersion?._id;
-              const badge = isActive
-                ? { label: 'Current', cls: styles['badge-current'] }
-                : versionBadge(v, now);
-              const isSelected = !isNewDraft && selectedId === v._id;
-              return (
-                <li
-                  key={v._id}
-                  className={`${styles['version-item']} ${isSelected ? styles['selected'] : ''}`}
-                  onClick={() => openVersion(v)}
-                >
-                  <span className={`${styles['version-badge']} ${badge.cls}`}>{badge.label}</span>
-                  <span className={styles['version-date']}>{versionLabel(v)}</span>
-                  <span className={styles['version-meta']}>{v.fields.length} field{v.fields.length !== 1 ? 's' : ''}</span>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-
-        {/* Editor */}
-        {editorOpen ? (
-          <div className={styles['editor-panel']}>
-            {/* Header row */}
-            <div className={styles['editor-header']}>
-              <div>
-                <p className={styles['editor-title']}>
-                  {isNewDraft ? 'New Version' : `Version: ${editEffectiveFrom}`}
-                </p>
-                <p className={styles['editor-subtitle']}>
-                  Orders on or after the effective date use this config
-                </p>
-              </div>
-              <div className={styles['editor-actions']}>
-                {!isNewDraft && selectedId && versions.length > 1 && (
-                  <button className={styles['delete-version-btn']} onClick={() => handleDelete(selectedId)}>
-                    Delete
-                  </button>
-                )}
-                <button className={styles['save-btn']} onClick={handleSave} disabled={isSaving}>
-                  {isSaving ? 'Saving…' : isNewDraft ? 'Create Version' : 'Save Changes'}
-                </button>
-              </div>
-            </div>
-
-            {/* Effective-from date */}
-            <div className={styles['effective-date-row']}>
-              <span className={styles['effective-date-label']}>Effective from</span>
-              <input
-                type="date"
-                className={styles['effective-date-input']}
-                value={editEffectiveFrom}
-                onChange={(e) => setEditEffectiveFrom(e.target.value)}
-              />
-              <span className={styles['date-hint']}>
-                Orders placed on this date or later will use these values
-              </span>
-            </div>
-
-            {/* Pre Cost table */}
-            <CostTable category="pre" fields={editFields} onChange={setEditFields} />
-
-            {/* Post Cost table */}
-            <CostTable category="post" fields={editFields} onChange={setEditFields} />
-
-            {/* Grand total summary */}
-            <div className={styles['grand-total-row']}>
-              <span className={styles['grand-total-label']}>Total COGS (Pre + Post)</span>
-              <div className={styles['grand-total-values']}>
-                <div className={styles['grand-total-item']}>
-                  <span className={styles['grand-total-variant']}>Small Prepaid</span>
-                  <span className={styles['grand-total-amount']}>₹{grandTotal('smallPrepaidValue').toFixed(0)}</span>
-                </div>
-                <div className={styles['grand-total-item']}>
-                  <span className={styles['grand-total-variant']}>Small COD</span>
-                  <span className={styles['grand-total-amount']}>₹{grandTotal('smallCODValue').toFixed(0)}</span>
-                </div>
-                <div className={styles['grand-total-item']}>
-                  <span className={styles['grand-total-variant']}>Large Prepaid</span>
-                  <span className={styles['grand-total-amount']}>₹{grandTotal('largePrepaidValue').toFixed(0)}</span>
-                </div>
-                <div className={styles['grand-total-item']}>
-                  <span className={styles['grand-total-variant']}>Large COD</span>
-                  <span className={styles['grand-total-amount']}>₹{grandTotal('largeCODValue').toFixed(0)}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className={styles['no-version-placeholder']}>
-            <p>Select a version from the left to edit it, or create a new one.</p>
-          </div>
+      {/* Version selector bar */}
+      <div className={styles['version-bar']}>
+        {versions.map((v) => {
+          const isActive = v._id === currentVersion?._id;
+          const badge = isActive
+            ? { label: 'Current', cls: styles['badge-current'] }
+            : versionBadge(v, now);
+          const isSelected = !isNewDraft && selectedId === v._id;
+          return (
+            <button
+              key={v._id}
+              className={`${styles['version-chip']} ${isSelected ? styles['chip-selected'] : ''}`}
+              onClick={() => openVersion(v)}
+            >
+              <span className={`${styles['version-badge']} ${badge.cls}`}>{badge.label}</span>
+              <span className={styles['chip-date']}>{versionLabel(v)}</span>
+            </button>
+          );
+        })}
+        {isNewDraft && (
+          <button className={`${styles['version-chip']} ${styles['chip-selected']} ${styles['chip-draft']}`}>
+            <span className={`${styles['version-badge']} ${styles['badge-draft']}`}>Draft</span>
+            <span className={styles['chip-date']}>New version</span>
+          </button>
         )}
+        <button className={styles['new-version-chip']} onClick={startNewVersion}>
+          + New Version
+        </button>
       </div>
+
+      {/* Editor */}
+      {editorOpen ? (
+        <div className={styles['editor-panel']}>
+          {/* Effective-from date */}
+          <div className={styles['effective-date-row']}>
+            <span className={styles['effective-date-label']}>Effective from</span>
+            <input
+              type="date"
+              className={styles['effective-date-input']}
+              value={editEffectiveFrom}
+              onChange={(e) => setEditEffectiveFrom(e.target.value)}
+            />
+            <span className={styles['date-hint']}>
+              Orders placed on this date or later will use these values
+            </span>
+          </div>
+
+          {/* Pre Cost table */}
+          <CostTable category="pre" fields={editFields} onChange={setEditFields} />
+
+          {/* Post Cost table */}
+          <CostTable category="post" fields={editFields} onChange={setEditFields} />
+
+          {/* Grand total summary */}
+          <div className={styles['grand-total-row']}>
+            <span className={styles['grand-total-label']}>Total COGS (Pre + Post)</span>
+            <div className={styles['grand-total-values']}>
+              {(['smallPrepaidValue', 'smallCODValue', 'largePrepaidValue', 'largeCODValue'] as ValueKey[]).map((key) => (
+                <div key={key} className={styles['grand-total-item']}>
+                  <span className={styles['grand-total-variant']}>
+                    {key === 'smallPrepaidValue' ? 'Small Prepaid' : key === 'smallCODValue' ? 'Small COD' : key === 'largePrepaidValue' ? 'Large Prepaid' : 'Large COD'}
+                  </span>
+                  <span className={styles['grand-total-amount']}>₹{grandTotal(key).toFixed(0)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className={styles['no-version-placeholder']}>
+          <p>Select a version above or create a new one.</p>
+        </div>
+      )}
     </div>
   );
 }
