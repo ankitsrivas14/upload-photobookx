@@ -105,7 +105,7 @@ function MetricChart({ title, data, dataKey, color, formatValue, zeroLine }: Met
 }
 
 export function ProfitPredictionCalculator() {
-  const [days, setDays] = useState<DayOption>(30);
+  const [days, setDays] = useState<DayOption>(90);
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -147,30 +147,44 @@ export function ProfitPredictionCalculator() {
 
   const chartData = useMemo(() => {
     const completed = daily.filter(d => d.isCompleted);
-    const WINDOW = 7;
 
-    const roll = (arr: (number | null)[], i: number): number | null => {
-      const slice = arr.slice(Math.max(0, i - WINDOW + 1), i + 1).filter((v): v is number => v !== null);
-      return slice.length > 0 ? slice.reduce((a, b) => a + b, 0) / slice.length : null;
-    };
+    // Group into ISO weeks (Mon–Sun). Key = 'YYYY-Www'
+    const weeks = new Map<string, typeof completed>();
+    for (const d of completed) {
+      const date = new Date(d.date);
+      const day = date.getDay() === 0 ? 7 : date.getDay(); // Mon=1 … Sun=7
+      const mon = new Date(date);
+      mon.setDate(date.getDate() - (day - 1));
+      const key = mon.toLocaleDateString('en-CA'); // YYYY-MM-DD of Monday
+      if (!weeks.has(key)) weeks.set(key, []);
+      weeks.get(key)!.push(d);
+    }
 
-    const raw = {
-      avgRevenue:   completed.map(d => d.orders > 0 ? d.avgRevenuePerOrder : null),
-      avgCosts:     completed.map(d => d.orders > 0 ? d.avgCogsPerOrder : null),
-      avgProfit:    completed.map(d => d.orders > 0 ? d.avgProfitPerOrder : null),
-      profitMargin: completed.map(d => d.revenue > 0 ? (d.profit / d.revenue) * 100 : null),
-      roas:         completed.map(d => d.adSpend > 0 ? d.roas : null),
-    };
+    return [...weeks.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, rows]) => {
+        const monDate = new Date(key);
+        const sunDate = new Date(key);
+        sunDate.setDate(monDate.getDate() + 6);
+        const label = `${monDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}–${sunDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`;
 
-    return completed.map((d, i) => ({
-      label: new Date(d.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }),
-      avgRevenue:   roll(raw.avgRevenue, i),
-      avgCosts:     roll(raw.avgCosts, i),
-      avgProfit:    roll(raw.avgProfit, i),
-      profitMargin: roll(raw.profitMargin, i),
-      roas:         roll(raw.roas, i),
-      isCompleted:  true,
-    }));
+        const orderedRows = rows.filter(r => r.orders > 0);
+        const avg = (vals: number[]) => vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+
+        const totRevenue = rows.reduce((s, r) => s + r.revenue, 0);
+        const totProfit  = rows.reduce((s, r) => s + r.profit, 0);
+        const totAdSpend = rows.reduce((s, r) => s + r.adSpend, 0);
+
+        return {
+          label,
+          avgRevenue:   avg(orderedRows.map(r => r.avgRevenuePerOrder)),
+          avgCosts:     avg(orderedRows.map(r => r.avgCogsPerOrder)),
+          avgProfit:    avg(orderedRows.map(r => r.avgProfitPerOrder)),
+          profitMargin: totRevenue > 0 ? (totProfit / totRevenue) * 100 : null,
+          roas:         totAdSpend > 0 ? totRevenue / totAdSpend : null,
+          isCompleted:  true,
+        };
+      });
   }, [daily]);
 
   const targetNum = parseFloat(targetMonthlyProfit) || 0;
@@ -373,7 +387,7 @@ export function ProfitPredictionCalculator() {
             <section className={styles.card}>
               <h2 className={styles['card-title']}>
                 Daily Trends
-                <span className={styles['card-subtitle']}>last {summary.days} days · 7-day rolling average</span>
+                <span className={styles['card-subtitle']}>last {summary.days} days · weekly</span>
               </h2>
               <div className={styles['charts-grid']}>
                 <MetricChart

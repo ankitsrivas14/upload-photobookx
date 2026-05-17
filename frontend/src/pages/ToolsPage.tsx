@@ -5,6 +5,7 @@ import type { AdminUser } from '../services/api';
 import { ProfitPredictionCalculator } from './ProfitPredictionCalculator';
 import { StockPrediction } from './StockPrediction';
 import { ProductsManager } from './tools/ProductsManager';
+import { VariantPerformance } from './tools/VariantPerformance';
 import { GSTMonthlyReports } from './GSTMonthlyReports';
 import styles from './ToolsPage.module.css';
 
@@ -19,6 +20,7 @@ export function ToolsPage() {
   const isStockPrediction = currentPath.includes('/admin/tools/stock-prediction');
   const isProducts = currentPath.includes('/admin/tools/products');
   const isGSTReports = currentPath.includes('/admin/tools/gst-reports');
+  const isVariantPerformance = currentPath.includes('/admin/tools/variant-performance');
 
   useEffect(() => {
     loadUser();
@@ -112,6 +114,12 @@ export function ToolsPage() {
           >
             GST Reports
           </Link>
+          <Link
+            to="/admin/tools/variant-performance"
+            className={`${styles['tools-nav-item']} ${isVariantPerformance ? styles.active : ''}`}
+          >
+            Variant Performance
+          </Link>
         </div>
 
         <Routes>
@@ -119,6 +127,7 @@ export function ToolsPage() {
           <Route path="stock-prediction" element={<StockPrediction />} />
           <Route path="products" element={<ProductsManager />} />
           <Route path="gst-reports" element={<GSTMonthlyReports />} />
+          <Route path="variant-performance" element={<VariantPerformance />} />
           <Route path="*" element={<Navigate to="profit-calculator" replace />} />
         </Routes>
       </main>

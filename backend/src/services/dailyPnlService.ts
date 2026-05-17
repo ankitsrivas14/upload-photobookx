@@ -234,6 +234,82 @@ function calcOrderPnl(
   return { revenue, cogs: totalCogs, pnl: revenue - totalCogs - adCostPerOrder };
 }
 
+// ─── variant performance ─────────────────────────────────────────────────────
+
+export interface VariantBucket {
+  variant: 'small' | 'large';
+  payment: 'prepaid' | 'cod';
+  orders: number;
+  delivered: number;
+  rto: number;
+  pending: number;
+  revenue: number;
+  cogs: number;
+  adSpend: number;
+  profit: number;
+}
+
+export async function getVariantPerformance(days: number): Promise<VariantBucket[]> {
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - (days - 1));
+  startDate.setHours(0, 0, 0, 0);
+  const startKey = startDate.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+
+  const [ordersByDate, rtoSet, shippingMap, adSpendByDate, cogsVersions] = await Promise.all([
+    loadOrdersByDate(),
+    loadRtoSet(),
+    loadShippingMap(),
+    loadAdSpendByDate(),
+    loadCogsVersions(),
+  ]);
+
+  const buckets: Record<string, VariantBucket> = {
+    smallPrepaid: { variant: 'small', payment: 'prepaid', orders: 0, delivered: 0, rto: 0, pending: 0, revenue: 0, cogs: 0, adSpend: 0, profit: 0 },
+    smallCod:     { variant: 'small', payment: 'cod',     orders: 0, delivered: 0, rto: 0, pending: 0, revenue: 0, cogs: 0, adSpend: 0, profit: 0 },
+    largePrepaid: { variant: 'large', payment: 'prepaid', orders: 0, delivered: 0, rto: 0, pending: 0, revenue: 0, cogs: 0, adSpend: 0, profit: 0 },
+    largeCod:     { variant: 'large', payment: 'cod',     orders: 0, delivered: 0, rto: 0, pending: 0, revenue: 0, cogs: 0, adSpend: 0, profit: 0 },
+  };
+
+  for (const [dateKey, orders] of ordersByDate) {
+    if (dateKey < startKey) continue;
+
+    const version = getCogsVersionForDate(dateKey, cogsVersions);
+    const cogsFields = version?.fields ?? [];
+    const overrides = version?.totalOverrides;
+    const adSpend = adSpendByDate.get(dateKey) ?? 0;
+    const adCostPerOrder = orders.length > 0 ? adSpend / orders.length : 0;
+
+    for (const order of orders) {
+      const variant = detectVariant(order);
+      const payment = isPaymentPrepaid(order) ? 'prepaid' : 'cod';
+      const key = `${variant}${payment.charAt(0).toUpperCase()}${payment.slice(1)}`;
+      const bucket = buckets[key];
+
+      const isFinal = orderIsFinalStatus(order, rtoSet);
+      if (!isFinal) {
+        bucket.pending++;
+        continue;
+      }
+
+      const delivered = orderIsDelivered(order, rtoSet);
+      const failed = !delivered;
+
+      const { revenue, cogs, pnl } = calcOrderPnl(order, adCostPerOrder, rtoSet, shippingMap, cogsFields, overrides);
+
+      bucket.orders++;
+      if (delivered) bucket.delivered++;
+      else if (failed) bucket.rto++;
+
+      bucket.revenue += revenue;
+      bucket.cogs += cogs;
+      bucket.adSpend += adCostPerOrder;
+      bucket.profit += pnl;
+    }
+  }
+
+  return Object.values(buckets);
+}
+
 // ─── recompute ────────────────────────────────────────────────────────────────
 
 export async function recomputePnlForDate(

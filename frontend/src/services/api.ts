@@ -1294,6 +1294,30 @@ class ApiService {
     return this.request(`/api/admin/sales/daily-averages?days=${days}`);
   }
 
+  async getVariantPerformance(days = 30): Promise<{
+    success: boolean;
+    days?: number;
+    buckets?: Array<{
+      variant: 'small' | 'large';
+      payment: 'prepaid' | 'cod';
+      orders: number;
+      delivered: number;
+      rto: number;
+      pending: number;
+      deliveryRate: number;
+      rtoRate: number;
+      revenue: number;
+      cogs: number;
+      adSpend: number;
+      profit: number;
+      avgRevenuePerOrder: number;
+      avgProfitPerOrder: number;
+      profitMargin: number;
+    }>;
+  }> {
+    return this.request(`/api/admin/sales/variant-performance?days=${days}`);
+  }
+
   async getDailyPnl(params: { month?: string; year?: string; startDate?: string; endDate?: string } = {}): Promise<{
     success: boolean;
     records?: Array<{

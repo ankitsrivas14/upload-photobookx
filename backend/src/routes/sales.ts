@@ -6,7 +6,7 @@ import aiService from '../services/aiService';
 import { backfillAllDates } from '../services/roasService';
 import { backfillShippingStats } from '../services/shippingStatsService';
 import { backfillOrderStats } from '../services/orderStatsService';
-import { backfillDailyPnl } from '../services/dailyPnlService';
+import { backfillDailyPnl, getVariantPerformance } from '../services/dailyPnlService';
 import { computeBreakevenMetrics } from '../services/breakevenService';
 
 const router = express.Router();
@@ -1505,6 +1505,40 @@ router.get('/backlog-orders', requireAdmin, async (req: AuthenticatedRequest, re
   } catch (error) {
     console.error('Error fetching backlog orders:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch backlog orders' });
+  }
+});
+
+/**
+ * GET /api/admin/sales/variant-performance?days=30
+ * Returns P&L broken down by variant (small/large) × payment (prepaid/COD).
+ */
+router.get('/variant-performance', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const days = Math.min(Math.max(parseInt(req.query.days as string) || 30, 1), 365);
+    const buckets = await getVariantPerformance(days);
+
+    const result = buckets.map(b => ({
+      variant: b.variant,
+      payment: b.payment,
+      orders: b.orders,
+      delivered: b.delivered,
+      rto: b.rto,
+      pending: b.pending,
+      deliveryRate: b.orders > 0 ? (b.delivered / b.orders) * 100 : 0,
+      rtoRate: b.orders > 0 ? (b.rto / b.orders) * 100 : 0,
+      revenue: b.revenue,
+      cogs: b.cogs,
+      adSpend: b.adSpend,
+      profit: b.profit,
+      avgRevenuePerOrder: b.delivered > 0 ? b.revenue / b.delivered : 0,
+      avgProfitPerOrder: b.orders > 0 ? b.profit / b.orders : 0,
+      profitMargin: b.revenue > 0 ? (b.profit / b.revenue) * 100 : 0,
+    }));
+
+    res.json({ success: true, days, buckets: result });
+  } catch (error) {
+    console.error('Error fetching variant performance:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch variant performance' });
   }
 });
 
