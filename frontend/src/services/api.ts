@@ -1191,6 +1191,23 @@ class ApiService {
   async backfillDailyPnl(): Promise<{ success: boolean; upserted?: number; error?: string }> {
     return this.request('/api/admin/sales/daily-pnl/backfill', { method: 'POST' });
   }
+
+  async getBreakevenMetrics(): Promise<{
+    success: boolean;
+    aov?: number;
+    avgCOGS?: number;
+    avgShipping?: number;
+    avgTotalCost?: number;
+    contributionMargin?: number;
+    breakevenROAS?: number;
+    deliveredCount?: number;
+    failedCount?: number;
+    totalOrders?: number;
+    completedDaysCount?: number;
+    error?: string;
+  }> {
+    return this.request('/api/admin/sales/breakeven-metrics');
+  }
 }
 
 

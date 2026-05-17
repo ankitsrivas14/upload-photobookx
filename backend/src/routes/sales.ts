@@ -7,6 +7,7 @@ import { backfillAllDates } from '../services/roasService';
 import { backfillShippingStats } from '../services/shippingStatsService';
 import { backfillOrderStats } from '../services/orderStatsService';
 import { backfillDailyPnl } from '../services/dailyPnlService';
+import { computeBreakevenMetrics } from '../services/breakevenService';
 
 const router = express.Router();
 
@@ -1221,6 +1222,20 @@ router.post('/daily-pnl/backfill', requireAdmin, async (_req: AuthenticatedReque
   } catch (error) {
     console.error('Error backfilling daily P&L:', error);
     res.status(500).json({ success: false, error: 'Backfill failed' });
+  }
+});
+
+/**
+ * GET /api/admin/sales/breakeven-metrics
+ * Compute breakeven ROAS metrics from completed days (last 30 days, DailyOrderStats + raw orders)
+ */
+router.get('/breakeven-metrics', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const metrics = await computeBreakevenMetrics();
+    res.json({ success: true, ...metrics });
+  } catch (error) {
+    console.error('Error computing breakeven metrics:', error);
+    res.status(500).json({ success: false, error: 'Failed to compute breakeven metrics' });
   }
 });
 

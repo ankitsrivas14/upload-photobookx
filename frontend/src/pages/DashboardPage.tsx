@@ -17,38 +17,12 @@ import {
   Pie,
 } from 'recharts';
 import { api } from '../services/api';
-import type { AdminUser, ShopifyOrder } from '../services/api';
+import type { AdminUser } from '../services/api';
 import { SalesPage, type SalesPageProps } from './SalesPage';
 import styles from './DashboardPage.module.css';
 
 const STORE_TIMEZONE = 'Asia/Kolkata';
 
-function getOrderDateKey(createdAt: string): string {
-  return new Date(createdAt).toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
-}
-
-/** Get date (YYYY-MM-DD) and hour (0-23) in store timezone for an order */
-function getOrderDateAndHour(createdAt: string): { dateKey: string; hour: number } {
-  const d = new Date(createdAt);
-  const dateKey = d.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
-  const hourStr = d.toLocaleString('en-US', { timeZone: STORE_TIMEZONE, hour: 'numeric', hour12: false });
-  let hour = Number(hourStr);
-  if (Number.isNaN(hour) || hour < 0) hour = 0;
-  if (hour > 23) hour = 23;
-  return { dateKey, hour };
-}
-
-interface COGSField {
-  id: string;
-  name: string;
-  smallPrepaidValue: number;
-  smallCODValue: number;
-  largePrepaidValue: number;
-  largeCODValue: number;
-  type: 'cogs' | 'ndr' | 'both';
-  calculationType: 'fixed' | 'percentage';
-  percentageType?: 'included' | 'excluded';
-}
 
 export function DashboardPage() {
   const navigate = useNavigate();
@@ -73,17 +47,18 @@ export function DashboardPage() {
   const [pnlChartRecords, setPnlChartRecords] = useState<Array<{
     dateKey: string; isCompleted: boolean; barChartProfit: number;
   }>>([]);
-  const [orders, setOrders] = useState<ShopifyOrder[]>([]);
+  // Breakeven metrics from DB
+  const [breakevenDbMetrics, setBreakevenDbMetrics] = useState<{
+    aov: number; avgCOGS: number; avgShipping: number; avgTotalCost: number;
+    contributionMargin: number; breakevenROAS: number;
+    deliveredCount: number; failedCount: number; totalOrders: number; completedDaysCount: number;
+  } | null>(null);
 
   // Sales Modal State
   const [salesModalOpen, setSalesModalOpen] = useState(false);
   const [salesModalFilter, setSalesModalFilter] = useState<SalesPageProps['initialFilter']>();
 
-  // Cache for ad spend by date
-  const [adSpendByDate, setAdSpendByDate] = useState<Record<string, number>>({});
   const [tooltip, setTooltip] = useState<{ dateLabel: string; pnl: number | null; x: number; y: number } | null>(null);
-  const [cogsFields, setCogsFields] = useState<COGSField[]>([]);
-  const [rtoOrderIds, setRtoOrderIds] = useState<Set<number>>(new Set());
 
   // Shipping chart controls
   const [shippingGranularity, setShippingGranularity] = useState<'day' | 'week' | 'month'>('day');
@@ -133,131 +108,25 @@ export function DashboardPage() {
     }
   };
 
-  const loadDailyPnl = useCallback(async () => {
+  const loadBreakevenMetrics = useCallback(async () => {
     try {
-      const [ordersRes, adSpendRes, cogsRes, rtoRes] = await Promise.all([
-        api.getOrders(10000, true),
-        api.getDailyAdSpend(),
-        api.getCOGSConfiguration(),
-        api.getRTOOrderIds(),
-      ]);
-
-      const orders = ordersRes.success && ordersRes.orders ? ordersRes.orders : [];
-      const adSpendEntries = adSpendRes.success && adSpendRes.entries ? adSpendRes.entries : [];
-      const cogsFields = cogsRes?.fields ?? [];
-      const rtoOrderIds = new Set(rtoRes.success ? rtoRes.rtoOrderIds : []);
-
-      // Build ad cost per order by date - EXACT same logic as SalesPage
-      const orderCountByDate: Record<string, number> = {};
-      orders.forEach((o) => {
-        if (o.cancelledAt) return;
-        const d = getOrderDateKey(o.createdAt);
-        orderCountByDate[d] = (orderCountByDate[d] || 0) + 1;
-      });
-
-      const adSpendByDate: Record<string, number> = {};
-      adSpendEntries.forEach((e) => {
-        // Use same timezone conversion as order dates (STORE_TIMEZONE)
-        const d = new Date(e.date).toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
-        adSpendByDate[d] = (adSpendByDate[d] || 0) + e.amount;
-      });
-
-      const adCostPerOrderByDate: Record<string, number> = {};
-      Object.keys(adSpendByDate).forEach((d) => {
-        const count = orderCountByDate[d] || 0;
-        if (count > 0) adCostPerOrderByDate[d] = adSpendByDate[d] / count;
-      });
-
-      // EXACT same isOrderDelivered logic as SalesPage
-      const isOrderDelivered = (order: ShopifyOrder) => {
-        if (rtoOrderIds.has(order.id)) return false;
-        const status = order.deliveryStatus?.toLowerCase() || '';
-        const ndrStatuses = ['failed', 'rto', 'return'];
-        if (ndrStatuses.some(s => status.includes(s))) return false;
-        if (status === 'delivered') return true;
-        if (order.paymentMethod?.toLowerCase() === 'prepaid') return true;
-        return false;
-      };
-
-      // EXACT same isOrderFinalStatus logic as SalesPage  
-      const isOrderFinalStatus = (order: ShopifyOrder) => {
-        const status = order.deliveryStatus?.toLowerCase() || '';
-        const isDelivered = status === 'delivered';
-        const isFailed =
-          rtoOrderIds.has(order.id) ||
-          status === 'failure' ||
-          status.includes('failed') ||
-          status.includes('rto');
-        return isDelivered || isFailed;
-      };
-
-      const detectVariant = (order: ShopifyOrder): 'small' | 'large' => {
-        if (!order.lineItems?.length) return 'small';
-        const hasLarge = order.lineItems.some(
-          (item) =>
-            item.title?.toLowerCase().includes('large') ||
-            item.variantTitle?.toLowerCase().includes('large')
-        );
-        return hasLarge ? 'large' : 'small';
-      };
-
-      // EXACT same calcOrderPnl logic as SalesPage's calculateOrderProfitLoss (attempted_delivery out of failed)
-      const calcOrderPnl = (order: ShopifyOrder): number => {
-        if (cogsFields.length === 0) return 0;
-        const variant = detectVariant(order);
-        const isDelivered = isOrderDelivered(order);
-        const status = order.deliveryStatus?.toLowerCase() || '';
-        const isFailed =
-          rtoOrderIds.has(order.id) ||
-          status === 'failure' ||
-          status.includes('failed') ||
-          status.includes('rto');
-        const paymentMethod = order.paymentMethod?.toLowerCase() === 'prepaid' ? 'prepaid' : 'cod';
-
-        let revenue = 0;
-        let fieldsToUse: COGSField[] = [];
-
-        if (isDelivered) {
-          revenue = order.totalPrice || 0;
-          fieldsToUse = (cogsFields as COGSField[]).filter(f => f.type === 'cogs' || f.type === 'both');
-        } else if (isFailed) {
-          revenue = 0;
-          fieldsToUse = (cogsFields as COGSField[]).filter(f => f.type === 'ndr' || f.type === 'both');
-        } else {
-          revenue = 0;
-          fieldsToUse = (cogsFields as COGSField[]).filter(f => f.type === 'cogs' || f.type === 'both');
-        }
-
-        let totalCosts = 0;
-        const key = `${variant}${paymentMethod === 'prepaid' ? 'Prepaid' : 'COD'}Value` as keyof COGSField;
-        fieldsToUse.forEach((field) => {
-          let value = field[key] as number;
-          if (value === undefined || value === null) {
-            value = variant === 'small' ? 0 : 0;
-          }
-          if (field.calculationType === 'fixed') {
-            totalCosts += value;
-          } else {
-            const salePrice = order.totalPrice || 0;
-            const pct = field.percentageType || 'excluded';
-            totalCosts +=
-              pct === 'included'
-                ? (value / (100 + value)) * salePrice
-                : (value / 100) * salePrice;
-          }
+      const res = await api.getBreakevenMetrics();
+      if (res.success) {
+        setBreakevenDbMetrics({
+          aov: res.aov ?? 0,
+          avgCOGS: res.avgCOGS ?? 0,
+          avgShipping: res.avgShipping ?? 0,
+          avgTotalCost: res.avgTotalCost ?? 0,
+          contributionMargin: res.contributionMargin ?? 0,
+          breakevenROAS: res.breakevenROAS ?? 0,
+          deliveredCount: res.deliveredCount ?? 0,
+          failedCount: res.failedCount ?? 0,
+          totalOrders: res.totalOrders ?? 0,
+          completedDaysCount: res.completedDaysCount ?? 0,
         });
-        const orderDateStr = getOrderDateKey(order.createdAt);
-        const adCost = adCostPerOrderByDate[orderDateStr] ?? 0;
-        return revenue - totalCosts - adCost;
-      };
-
-      setOrders(orders);
-      setAdSpendByDate(adSpendByDate);
-      setCogsFields(cogsFields);
-      setRtoOrderIds(rtoOrderIds);
+      }
     } catch (err) {
-      console.error('Failed to load daily P/L:', err);
-      setDailyPnlMap({});
+      console.error('Failed to load breakeven metrics:', err);
     }
   }, []);
 
@@ -351,7 +220,7 @@ export function DashboardPage() {
 
   useEffect(() => {
     if (user) {
-      loadDailyPnl();
+      loadBreakevenMetrics();
       loadROAS(roasDays, roasStartDate, roasEndDate);
       loadShipping();
       loadOrderStats();
@@ -359,7 +228,7 @@ export function DashboardPage() {
       loadHeatmap(selectedYear);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount
-  }, [user, loadDailyPnl, loadROAS, loadShipping, loadOrderStats, loadPnlChart, loadHeatmap]);
+  }, [user, loadBreakevenMetrics, loadROAS, loadShipping, loadOrderStats, loadPnlChart, loadHeatmap]);
 
   // Re-fetch bar chart when selected month/year changes
   useEffect(() => {
@@ -444,157 +313,12 @@ export function DashboardPage() {
     return data;
   })();
 
-  // Breakeven ROAS Calculation
-  const breakevenMetrics = (() => {
-    // Detect variant
-    const detectVariant = (order: ShopifyOrder): 'small' | 'large' => {
-      if (!order.lineItems?.length) return 'small';
-      const hasLarge = order.lineItems.some(
-        (item) =>
-          item.title?.toLowerCase().includes('large') ||
-          item.variantTitle?.toLowerCase().includes('large')
-      );
-      return hasLarge ? 'large' : 'small';
-    };
-
-    // Filter orders to only include "Completed Days" within the last 30 days
-    // A Completed Day is a day where ALL orders have a final status (Delivered, Failed, RTO).
-    // This removes bias from pending orders.
-
-    // 1. Group orders by date
-    const ordersByDate: Record<string, ShopifyOrder[]> = {};
-    const now = new Date();
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    thirtyDaysAgo.setHours(0, 0, 0, 0);
-
-    const cutoffDate = new Date('2026-01-28');
-    // Ensure we don't look back further than Jan 28
-    const effectiveStartDate = cutoffDate > thirtyDaysAgo ? cutoffDate : thirtyDaysAgo;
-
-    orders.forEach((o) => {
-      if (o.cancelledAt) return;
-      const d = getOrderDateKey(o.createdAt);
-      if (!ordersByDate[d]) ordersByDate[d] = [];
-      ordersByDate[d].push(o);
-    });
-
-    // 2. Identify Completed Days and aggregate data
-    let totalRevenue = 0;
-    let totalCOGS = 0;
-    let totalShipping = 0;
-    let deliveredCount = 0;
-    let failedCount = 0;
-    let completedDaysCount = 0;
-    const completedDates = new Set<string>();
-
-    // Helper to check final status (duplicated from lower scope, but needed here)
-    const isOrderFinal = (order: ShopifyOrder) => {
-      const status = order.deliveryStatus?.toLowerCase() || '';
-      const isDelivered = status === 'delivered';
-      const isFailed = rtoOrderIds.has(order.id) ||
-        status === 'failure' ||
-        status.includes('failed') ||
-        status.includes('rto');
-      // Prepaid orders are often assumed delivered if not failed, but for "Completed Day" validaton
-      // we should be strict. However, the existing logic assumes Prepaid = Delivered often.
-      // Let's stick to the strict definition used in profitChart:
-      // isOrderFinalStatus there checks Delivered OR Failed. 
-      // But wait, existing isOrderFinalStatus also returns true for Prepaid.
-      // Let's use the same logic as the profit chart to match "this widget".
-      const isPrepaid = order.paymentMethod?.toLowerCase() === 'prepaid';
-      return isDelivered || isFailed || isPrepaid;
-    };
-
-    Object.keys(ordersByDate).forEach((dateKey) => {
-      // Check if date is within last 30 days AND after cutoff
-      const dateObj = new Date(dateKey);
-      if (dateObj < effectiveStartDate || dateObj > now) return;
-
-      const dayOrders = ordersByDate[dateKey];
-      const allComplete = dayOrders.length > 0 && dayOrders.every(isOrderFinal);
-
-      if (allComplete) {
-        completedDaysCount++;
-        completedDates.add(dateKey);
-        dayOrders.forEach((order) => {
-          const variant = detectVariant(order);
-          const paymentMethod = order.paymentMethod?.toLowerCase() === 'prepaid' ? 'prepaid' : 'cod';
-          const status = order.deliveryStatus?.toLowerCase() || '';
-
-          const isDelivered = status === 'delivered' || (paymentMethod === 'prepaid' && !rtoOrderIds.has(order.id));
-          const isFailed = !isDelivered && (rtoOrderIds.has(order.id) || status === 'failure' || status.includes('failed') || status.includes('rto'));
-
-          // Determine if we should count this order's financials
-          // In "Completed Day", every order is either Delivered (Revenue + COGS + Ship) or Failed (0 Rev + NDR + Ship).
-
-          if (isDelivered) {
-            deliveredCount++;
-            totalRevenue += order.totalPrice || 0;
-
-            // COGS
-            const key = `${variant}${paymentMethod === 'prepaid' ? 'Prepaid' : 'COD'}Value` as keyof COGSField;
-            let orderCOGS = 0;
-            cogsFields.filter(f => f.type === 'cogs' || f.type === 'both').forEach(field => {
-              let value = field[key] as number || 0;
-              if (field.calculationType === 'fixed') {
-                orderCOGS += value;
-              } else {
-                const salePrice = order.totalPrice || 0;
-                const pct = field.percentageType || 'excluded';
-                orderCOGS += pct === 'included' ? (value / (100 + value)) * salePrice : (value / 100) * salePrice;
-              }
-            });
-            totalCOGS += orderCOGS;
-
-          } else if (isFailed) {
-            failedCount++;
-            // NDR Costs
-            const key = `${variant}${paymentMethod === 'prepaid' ? 'Prepaid' : 'COD'}Value` as keyof COGSField;
-            let orderNDR = 0;
-            cogsFields.filter(f => f.type === 'ndr' || f.type === 'both').forEach(field => {
-              let value = field[key] as number || 0;
-              if (field.calculationType === 'fixed') {
-                orderNDR += value;
-              } else {
-                const salePrice = order.totalPrice || 0;
-                const pct = field.percentageType || 'excluded';
-                orderNDR += pct === 'included' ? (value / (100 + value)) * salePrice : (value / 100) * salePrice;
-              }
-            });
-            totalCOGS += orderNDR;
-          }
-
-          if (order.shippingCharge) {
-            totalShipping += order.shippingCharge;
-          }
-        });
-      }
-    });
-
-    const totalOrders = deliveredCount + failedCount;
-    const avgRevenue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
-    const avgCOGS = totalOrders > 0 ? totalCOGS / totalOrders : 0;
-    const avgShipping = totalOrders > 0 ? totalShipping / totalOrders : 0;
-    const avgTotalCost = avgCOGS + avgShipping;
-    const contributionMargin = avgRevenue - avgTotalCost;
-
-    const breakevenROAS = contributionMargin > 0 ? avgRevenue / contributionMargin : 0;
-
-    return {
-      aov: avgRevenue,
-      avgCOGS,
-      avgShipping,
-      avgTotalCost,
-      contributionMargin,
-      breakevenROAS,
-      deliveredCount,
-      failedCount,
-      totalOrders,
-      completedDaysCount,
-      completedDates
-    };
-  })();
+  // Breakeven metrics from DB (null while loading)
+  const breakevenMetrics = breakevenDbMetrics ?? {
+    aov: 0, avgCOGS: 0, avgShipping: 0, avgTotalCost: 0,
+    contributionMargin: 0, breakevenROAS: 0,
+    deliveredCount: 0, failedCount: 0, totalOrders: 0, completedDaysCount: 0,
+  };
 
   // Pie Charts data — sourced from DB (pre-computed daily stats)
   const pieChartsData = (() => {
