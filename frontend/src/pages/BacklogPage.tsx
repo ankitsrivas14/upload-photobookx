@@ -1,29 +1,70 @@
 import { useState, useEffect, useMemo } from 'react';
-import { api, type ShopifyOrder } from '../services/api';
+import { api, type BacklogOrder } from '../services/api';
 import styles from './BacklogPage.module.css';
 import toast from 'react-hot-toast';
 
 type ViewMode = 'all' | 'default';
 
+// Pre-computed fields attached to each order on load — never recomputed during render
+interface EnrichedOrder extends BacklogOrder {
+  _monthKey: string;   // 'YYYY-MM'
+  _day: number;        // day-of-month for week bucketing
+  _statusClass: string;
+  _dateLabel: string;  // formatted display string
+}
+
+const WEEK_LABELS = [
+  'Week 1 (1st–7th)',
+  'Week 2 (8th–14th)',
+  'Week 3 (15th–21st)',
+  'Week 4 (22nd–28th)',
+  'Week 5 (29th–end)',
+] as const;
+
+function weekIndex(day: number): number {
+  if (day <= 7) return 0;
+  if (day <= 14) return 1;
+  if (day <= 21) return 2;
+  if (day <= 28) return 3;
+  return 4;
+}
+
+function computeStatusClass(order: BacklogOrder): string {
+  const status = order.deliveryStatus?.toLowerCase() || '';
+  if (status === 'delivered') return styles.delivered;
+  if (status.includes('fail') || status.includes('rto')) return styles.failed;
+  if (status.includes('transit') || status.includes('shipped')) return styles.transit;
+  if (status === 'out_for_delivery') return styles.outForDelivery;
+  if (!order.fulfillmentStatus || order.fulfillmentStatus === 'unfulfilled') return styles.unfulfilled;
+  return styles.confirmed;
+}
+
+function enrich(order: BacklogOrder): EnrichedOrder {
+  const d = new Date(order.createdAt);
+  const month = d.getMonth() + 1;
+  return {
+    ...order,
+    _monthKey: `${d.getFullYear()}-${String(month).padStart(2, '0')}`,
+    _day: d.getDate(),
+    _statusClass: computeStatusClass(order),
+    _dateLabel: d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }),
+  };
+}
+
 export default function BacklogPage() {
-  const [orders, setOrders] = useState<ShopifyOrder[]>([]);
+  const [orders, setOrders] = useState<EnrichedOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<ViewMode>('default');
 
-  useEffect(() => {
-    loadOrders();
-  }, []);
+  useEffect(() => { loadOrders(); }, []);
 
   const loadOrders = async () => {
     setLoading(true);
     try {
-      const response = await api.getOrders(10000, true);
+      const response = await api.getBacklogOrders();
       if (response.success && response.orders) {
-        const startDate = new Date(2026, 0, 1);
-        const filtered = response.orders.filter(o => 
-          new Date(o.createdAt) >= startDate && !o.cancelledAt
-        );
-        setOrders(filtered);
+        // Enrich once on load — all downstream reads are plain property accesses
+        setOrders(response.orders.map(enrich));
       } else {
         toast.error(response.error || 'Failed to load orders');
       }
@@ -35,80 +76,65 @@ export default function BacklogPage() {
     }
   };
 
+  // Build month labels from Jan 2026 to today — recomputes once per day at most
   const monthsRange = useMemo(() => {
-    const months = [];
-    const startDate = new Date(2026, 0, 1); // Jan 2026
-    const endDate = new Date();
-
-    let current = new Date(startDate);
-    while (current <= endDate) {
+    const months: { label: string; key: string }[] = [];
+    const end = new Date();
+    let y = 2026, m = 1;
+    while (true) {
+      const key = `${y}-${String(m).padStart(2, '0')}`;
       months.push({
-        label: current.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
-        key: `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}`
+        key,
+        label: new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
       });
-      current.setMonth(current.getMonth() + 1);
+      if (y === end.getFullYear() && m === end.getMonth() + 1) break;
+      m++;
+      if (m > 12) { m = 1; y++; }
     }
     return months;
   }, []);
 
-  const getOrderMonthKey = (createdAt: string) => {
-    const d = new Date(createdAt);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-  };
+  const currentMonthKey = useMemo(() => {
+    const n = new Date();
+    return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}`;
+  }, []);
 
-  const getStatusClass = (order: ShopifyOrder) => {
-    const status = order.deliveryStatus?.toLowerCase() || '';
-    const fulfillment = order.fulfillmentStatus || '';
-
-    if (status === 'delivered') return styles.delivered;
-    if (status.includes('fail') || status.includes('rto')) return styles.failed;
-    if (status.includes('transit') || status.includes('shipped')) return styles.transit;
-    if (status === 'out_for_delivery') return styles.outForDelivery;
-    if (!fulfillment || fulfillment === 'unfulfilled') return styles.unfulfilled;
-    return styles.confirmed;
-  };
-
-  const filteredOrdersByView = useMemo(() => {
-    if (viewMode === 'all') return orders;
-    
-    return orders.filter(order => {
-      const status = order.deliveryStatus?.toLowerCase() || '';
-      const isDelivered = status === 'delivered';
-      const isFailed = status.includes('fail') || status.includes('rto');
-      const isAttempted = status === 'attempted_delivery';
-      
-      return !isDelivered && !isFailed && !isAttempted;
-    });
-  }, [orders, viewMode]);
-
+  // Fix 2+3: filter once, then single-pass bucket into month → week
   const ordersByMonth = useMemo(() => {
-    return monthsRange.map(month => {
-      const monthOrders = filteredOrdersByView
-        .filter(o => getOrderMonthKey(o.createdAt) === month.key)
-        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-        
-      const weeksMap = new Map<string, ShopifyOrder[]>();
-      ['Week 1 (1st - 7th)', 'Week 2 (8th - 14th)', 'Week 3 (15th - 21st)', 'Week 4 (22nd - 28th)', 'Week 5 (29th - end)'].forEach(w => weeksMap.set(w, []));
-      
-      monthOrders.forEach(o => {
-        const d = new Date(o.createdAt).getDate();
-        let w = 'Week 1 (1st - 7th)';
-        if (d > 7 && d <= 14) w = 'Week 2 (8th - 14th)';
-        else if (d > 14 && d <= 21) w = 'Week 3 (15th - 21st)';
-        else if (d > 21 && d <= 28) w = 'Week 4 (22nd - 28th)';
-        else if (d > 28) w = 'Week 5 (29th - end)';
-        weeksMap.get(w)!.push(o);
-      });
-      
-      const weeks = Array.from(weeksMap.entries()).map(([label, orders]) => ({ label, orders }));
+    // Filter
+    const visible = viewMode === 'all'
+      ? orders
+      : orders.filter(o => {
+          const s = o.deliveryStatus?.toLowerCase() || '';
+          return s !== 'delivered' && !s.includes('fail') && !s.includes('rto') && s !== 'attempted_delivery';
+        });
 
-      return {
-        ...month,
-        orders: monthOrders,
-        weeks: weeks.filter(w => w.orders.length > 0)
-      };
-    }).filter(m => m.orders.length > 0 || m.key === getOrderMonthKey(new Date().toISOString()));
-  }, [filteredOrdersByView, monthsRange]);
+    // Single-pass bucket: month key → week index → orders[]
+    const monthBuckets = new Map<string, EnrichedOrder[][]>();
+    for (const o of visible) {
+      let weekBuckets = monthBuckets.get(o._monthKey);
+      if (!weekBuckets) {
+        weekBuckets = [[], [], [], [], []];
+        monthBuckets.set(o._monthKey, weekBuckets);
+      }
+      weekBuckets[weekIndex(o._day)].push(o);
+    }
+
+    // Sort orders within each week oldest-first (createdAt strings sort correctly)
+    monthBuckets.forEach(weekBuckets => weekBuckets.forEach(w => w.sort((a, b) => a.createdAt < b.createdAt ? -1 : 1)));
+
+    // Build final structure in monthsRange order
+    return monthsRange
+      .map(month => {
+        const weekBuckets = monthBuckets.get(month.key);
+        const weeks = weekBuckets
+          ? WEEK_LABELS.map((label, i) => ({ label, orders: weekBuckets[i] })).filter(w => w.orders.length > 0)
+          : [];
+        const totalOrders = weekBuckets ? weekBuckets.reduce((s, w) => s + w.length, 0) : 0;
+        return { ...month, weeks, totalOrders };
+      })
+      .filter(m => m.totalOrders > 0 || m.key === currentMonthKey);
+  }, [orders, viewMode, monthsRange, currentMonthKey]);
 
   return (
     <div className={styles['backlog-page']}>
@@ -128,7 +154,7 @@ export default function BacklogPage() {
           </div>
           <div className={styles['view-selector']}>
             <label htmlFor="view-mode">View Mode</label>
-            <select 
+            <select
               id="view-mode"
               value={viewMode}
               onChange={(e) => setViewMode(e.target.value as ViewMode)}
@@ -169,7 +195,7 @@ export default function BacklogPage() {
               <section key={section.key} className={styles['month-section']}>
                 <div className={styles['section-header']}>
                   <h2 className={styles['month-title']}>{section.label}</h2>
-                  <span className={styles['month-count']}>{section.orders.length}</span>
+                  <span className={styles['month-count']}>{section.totalOrders}</span>
                 </div>
                 <div className={styles['month-weeks']}>
                   {section.weeks.map(week => (
@@ -177,33 +203,33 @@ export default function BacklogPage() {
                       <h3 className={styles['week-title']}>{week.label} <span className={styles['week-count']}>({week.orders.length})</span></h3>
                       <div className={styles['orders-grid']}>
                         {week.orders.map(order => (
-                          <div 
-                            key={order.id} 
-                            className={`${styles['order-box']} ${getStatusClass(order)}`}
+                          <div
+                            key={order.id}
+                            className={`${styles['order-box']} ${order._statusClass}`}
                             onClick={() => window.open(`https://admin.shopify.com/store/c3532f-a9/orders/${order.id}`, '_blank')}
                           >
                             <div className={styles['box-hover-card']}>
-                               <div className={styles['card-name']}>{order.name}</div>
-                               <div className={styles['card-customer']}>{order.customerName}</div>
-                               <div className={styles['card-status']}>{order.deliveryStatus || order.fulfillmentStatus || 'Pending'}</div>
-                               <div className={styles['card-items']}>
-                                 {order.lineItems && order.lineItems.length > 0 ? (
-                                   order.lineItems.map((item, idx) => (
-                                     <div key={idx} className={styles['item-row']}>
-                                       <span className={styles['item-qty']}>{item.quantity}x</span>
-                                       <div className={styles['item-details']}>
-                                         <span className={styles['item-title']}>{item.title}</span>
-                                         {item.variantTitle && (
-                                           <span className={styles['item-variant']}>{item.variantTitle}</span>
-                                         )}
-                                       </div>
-                                     </div>
-                                   ))
-                                 ) : (
-                                   <div className={styles['item-row']}>No items listed</div>
-                                 )}
-                               </div>
-                               <div className={styles['card-date']}>{new Date(order.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
+                              <div className={styles['card-name']}>{order.name}</div>
+                              <div className={styles['card-customer']}>{order.customerName}</div>
+                              <div className={styles['card-status']}>{order.deliveryStatus || order.fulfillmentStatus || 'Pending'}</div>
+                              <div className={styles['card-items']}>
+                                {order.lineItems.length > 0 ? (
+                                  order.lineItems.map((item, idx) => (
+                                    <div key={idx} className={styles['item-row']}>
+                                      <span className={styles['item-qty']}>{item.quantity}x</span>
+                                      <div className={styles['item-details']}>
+                                        <span className={styles['item-title']}>{item.title}</span>
+                                        {item.variantTitle && (
+                                          <span className={styles['item-variant']}>{item.variantTitle}</span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ))
+                                ) : (
+                                  <div className={styles['item-row']}>No items listed</div>
+                                )}
+                              </div>
+                              <div className={styles['card-date']}>{order._dateLabel}</div>
                             </div>
                           </div>
                         ))}

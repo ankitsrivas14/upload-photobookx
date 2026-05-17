@@ -94,6 +94,17 @@ interface CreateMagicLinkResponse {
   error?: string;
 }
 
+// Lightweight order shape for the Backlog Mosaic page
+export interface BacklogOrder {
+  id: number;
+  name: string;
+  createdAt: string;
+  fulfillmentStatus: string | null;
+  deliveryStatus: string | null;
+  customerName: string | null;
+  lineItems: { title: string; quantity: number; variantTitle: string | null }[];
+}
+
 // Shopify Order Types
 interface ShopifyOrder {
   id: number;
@@ -315,6 +326,10 @@ class ApiService {
     const dateParam = createdAtMin ? `&created_at_min=${encodeURIComponent(createdAtMin)}` : '';
     const monthParam = month ? `&month=${encodeURIComponent(month)}` : '';
     return this.request<OrdersResponse>(`/api/admin/magic-links/shopify/orders?limit=${limit}${allParam}${dateParam}${monthParam}`);
+  }
+
+  async getBacklogOrders(): Promise<{ success: boolean; orders?: BacklogOrder[]; error?: string }> {
+    return this.request('/api/admin/sales/backlog-orders');
   }
 
   async getOrder(orderNumber: string): Promise<{ success: boolean; order?: ShopifyOrder; error?: string }> {

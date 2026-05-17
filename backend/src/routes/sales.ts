@@ -1316,4 +1316,120 @@ router.get('/ai-prediction-data', requireAdmin, async (req: AuthenticatedRequest
   }
 });
 
+/**
+ * GET /api/admin/sales/backlog-orders
+ * Lightweight endpoint for the Backlog Mosaic page.
+ * Reads directly from ShopifyOrderCache, applies server-side filters (Jan 2026+,
+ * non-cancelled), and returns only the 7 fields the mosaic needs.
+ * No shipping charge lookups, no delivery-date lookups — ~20x smaller payload.
+ */
+router.get('/backlog-orders', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    // Shopify created_at strings are ISO-8601 and sort lexicographically, so a
+    // string prefix comparison ">=2026-01-01" correctly excludes pre-2026 orders.
+    const BACKLOG_START_STR = '2026-01-01';
+
+    // Aggregation pipeline: all heavy work (filter + field projection) runs inside
+    // MongoDB so only the 7 needed fields for post-2026 non-cancelled orders are
+    // transferred to Node.js — typically 10-20x less data than loading raw orders.
+    const cacheEntries = await ShopifyOrderCache.aggregate([
+      { $match: { cacheKey: { $regex: /^all_orders_/ } } },
+      {
+        $project: {
+          _id: 0,
+          orders: {
+            $map: {
+              // Filter to Jan 2026+ non-cancelled orders inside MongoDB
+              input: {
+                $filter: {
+                  input: '$orders',
+                  as: 'o',
+                  cond: {
+                    $and: [
+                      { $not: [{ $ifNull: ['$$o.cancelled_at', false] }] },
+                      { $gte: ['$$o.created_at', BACKLOG_START_STR] },
+                    ],
+                  },
+                },
+              },
+              as: 'o',
+              // Project only the 7 fields the mosaic needs
+              in: {
+                id: '$$o.id',
+                name: '$$o.name',
+                created_at: '$$o.created_at',
+                fulfillment_status: '$$o.fulfillment_status',
+                // Extract just the last fulfillment's shipment_status
+                last_shipment_status: {
+                  $getField: {
+                    field: 'shipment_status',
+                    input: { $arrayElemAt: [{ $ifNull: ['$$o.fulfillments', []] }, -1] },
+                  },
+                },
+                // Customer name: prefer shipping_address.name, fallback to customer fields
+                customer_name: {
+                  $ifNull: [
+                    '$$o.shipping_address.name',
+                    {
+                      $trim: {
+                        input: {
+                          $concat: [
+                            { $ifNull: ['$$o.customer.first_name', ''] },
+                            ' ',
+                            { $ifNull: ['$$o.customer.last_name', ''] },
+                          ],
+                        },
+                      },
+                    },
+                  ],
+                },
+                line_items: {
+                  $map: {
+                    input: { $ifNull: ['$$o.line_items', []] },
+                    as: 'li',
+                    in: {
+                      title: '$$li.title',
+                      quantity: '$$li.quantity',
+                      variant_title: '$$li.variant_title',
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    ]);
+
+    // Deduplicate across cache chunks (there may be multiple all_orders_* entries)
+    const seen = new Set<number | string>();
+    const result: any[] = [];
+
+    for (const entry of cacheEntries) {
+      for (const o of (entry.orders ?? []) as any[]) {
+        if (!o.id || seen.has(o.id)) continue;
+        seen.add(o.id);
+
+        const deliveryStatus: string | null =
+          o.last_shipment_status || o.fulfillment_status || null;
+
+        result.push({
+          id: o.id,
+          name: o.name,
+          createdAt: o.created_at,
+          fulfillmentStatus: o.fulfillment_status || null,
+          deliveryStatus,
+          customerName: o.customer_name || null,
+          lineItems: (o.line_items as any[]) ?? [],
+        });
+      }
+    }
+
+    res.json({ success: true, orders: result });
+  } catch (error) {
+    console.error('Error fetching backlog orders:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch backlog orders' });
+  }
+});
+
 export default router;
