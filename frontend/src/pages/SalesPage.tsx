@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
 import styles from './SalesPage.module.css';
@@ -570,7 +570,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
   };
 
   // Orders for stats: month filter + exclude discarded/cancelled only (no status filter). Header stats never change when status filters are applied.
-  const getOrdersForStats = () => {
+  const ordersForStats = useMemo(() => {
     let filtered = orders.filter(order =>
       !discardedOrderIds.has(order.id) && !order.cancelledAt
     );
@@ -599,12 +599,10 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       }
     }
     return filtered;
-  };
-
-  const ordersForStats = getOrdersForStats();
+  }, [orders, discardedOrderIds, selectedMonthFilter]);
 
   // Filter orders based on selected month, status filters, and exclude discarded/cancelled orders
-  const getFilteredOrders = () => {
+  const filteredOrders = useMemo(() => {
     let filtered = ordersForStats;
 
     // Apply Payment Method filters
@@ -632,17 +630,18 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
         if (showNotAcknowledged) conditions.push(!acknowledgedOrderIds.has(order.id));
         if (showTicketRaised) conditions.push(ticketRaisedOrderIds.has(order.id) || order.hasTicket);
 
-        if (conditions.length === 0) return true; // Should ideally never hit this due to outer wrapper
-        
-        return filterOperator === 'AND' 
+        if (conditions.length === 0) return true;
+
+        return filterOperator === 'AND'
           ? conditions.every(c => c)
           : conditions.some(c => c);
       });
     }
     return filtered;
-  };
-
-  const filteredOrders = getFilteredOrders();
+  }, [ordersForStats, showPrepaid, showCOD, showUnfulfilled, showDelivered, showFailed,
+      showAttemptedDelivery, showInTransit, showOutForDelivery, showConfirmed,
+      showNotAcknowledged, showTicketRaised, acknowledgedOrderIds, ticketRaisedOrderIds,
+      rtoOrderIds, filterOperator]);
 
   const hasStatusFilter =
     showUnfulfilled || showDelivered || showFailed || showAttemptedDelivery || showInTransit || showOutForDelivery || showConfirmed || showNotAcknowledged || showTicketRaised;
@@ -666,7 +665,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
 
   // Group filtered orders by date; include ad-spend-only dates only when they're in the selected month
   // Global NDR rate from ALL orders (not filtered by month) — for expected NDR per day
-  const globalNdrRate = (() => {
+  const globalNdrRate = useMemo(() => {
     let delivered = 0;
     let failed = 0;
     orders.forEach((o) => {
@@ -683,10 +682,10 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
     });
     const finalCount = delivered + failed;
     return finalCount > 0 ? (failed / finalCount) * 100 : 0;
-  })();
+  }, [orders, discardedOrderIds, rtoOrderIds]);
 
   // Average P/L per final-status order (all orders) — for estimated P/L per day
-  const avgPnlPerFinalOrder = (() => {
+  const avgPnlPerFinalOrder = useMemo(() => {
     let totalPnl = 0;
     let count = 0;
     orders.forEach((o) => {
@@ -704,9 +703,9 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       }
     });
     return count > 0 ? totalPnl / count : 0;
-  })();
+  }, [orders, discardedOrderIds, rtoOrderIds, orderProfitLoss]);
 
-  const ordersGroupedByDate = (() => {
+  const ordersGroupedByDate = useMemo(() => {
     const byDate: Record<string, ShopifyOrder[]> = {};
     filteredOrders.forEach((order) => {
       const dateKey = getOrderDateKey(order.createdAt);
@@ -718,7 +717,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       if (!byDate[dateKey]) byDate[dateKey] = [];
     });
 
-    const grouped = Object.entries(byDate)
+    return Object.entries(byDate)
       .sort(([a], [b]) => b.localeCompare(a))
       .map(([dateKey, orders]) => ({
         dateKey,
@@ -726,9 +725,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
         orders,
         adSpend: adSpendByDate[dateKey] ?? 0,
       }));
-
-    return grouped;
-  })();
+  }, [filteredOrders, adSpendByDate, selectedMonthFilter]);
 
   // Clear selections when filters change
   useEffect(() => {
@@ -817,7 +814,8 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
   };
 
   // Calculate stats from ordersForStats (month only, no status filter) so header stats don't change when filters are applied
-  const calculateStats = () => {
+  const stats = useMemo(() => {
+    const calculateStats = () => {
     const totalOrders = ordersForStats.length;
     let ndrCount = 0;
     let deliveredCount = 0;
@@ -955,12 +953,13 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       unfulfilledCODCount,
       fulfilledCount,
     };
-  };
-
-  const stats = calculateStats();
+    };
+    return calculateStats();
+  }, [ordersForStats, rtoOrderIds]);
 
   // Calculate Expected Profit for current month
-  const calculateExpectedProfit = () => {
+  const expectedProfit = useMemo(() => {
+    const calculateExpectedProfit = () => {
     // Only calculate for current month or specific month selection
     if (selectedMonthFilter === 'all') {
       return null;
@@ -1129,9 +1128,10 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       remainingDays,
       isCurrentMonth,
     };
-  };
-
-  const expectedProfit = calculateExpectedProfit();
+    };
+    return calculateExpectedProfit();
+  }, [ordersForStats, orders, selectedMonthFilter, rtoOrderIds, discardedOrderIds,
+      orderProfitLoss, adSpendByDate, globalNdrRate]);
 
   const handleDiscardOrders = async () => {
     if (selectedOrders.size === 0) return;
