@@ -13,6 +13,9 @@ import { S3Client, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client
 import { fromInstanceMetadata } from '@aws-sdk/credential-provider-imds';
 import { Ticket } from '../models';
 import archiver from 'archiver';
+import { recomputeShippingForDate, getOrderDateKey as getShippingOrderDateKey, backfillShippingStats } from '../services/shippingStatsService';
+import { recomputeOrderStatsForDate, backfillOrderStats } from '../services/orderStatsService';
+import { backfillDailyPnl } from '../services/dailyPnlService';
 
 const router = Router();
 
@@ -309,6 +312,10 @@ router.post('/shopify/orders/clear-cache', requireAdmin, async (_req: Authentica
       message: `Orders synced successfully (${syncedCount} updated).`,
       syncedCount
     });
+
+    // Async full recompute of order stats and P&L after sync
+    backfillOrderStats().catch(console.error);
+    backfillDailyPnl().catch(console.error);
   } catch (error) {
     console.error('Error syncing orders:', error);
     res.status(500).json({ success: false, error: 'Failed to sync orders' });
@@ -438,15 +445,14 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
         const paymentGateways = order.payment_gateway_names?.map(g => g.toLowerCase()) || [];
         const tags = order.tags?.toLowerCase() || '';
 
-        // Check if it's COD (Only if it's not already paid)
+        // Check if it's COD based on gateway/tags — ignore financial_status because
+        // Shopify marks COD orders as 'paid' once cash is collected on delivery,
+        // which would otherwise cause delivered COD orders to be misclassified as Prepaid.
         if (
-          order.financial_status !== 'paid' &&
-          (
-            gateway.includes('cash on delivery') ||
-            gateway.includes('cod') ||
-            paymentGateways.some(g => g.includes('cash on delivery') || g.includes('cod')) ||
-            tags.includes('cod')
-          )
+          gateway.includes('cash on delivery') ||
+          gateway.includes('cod') ||
+          paymentGateways.some(g => g.includes('cash on delivery') || g.includes('cod')) ||
+          tags.includes('cod')
         ) {
           paymentMethod = 'COD';
         }
@@ -669,6 +675,13 @@ router.post('/shopify/update-delivery-status', requireAdmin, async (req: Authent
       success: true,
       message: `Order ${orderNumber} marked as ${status}`,
     });
+
+    // Async recompute order stats for the affected date
+    getShippingOrderDateKey(orderNumber)
+      .then((dateKey) => {
+        if (dateKey) recomputeOrderStatsForDate(dateKey).catch(console.error);
+      })
+      .catch(console.error);
   } catch (error) {
     console.error('Error updating delivery status:', error);
     res.status(500).json({
@@ -1075,6 +1088,11 @@ router.post('/shiprocket/fetch-shipping-charge', requireAdmin, async (req: Authe
     const ShippingCharge = (await import('../models/ShippingCharge')).default;
     const saved = await ShippingCharge.findOne({ orderNumber });
 
+    // Recompute DailyShipping for the affected date asynchronously
+    getShippingOrderDateKey(orderNumber)
+      .then((dateKey) => { if (dateKey) recomputeShippingForDate(dateKey); })
+      .catch((err) => console.error('DailyShipping recompute error:', err));
+
     res.json({
       success: true,
       shippingCharge,
@@ -1152,6 +1170,9 @@ router.post('/shiprocket/sync-shipping-charges', requireAdmin, async (req: Authe
 
     // Use bulk fetch method (much faster)
     const result = await shiprocketService.bulkFetchShippingCharges(orderNumbers);
+
+    // Recompute DailyShipping for all affected dates asynchronously
+    backfillShippingStats().catch((err) => console.error('DailyShipping bulk recompute error:', err));
 
     res.json({
       success: true,

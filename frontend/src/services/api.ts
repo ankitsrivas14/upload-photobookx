@@ -657,6 +657,46 @@ class ApiService {
     });
   }
 
+  async getDailyROAS(startDate?: string, endDate?: string): Promise<{
+    success: boolean;
+    records?: Array<{ dateKey: string; revenue: number; adSpend: number; roas: number | null; updatedAt: string }>;
+    error?: string;
+  }> {
+    const params = new URLSearchParams();
+    if (startDate) params.set('startDate', startDate);
+    if (endDate) params.set('endDate', endDate);
+    const qs = params.toString();
+    return this.request(`/api/admin/sales/daily-roas${qs ? `?${qs}` : ''}`);
+  }
+
+  async backfillDailyROAS(): Promise<{ success: boolean; upserted?: number; error?: string }> {
+    return this.request('/api/admin/sales/daily-roas/backfill', { method: 'POST' });
+  }
+
+  async getDailyShipping(startDate?: string, endDate?: string): Promise<{
+    success: boolean;
+    records?: Array<{
+      dateKey: string;
+      avgShipping: number | null;
+      avgShippingSmall: number | null;
+      avgShippingLarge: number | null;
+      orderCount: number;
+      smallCount: number;
+      largeCount: number;
+    }>;
+    error?: string;
+  }> {
+    const params = new URLSearchParams();
+    if (startDate) params.set('startDate', startDate);
+    if (endDate) params.set('endDate', endDate);
+    const qs = params.toString();
+    return this.request(`/api/admin/sales/daily-shipping${qs ? `?${qs}` : ''}`);
+  }
+
+  async backfillDailyShipping(): Promise<{ success: boolean; upserted?: number; error?: string }> {
+    return this.request('/api/admin/sales/daily-shipping/backfill', { method: 'POST' });
+  }
+
   // Upload (public - no auth needed)
   async validateUploadToken(token: string): Promise<UploadInfo> {
     return this.request<UploadInfo>(`/api/upload/${token}`);
@@ -942,23 +982,6 @@ class ApiService {
     });
   }
 
-  async predictDailyPerformance(data: {
-    dayName: string;
-    expectedAdSpend: number;
-    historicalSameDayData: any[];
-    dateKey: string;
-    todayData: any;
-  }): Promise<{ success: boolean; prediction?: any; error?: string }> {
-    return this.request('/api/admin/sales/predict-daily-performance', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
-
-  async getDailyPerformancePrediction(dateKey: string): Promise<{ success: boolean; prediction?: any; error?: string }> {
-    return this.request(`/api/admin/sales/predict-daily-performance/${dateKey}`);
-  }
-
   async analyzeAds(adData: any[]): Promise<{ success: boolean; recommendations: any[]; overallStrategy: string; error?: string }> {
     return this.request('/api/admin/sales/analyze-ads', {
       method: 'POST',
@@ -1120,6 +1143,70 @@ class ApiService {
 
   async getAllHourlyLogs(): Promise<{ success: boolean; employees?: any[]; logs?: any[]; error?: string }> {
     return this.request('/api/admin/attendance/hourly-logs/all');
+  }
+
+  async getDailyOrderStats(startDate?: string, endDate?: string): Promise<{
+    success: boolean;
+    stats?: {
+      prepaidCount: number; codCount: number;
+      deliveredCount: number; failedCount: number; inTransitCount: number;
+      outForDeliveryCount: number; attemptedDeliveryCount: number; confirmedCount: number;
+      codDeliveredCount: number; codFailedCount: number;
+    };
+    completedDates?: string[];
+    error?: string;
+  }> {
+    const params = new URLSearchParams();
+    if (startDate) params.set('startDate', startDate);
+    if (endDate) params.set('endDate', endDate);
+    const qs = params.toString();
+    return this.request(`/api/admin/sales/daily-order-stats${qs ? `?${qs}` : ''}`);
+  }
+
+  async backfillDailyOrderStats(): Promise<{ success: boolean; upserted?: number; error?: string }> {
+    return this.request('/api/admin/sales/daily-order-stats/backfill', { method: 'POST' });
+  }
+
+  async getDailyPnl(params: { month?: string; year?: string; startDate?: string; endDate?: string } = {}): Promise<{
+    success: boolean;
+    records?: Array<{
+      dateKey: string;
+      isCompleted: boolean;
+      barChartProfit: number;
+      heatmapProfit: number;
+      orderCount: number;
+      adSpend: number;
+    }>;
+    error?: string;
+  }> {
+    const qs = new URLSearchParams();
+    if (params.month) qs.set('month', params.month);
+    if (params.year) qs.set('year', params.year);
+    if (params.startDate) qs.set('startDate', params.startDate);
+    if (params.endDate) qs.set('endDate', params.endDate);
+    const q = qs.toString();
+    return this.request(`/api/admin/sales/daily-pnl${q ? `?${q}` : ''}`);
+  }
+
+  async backfillDailyPnl(): Promise<{ success: boolean; upserted?: number; error?: string }> {
+    return this.request('/api/admin/sales/daily-pnl/backfill', { method: 'POST' });
+  }
+
+  async getBreakevenMetrics(): Promise<{
+    success: boolean;
+    aov?: number;
+    avgCOGS?: number;
+    avgShipping?: number;
+    avgTotalCost?: number;
+    contributionMargin?: number;
+    breakevenROAS?: number;
+    deliveredCount?: number;
+    failedCount?: number;
+    totalOrders?: number;
+    completedDaysCount?: number;
+    error?: string;
+  }> {
+    return this.request('/api/admin/sales/breakeven-metrics');
   }
 }
 

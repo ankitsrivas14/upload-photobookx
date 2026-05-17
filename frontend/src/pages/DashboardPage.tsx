@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   LineChart,
   Line,
@@ -17,38 +17,12 @@ import {
   Pie,
 } from 'recharts';
 import { api } from '../services/api';
-import type { AdminUser, ShopifyOrder } from '../services/api';
+import type { AdminUser } from '../services/api';
 import { SalesPage, type SalesPageProps } from './SalesPage';
 import styles from './DashboardPage.module.css';
 
 const STORE_TIMEZONE = 'Asia/Kolkata';
 
-function getOrderDateKey(createdAt: string): string {
-  return new Date(createdAt).toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
-}
-
-/** Get date (YYYY-MM-DD) and hour (0-23) in store timezone for an order */
-function getOrderDateAndHour(createdAt: string): { dateKey: string; hour: number } {
-  const d = new Date(createdAt);
-  const dateKey = d.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
-  const hourStr = d.toLocaleString('en-US', { timeZone: STORE_TIMEZONE, hour: 'numeric', hour12: false });
-  let hour = Number(hourStr);
-  if (Number.isNaN(hour) || hour < 0) hour = 0;
-  if (hour > 23) hour = 23;
-  return { dateKey, hour };
-}
-
-interface COGSField {
-  id: string;
-  name: string;
-  smallPrepaidValue: number;
-  smallCODValue: number;
-  largePrepaidValue: number;
-  largeCODValue: number;
-  type: 'cogs' | 'ndr' | 'both';
-  calculationType: 'fixed' | 'percentage';
-  percentageType?: 'included' | 'excluded';
-}
 
 export function DashboardPage() {
   const navigate = useNavigate();
@@ -56,37 +30,60 @@ export function DashboardPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
-  const [dailyPnlMap, setDailyPnlMap] = useState<Record<string, number>>({});
-  const [orders, setOrders] = useState<ShopifyOrder[]>([]);
+  // ROAS filter — uncontrolled refs for inputs (no re-render on typing)
+  const roasDaysRef = useRef<HTMLInputElement>(null);
+  const roasStartRef = useRef<HTMLInputElement>(null);
+  const roasEndRef = useRef<HTMLInputElement>(null);
+  // ROAS filter — applied state (what the chart uses, updated on Go)
+  const [roasDays, setRoasDays] = useState(30);
+  const [roasStartDate, setRoasStartDate] = useState('');
+  const [roasEndDate, setRoasEndDate] = useState('');
+  // ROAS data fetched from DB
+  const [roasDbRecords, setRoasDbRecords] = useState<Array<{ dateKey: string; revenue: number; adSpend: number; roas: number | null }>>([]);
+  const [roasLoading, setRoasLoading] = useState(false);
+  // Heatmap P&L from DB — keyed by dateKey
+  const [heatmapByDate, setHeatmapByDate] = useState<Record<string, number>>({});
+  // Monthly bar chart records from DB
+  const [pnlChartRecords, setPnlChartRecords] = useState<Array<{
+    dateKey: string; isCompleted: boolean; barChartProfit: number;
+  }>>([]);
+  // Breakeven metrics from DB
+  const [breakevenDbMetrics, setBreakevenDbMetrics] = useState<{
+    aov: number; avgCOGS: number; avgShipping: number; avgTotalCost: number;
+    contributionMargin: number; breakevenROAS: number;
+    deliveredCount: number; failedCount: number; totalOrders: number; completedDaysCount: number;
+  } | null>(null);
 
   // Sales Modal State
   const [salesModalOpen, setSalesModalOpen] = useState(false);
   const [salesModalFilter, setSalesModalFilter] = useState<SalesPageProps['initialFilter']>();
 
-  // Cache for ad spend by date
-  const [adSpendByDate, setAdSpendByDate] = useState<Record<string, number>>({});
   const [tooltip, setTooltip] = useState<{ dateLabel: string; pnl: number | null; x: number; y: number } | null>(null);
-  const [cogsFields, setCogsFields] = useState<COGSField[]>([]);
-  const [rtoOrderIds, setRtoOrderIds] = useState<Set<number>>(new Set());
 
   // Shipping chart controls
   const [shippingGranularity, setShippingGranularity] = useState<'day' | 'week' | 'month'>('day');
   const [activeShippingLines, setActiveShippingLines] = useState({
     all: true,
-    small: true,
-    large: true,
+    small: false,
+    large: false,
   });
+  const [shippingDbRecords, setShippingDbRecords] = useState<Array<{
+    dateKey: string;
+    avgShipping: number | null;
+    avgShippingSmall: number | null;
+    avgShippingLarge: number | null;
+  }>>([]);
 
-  // AI Daily Prediction State
-  const [expectedAdSpend, setExpectedAdSpend] = useState<number>(0);
-  const [aiForecastData, setAiForecastData] = useState<{
-    hourlyCumul: number[];
-    hourlyRevenueCumul: number[];
-    reasoning: string;
-    totalOrders: number;
-    totalRevenue: number;
+  // Order Distribution DB state
+  const [orderStatsDb, setOrderStatsDb] = useState<{
+    prepaidCount: number; codCount: number;
+    deliveredCount: number; failedCount: number; inTransitCount: number;
+    outForDeliveryCount: number; attemptedDeliveryCount: number; confirmedCount: number;
+    codDeliveredCount: number; codFailedCount: number;
   } | null>(null);
-  const [isAiPredicting, setIsAiPredicting] = useState(false);
+  // Completed dates from DB — days where every order is in a final state
+  const [completedDatesDb, setCompletedDatesDb] = useState<Set<string>>(new Set());
+
 
   useEffect(() => {
     loadUser();
@@ -111,191 +108,145 @@ export function DashboardPage() {
     }
   };
 
-  const loadDailyPnl = useCallback(async () => {
+  const loadBreakevenMetrics = useCallback(async () => {
     try {
-      const [ordersRes, adSpendRes, cogsRes, rtoRes] = await Promise.all([
-        api.getOrders(10000, true),
-        api.getDailyAdSpend(),
-        api.getCOGSConfiguration(),
-        api.getRTOOrderIds(),
-      ]);
-
-      const orders = ordersRes.success && ordersRes.orders ? ordersRes.orders : [];
-      const adSpendEntries = adSpendRes.success && adSpendRes.entries ? adSpendRes.entries : [];
-      const cogsFields = cogsRes?.fields ?? [];
-      const rtoOrderIds = new Set(rtoRes.success ? rtoRes.rtoOrderIds : []);
-
-      // Build ad cost per order by date - EXACT same logic as SalesPage
-      const orderCountByDate: Record<string, number> = {};
-      orders.forEach((o) => {
-        if (o.cancelledAt) return;
-        const d = getOrderDateKey(o.createdAt);
-        orderCountByDate[d] = (orderCountByDate[d] || 0) + 1;
-      });
-
-      const adSpendByDate: Record<string, number> = {};
-      adSpendEntries.forEach((e) => {
-        // Use same timezone conversion as order dates (STORE_TIMEZONE)
-        const d = new Date(e.date).toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
-        adSpendByDate[d] = (adSpendByDate[d] || 0) + e.amount;
-      });
-
-      const adCostPerOrderByDate: Record<string, number> = {};
-      Object.keys(adSpendByDate).forEach((d) => {
-        const count = orderCountByDate[d] || 0;
-        if (count > 0) adCostPerOrderByDate[d] = adSpendByDate[d] / count;
-      });
-
-      // EXACT same isOrderDelivered logic as SalesPage
-      const isOrderDelivered = (order: ShopifyOrder) => {
-        if (rtoOrderIds.has(order.id)) return false;
-        const status = order.deliveryStatus?.toLowerCase() || '';
-        const ndrStatuses = ['failed', 'rto', 'return'];
-        if (ndrStatuses.some(s => status.includes(s))) return false;
-        if (status === 'delivered') return true;
-        if (order.paymentMethod?.toLowerCase() === 'prepaid') return true;
-        return false;
-      };
-
-      // EXACT same isOrderFinalStatus logic as SalesPage  
-      const isOrderFinalStatus = (order: ShopifyOrder) => {
-        const status = order.deliveryStatus?.toLowerCase() || '';
-        const isDelivered = status === 'delivered';
-        const isFailed =
-          rtoOrderIds.has(order.id) ||
-          status === 'failure' ||
-          status.includes('failed') ||
-          status.includes('rto');
-        return isDelivered || isFailed;
-      };
-
-      const detectVariant = (order: ShopifyOrder): 'small' | 'large' => {
-        if (!order.lineItems?.length) return 'small';
-        const hasLarge = order.lineItems.some(
-          (item) =>
-            item.title?.toLowerCase().includes('large') ||
-            item.variantTitle?.toLowerCase().includes('large')
-        );
-        return hasLarge ? 'large' : 'small';
-      };
-
-      // EXACT same calcOrderPnl logic as SalesPage's calculateOrderProfitLoss (attempted_delivery out of failed)
-      const calcOrderPnl = (order: ShopifyOrder): number => {
-        if (cogsFields.length === 0) return 0;
-        const variant = detectVariant(order);
-        const isDelivered = isOrderDelivered(order);
-        const status = order.deliveryStatus?.toLowerCase() || '';
-        const isFailed =
-          rtoOrderIds.has(order.id) ||
-          status === 'failure' ||
-          status.includes('failed') ||
-          status.includes('rto');
-        const paymentMethod = order.paymentMethod?.toLowerCase() === 'prepaid' ? 'prepaid' : 'cod';
-
-        let revenue = 0;
-        let fieldsToUse: COGSField[] = [];
-
-        if (isDelivered) {
-          revenue = order.totalPrice || 0;
-          fieldsToUse = (cogsFields as COGSField[]).filter(f => f.type === 'cogs' || f.type === 'both');
-        } else if (isFailed) {
-          revenue = 0;
-          fieldsToUse = (cogsFields as COGSField[]).filter(f => f.type === 'ndr' || f.type === 'both');
-        } else {
-          revenue = 0;
-          fieldsToUse = (cogsFields as COGSField[]).filter(f => f.type === 'cogs' || f.type === 'both');
-        }
-
-        let totalCosts = 0;
-        const key = `${variant}${paymentMethod === 'prepaid' ? 'Prepaid' : 'COD'}Value` as keyof COGSField;
-        fieldsToUse.forEach((field) => {
-          let value = field[key] as number;
-          if (value === undefined || value === null) {
-            value = variant === 'small' ? 0 : 0;
-          }
-          if (field.calculationType === 'fixed') {
-            totalCosts += value;
-          } else {
-            const salePrice = order.totalPrice || 0;
-            const pct = field.percentageType || 'excluded';
-            totalCosts +=
-              pct === 'included'
-                ? (value / (100 + value)) * salePrice
-                : (value / 100) * salePrice;
-          }
+      const res = await api.getBreakevenMetrics();
+      if (res.success) {
+        setBreakevenDbMetrics({
+          aov: res.aov ?? 0,
+          avgCOGS: res.avgCOGS ?? 0,
+          avgShipping: res.avgShipping ?? 0,
+          avgTotalCost: res.avgTotalCost ?? 0,
+          contributionMargin: res.contributionMargin ?? 0,
+          breakevenROAS: res.breakevenROAS ?? 0,
+          deliveredCount: res.deliveredCount ?? 0,
+          failedCount: res.failedCount ?? 0,
+          totalOrders: res.totalOrders ?? 0,
+          completedDaysCount: res.completedDaysCount ?? 0,
         });
-        const orderDateStr = getOrderDateKey(order.createdAt);
-        const adCost = adCostPerOrderByDate[orderDateStr] ?? 0;
-        return revenue - totalCosts - adCost;
-      };
-
-      const orderPnlByOrderId = new Map<number, number>();
-      orders.forEach((o) => orderPnlByOrderId.set(o.id, calcOrderPnl(o)));
-
-      const datesWithFinalOrders = new Set<string>();
-      const dailyPnl: Record<string, number> = {};
-
-      // Count orders in daily P/L: delivered, failed, or prepaid (prepaid won't fail so count as realized)
-      const isOrderCountedInDayPnl = (order: ShopifyOrder) =>
-        isOrderFinalStatus(order) || (order.paymentMethod?.toLowerCase() === 'prepaid');
-      orders.forEach((o) => {
-        if (o.cancelledAt) return;
-        const d = getOrderDateKey(o.createdAt);
-        if (!isOrderCountedInDayPnl(o)) return;
-        datesWithFinalOrders.add(d);
-        dailyPnl[d] = (dailyPnl[d] || 0) + (orderPnlByOrderId.get(o.id) ?? 0);
-      });
-
-      // Add ad-spend-only days (days without any final-status orders)
-      Object.entries(adSpendByDate).forEach(([dateKey, amount]) => {
-        if (!datesWithFinalOrders.has(dateKey)) {
-          dailyPnl[dateKey] = (dailyPnl[dateKey] ?? 0) - amount;
-        }
-      });
-
-      setOrders(orders);
-      setAdSpendByDate(adSpendByDate);
-      setDailyPnlMap(dailyPnl);
-      setCogsFields(cogsFields);
-      setRtoOrderIds(rtoOrderIds);
+      }
     } catch (err) {
-      console.error('Failed to load daily P/L:', err);
-      setDailyPnlMap({});
+      console.error('Failed to load breakeven metrics:', err);
+    }
+  }, []);
+
+  const loadROAS = useCallback(async (days: number, startDate: string, endDate: string) => {
+    setRoasLoading(true);
+    try {
+      let start: string;
+      let end: string;
+      if (startDate && endDate) {
+        start = startDate;
+        end = endDate;
+      } else {
+        const now = new Date();
+        end = now.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+        const s = new Date(now);
+        s.setDate(s.getDate() - (days - 1));
+        start = s.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+      }
+      const res = await api.getDailyROAS(start, end);
+      if (res.success && res.records) {
+        setRoasDbRecords(res.records);
+      }
+    } catch (err) {
+      console.error('Failed to load ROAS data:', err);
+    } finally {
+      setRoasLoading(false);
+    }
+  }, []);
+
+  const loadShipping = useCallback(async () => {
+    try {
+      // Fetch all history — widget aggregates client-side by granularity
+      const res = await api.getDailyShipping();
+      if (res.success && res.records) {
+        setShippingDbRecords(res.records);
+      }
+    } catch (err) {
+      console.error('Failed to load shipping data:', err);
+    }
+  }, []);
+
+  const loadOrderStats = useCallback(async () => {
+    try {
+      // Last 30 days, not before Jan 28, 2026
+      const now = new Date();
+      const endDate = now.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+      const s = new Date(now);
+      s.setDate(s.getDate() - 29);
+      const thirtyDaysAgo = s.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+      const startDate = thirtyDaysAgo < '2026-01-28' ? '2026-01-28' : thirtyDaysAgo;
+      const res = await api.getDailyOrderStats(startDate, endDate);
+      if (res.success && res.stats) {
+        setOrderStatsDb(res.stats);
+      }
+      if (res.success && res.completedDates) {
+        setCompletedDatesDb(new Set(res.completedDates));
+      }
+    } catch (err) {
+      console.error('Failed to load order stats:', err);
+    }
+  }, []);
+
+  const loadPnlChart = useCallback(async (year: number, month: number) => {
+    try {
+      const monthStr = `${year}-${String(month + 1).padStart(2, '0')}`;
+      const res = await api.getDailyPnl({ month: monthStr });
+      if (res.success && res.records) {
+        setPnlChartRecords(res.records.map((r) => ({
+          dateKey: r.dateKey,
+          isCompleted: r.isCompleted,
+          barChartProfit: r.barChartProfit,
+        })));
+      }
+    } catch (err) {
+      console.error('Failed to load P&L chart data:', err);
+    }
+  }, []);
+
+  const loadHeatmap = useCallback(async (year: number) => {
+    try {
+      const res = await api.getDailyPnl({ year: String(year) });
+      if (res.success && res.records) {
+        const map: Record<string, number> = {};
+        res.records.forEach((r) => { map[r.dateKey] = r.heatmapProfit; });
+        setHeatmapByDate(map);
+      }
+    } catch (err) {
+      console.error('Failed to load heatmap data:', err);
     }
   }, []);
 
   useEffect(() => {
     if (user) {
-      loadDailyPnl();
-      loadTodayPrediction();
+      loadBreakevenMetrics();
+      loadROAS(roasDays, roasStartDate, roasEndDate);
+      loadShipping();
+      loadOrderStats();
+      loadPnlChart(selectedYear, selectedMonth);
+      loadHeatmap(selectedYear);
     }
-  }, [user, loadDailyPnl]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount
+  }, [user, loadBreakevenMetrics, loadROAS, loadShipping, loadOrderStats, loadPnlChart, loadHeatmap]);
 
-  const loadTodayPrediction = async () => {
-    try {
-      const todayKey = new Date().toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
-      const res = await api.getDailyPerformancePrediction(todayKey);
-      if (res.success && res.prediction) {
-        const p = res.prediction;
-        setAiForecastData({
-          hourlyCumul: p.predictedHourlyCumul,
-          hourlyRevenueCumul: p.predictedHourlyRevenueCumul,
-          reasoning: p.reasoning,
-          totalOrders: p.predictedTotalOrders,
-          totalRevenue: p.predictedTotalRevenue
-        });
-        setExpectedAdSpend(p.expectedAdSpend);
-      }
-    } catch (err) {
-      console.error('Failed to load today prediction:', err);
-    }
-  };
+  // Re-fetch bar chart when selected month/year changes
+  useEffect(() => {
+    if (user) loadPnlChart(selectedYear, selectedMonth);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedYear, selectedMonth]);
+
+  // Re-fetch heatmap when selected year changes
+  useEffect(() => {
+    if (user) loadHeatmap(selectedYear);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedYear]);
 
   const weekLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S']; // Monday to Sunday
   const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
   const getPnlForDateKey = (dateKey: string): number | null => {
-    const val = dailyPnlMap[dateKey];
+    const val = heatmapByDate[dateKey];
     return val !== undefined ? val : null;
   };
 
@@ -316,423 +267,44 @@ export function DashboardPage() {
     return 0;
   };
 
-  const handleAiPredict = async () => {
-    try {
-      setIsAiPredicting(true);
-      const now = new Date();
-      const dayName = now.toLocaleDateString('en-US', { weekday: 'long', timeZone: STORE_TIMEZONE });
-      const dateKey = now.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+  // ROAS chart data — built from DB records fetched on Go / mount
+  const roasChartData = roasDbRecords.map((r) => ({
+    date: new Date(r.dateKey).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: STORE_TIMEZONE }),
+    dateKey: r.dateKey,
+    roas: r.roas,
+    revenue: r.revenue,
+    adSpend: r.adSpend,
+    profit: heatmapByDate[r.dateKey] || 0,
+  }));
 
-      // Find all previous same-day data (e.g. all previous Sundays)
-      const sameDayHistorical: any[] = [];
-
-      // We look back at last 10 weeks of same day
-      const ordersByDateByHour: Record<string, number[]> = {};
-      const revenueByDateByHour: Record<string, number[]> = {};
-      orders.forEach(o => {
-        if (o.cancelledAt) return;
-        const { dateKey, hour } = getOrderDateAndHour(o.createdAt);
-        if (!ordersByDateByHour[dateKey]) ordersByDateByHour[dateKey] = new Array(24).fill(0);
-        if (!revenueByDateByHour[dateKey]) revenueByDateByHour[dateKey] = new Array(24).fill(0);
-        ordersByDateByHour[dateKey][hour]++;
-        revenueByDateByHour[dateKey][hour] += (o.totalPrice || 0);
-      });
-
-      for (let i = 1; i <= 10; i++) {
-        const d = new Date(now);
-        d.setDate(d.getDate() - (i * 7));
-        const dateKey = d.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
-        
-        // Only include if date is after Jan 28, 2026
-        if (d < new Date('2026-01-28')) break;
-
-        const hourlyOrders = ordersByDateByHour[dateKey] || new Array(24).fill(0);
-        const hourlyRevenue = revenueByDateByHour[dateKey] || new Array(24).fill(0);
-        const totalAdSpend = adSpendByDate[dateKey] || 0;
-
-        // Convert to cumulative
-        const hourlyCumul = [];
-        const hourlyRevCumul = [];
-        let runningTotal = 0;
-        let runningRevenue = 0;
-        for (let h = 0; h < 24; h++) {
-          runningTotal += hourlyOrders[h];
-          runningRevenue += hourlyRevenue[h];
-          hourlyCumul.push(runningTotal);
-          hourlyRevCumul.push(runningRevenue);
-        }
-
-        sameDayHistorical.push({
-          date: dateKey,
-          totalAdSpend,
-          hourlyCumul,
-          hourlyRevCumul
-        });
-      }
-
-      if (sameDayHistorical.length === 0) {
-        alert('Not enough historical data for this day yet.');
-        return;
-      }
-
-      const todayDateKey = now.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
-      const currentHour = Number(now.toLocaleString('en-US', { timeZone: STORE_TIMEZONE, hour: 'numeric', hour12: false }));
-      const todayHourlyOrders = ordersByDateByHour[todayDateKey] || new Array(24).fill(0);
-      const todayHourlyRevenue = revenueByDateByHour[todayDateKey] || new Array(24).fill(0);
-      const todayAdSpend = adSpendByDate[todayDateKey] || 0;
-
-      const res = await api.predictDailyPerformance({
-        dayName,
-        expectedAdSpend,
-        historicalSameDayData: sameDayHistorical,
-        dateKey,
-        todayData: {
-          totalAdSpend: todayAdSpend,
-          hourlyOrders: todayHourlyOrders,
-          hourlyRevenue: todayHourlyRevenue,
-          currentHour
-        }
-      });
-
-      if (res.success && res.prediction) {
-        setAiForecastData({
-          hourlyCumul: res.prediction.predictedHourlyCumul,
-          hourlyRevenueCumul: res.prediction.predictedHourlyRevenueCumul,
-          reasoning: res.prediction.reasoning,
-          totalOrders: res.prediction.predictedTotalOrders,
-          totalRevenue: res.prediction.predictedTotalRevenue
-        });
-      }
-    } catch (err) {
-      console.error('Failed AI Daily Prediction:', err);
-    } finally {
-      setIsAiPredicting(false);
-    }
-  };
-
-  // Today vs same day last week: order counts by hour (store timezone)
-  const orderCountChartData = (() => {
-    const now = new Date();
-    const todayDateKey = now.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
-    const lastWeekSameDay = new Date(now);
-    lastWeekSameDay.setDate(lastWeekSameDay.getDate() - 7);
-    const lastWeekDateKey = lastWeekSameDay.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
-
-    const todayByHour = new Array(24).fill(0);
-    const lastWeekByHour = new Array(24).fill(0);
-
-    orders.forEach((o) => {
-      if (o.cancelledAt) return;
-      const { dateKey, hour } = getOrderDateAndHour(o.createdAt);
-      if (dateKey === todayDateKey && hour >= 0 && hour < 24) todayByHour[hour]++;
-      if (dateKey === lastWeekDateKey && hour >= 0 && hour < 24) lastWeekByHour[hour]++;
-    });
-
-    // Cumulative counts up to each hour
-    const todayCumul: number[] = [];
-    const lastWeekCumul: number[] = [];
-    let t = 0;
-    let l = 0;
-    for (let h = 0; h < 24; h++) {
-      t += todayByHour[h];
-      l += lastWeekByHour[h];
-      todayCumul.push(t);
-      lastWeekCumul.push(l);
-    }
-
-    const currentHour = Number(
-      now.toLocaleString('en-US', { timeZone: STORE_TIMEZONE, hour: 'numeric', hour12: false })
-    );
-    const currentHourClamped = Math.min(23, Math.max(0, Number.isNaN(currentHour) ? 0 : currentHour));
-
-    const dayLabel = now.toLocaleDateString('en-IN', { weekday: 'long', timeZone: STORE_TIMEZONE });
-    const chartData = Array.from({ length: 24 }, (_, h) => {
-      const isPastOrPresent = h <= currentHourClamped;
-      return {
-        hour: h,
-        label: h === 0 ? '12am' : h === 12 ? '12pm' : h < 12 ? `${h}am` : `${h - 12}pm`,
-        today: isPastOrPresent ? todayCumul[h] : null,
-        lastWeek: lastWeekCumul[h],
-        aiForecast: aiForecastData ? aiForecastData.hourlyCumul[h] : null,
-      };
-    });
-
-    return {
-      chartData,
-      dayLabel,
-      todayDateKey,
-      lastWeekDateKey,
-      currentHourClamped,
-    };
-  })();
-
-  // Revenue by hour (same two days) and summary stats
-  const revenueChartData = (() => {
-    const now = new Date();
-    const todayDateKey = now.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
-    const lastWeekSameDay = new Date(now);
-    lastWeekSameDay.setDate(lastWeekSameDay.getDate() - 7);
-    const lastWeekDateKey = lastWeekSameDay.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
-    const currentHour = Number(
-      now.toLocaleString('en-US', { timeZone: STORE_TIMEZONE, hour: 'numeric', hour12: false })
-    );
-    const currentHourClamped = Math.min(23, Math.max(0, Number.isNaN(currentHour) ? 0 : currentHour));
-
-    const todayRevenueByHour = new Array(24).fill(0);
-    const lastWeekRevenueByHour = new Array(24).fill(0);
-    let totalRevenueToday = 0;
-    let totalRevenueLastWeek = 0;
-
-    orders.forEach((o) => {
-      if (o.cancelledAt) return;
-      const { dateKey, hour } = getOrderDateAndHour(o.createdAt);
-      const amount = o.totalPrice ?? 0;
-      if (dateKey === todayDateKey && hour >= 0 && hour < 24) {
-        todayRevenueByHour[hour] += amount;
-        totalRevenueToday += amount;
-      }
-      if (dateKey === lastWeekDateKey && hour >= 0 && hour < 24) {
-        lastWeekRevenueByHour[hour] += amount;
-        totalRevenueLastWeek += amount;
-      }
-    });
-
-    let t = 0;
-    let l = 0;
-    const todayCumul: number[] = [];
-    const lastWeekCumul: number[] = [];
-    for (let h = 0; h < 24; h++) {
-      t += todayRevenueByHour[h];
-      l += lastWeekRevenueByHour[h];
-      todayCumul.push(t);
-      lastWeekCumul.push(l);
-    }
-
-    const dayLabel = now.toLocaleDateString('en-IN', { weekday: 'long', timeZone: STORE_TIMEZONE });
-    const chartData = Array.from({ length: 24 }, (_, h) => {
-      const isPastOrPresent = h <= currentHourClamped;
-      return {
-        hour: h,
-        label: h === 0 ? '12am' : h === 12 ? '12pm' : h < 12 ? `${h}am` : `${h - 12}pm`,
-        today: isPastOrPresent ? todayCumul[h] : null,
-        lastWeek: lastWeekCumul[h],
-        aiForecastRev: aiForecastData ? aiForecastData.hourlyRevenueCumul[h] : null,
-      };
-    });
-
-    return {
-      chartData,
-      dayLabel,
-      totalRevenueToday,
-      totalRevenueLastWeek,
-    };
-  })();
-
-  const todayDateKey = orderCountChartData.todayDateKey;
-  const lastWeekDateKey = orderCountChartData.lastWeekDateKey;
-  const adSpendToday = adSpendByDate[todayDateKey] ?? 0;
-  const adSpendLastWeek = adSpendByDate[lastWeekDateKey] ?? 0;
-
-  // ROAS (Return on Ad Spend) for last 30 days
-  const roasChartData = (() => {
-    const now = new Date();
-    const data: Array<{ date: string; dateKey: string; roas: number | null; revenue: number; adSpend: number; profit: number }> = [];
-
-    // Build daily revenue from orders
-    const revenueByDate: Record<string, number> = {};
-    orders.forEach((o) => {
-      if (o.cancelledAt) return;
-      const dateKey = getOrderDateKey(o.createdAt);
-      revenueByDate[dateKey] = (revenueByDate[dateKey] || 0) + (o.totalPrice || 0);
-    });
-
-    // Build daily profit from dailyPnlMap (which already includes all costs)
-    const profitByDate: Record<string, number> = dailyPnlMap;
-
-    // Generate last 30 days
-    for (let i = 29; i >= 0; i--) {
-      const date = new Date(now);
-      date.setDate(date.getDate() - i);
-
-      // Skip data before Jan 28, 2026
-      if (date < new Date('2026-01-28')) continue;
-
-      const dateKey = date.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
-      const revenue = revenueByDate[dateKey] || 0;
-      const adSpend = adSpendByDate[dateKey] || 0;
-      const profit = profitByDate[dateKey] || 0;
-      const roas = adSpend > 0 ? revenue / adSpend : null;
-
-      data.push({
-        date: date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: STORE_TIMEZONE }),
-        dateKey,
-        roas,
-        revenue,
-        adSpend,
-        profit,
-      });
-    }
-
-    return data;
-  })();
-
-  // Profit Chart Data - Show Selected Month Only
+  // Profit Chart Data — built from DB records (no orders array needed)
   const profitChartData = (() => {
     const now = new Date();
+    const todayKey = now.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
     const startDate = new Date(selectedYear, selectedMonth, 1);
     const endDate = new Date(selectedYear, selectedMonth + 1, 0);
 
-    const data: Array<{
-      date: string;
-      dateKey: string;
-      bookedProfit: number;
-      yetToBookProfit: number;
-    }> = [];
+    // Build a quick lookup from DB records
+    const dbMap = new Map(pnlChartRecords.map((r) => [r.dateKey, r]));
 
-    // Helper functions from loadDailyPnl
-    const isOrderDelivered = (order: ShopifyOrder) => {
-      if (rtoOrderIds.has(order.id)) return false;
-      const status = order.deliveryStatus?.toLowerCase() || '';
-      const ndrStatuses = ['failed', 'rto', 'return'];
-      if (ndrStatuses.some(s => status.includes(s))) return false;
-      if (status === 'delivered') return true;
-      if (order.paymentMethod?.toLowerCase() === 'prepaid') return true;
-      return false;
-    };
-
-    const isOrderFinalStatus = (order: ShopifyOrder) => {
-      const status = order.deliveryStatus?.toLowerCase() || '';
-      const isDelivered = status === 'delivered';
-      const isFailed = rtoOrderIds.has(order.id) ||
-        status === 'failure' ||
-        status.includes('failed') ||
-        status.includes('rto');
-      return isDelivered || isFailed;
-    };
-
-    const detectVariant = (order: ShopifyOrder): 'small' | 'large' => {
-      if (!order.lineItems?.length) return 'small';
-      const hasLarge = order.lineItems.some(
-        (item) =>
-          item.title?.toLowerCase().includes('large') ||
-          item.variantTitle?.toLowerCase().includes('large')
-      );
-      return hasLarge ? 'large' : 'small';
-    };
-
-    const calcOrderPnl = (order: ShopifyOrder, adCostForOrder: number): number => {
-      if (cogsFields.length === 0) return 0;
-      const variant = detectVariant(order);
-      const isDelivered = isOrderDelivered(order);
-      const status = order.deliveryStatus?.toLowerCase() || '';
-      const isFailed = rtoOrderIds.has(order.id) ||
-        status === 'failure' ||
-        status.includes('failed') ||
-        status.includes('rto');
-      const paymentMethod = order.paymentMethod?.toLowerCase() === 'prepaid' ? 'prepaid' : 'cod';
-
-      let revenue = 0;
-      let fieldsToUse: COGSField[] = [];
-
-      if (isDelivered) {
-        revenue = order.totalPrice || 0;
-        fieldsToUse = cogsFields.filter(f => f.type === 'cogs' || f.type === 'both');
-      } else if (isFailed) {
-        revenue = 0;
-        fieldsToUse = cogsFields.filter(f => f.type === 'ndr' || f.type === 'both');
-      } else {
-        revenue = 0;
-        fieldsToUse = cogsFields.filter(f => f.type === 'cogs' || f.type === 'both');
-      }
-
-      let totalCosts = 0;
-      const key = `${variant}${paymentMethod === 'prepaid' ? 'Prepaid' : 'COD'}Value` as keyof COGSField;
-      fieldsToUse.forEach((field) => {
-        let value = field[key] as number;
-        if (value === undefined || value === null) value = 0;
-        if (field.calculationType === 'fixed') {
-          totalCosts += value;
-        } else {
-          const salePrice = order.totalPrice || 0;
-          const pct = field.percentageType || 'excluded';
-          totalCosts += pct === 'included'
-            ? (value / (100 + value)) * salePrice
-            : (value / 100) * salePrice;
-        }
-      });
-
-      // Add shipping cost
-      if (order.shippingCharge) {
-        totalCosts += order.shippingCharge;
-      }
-
-      return revenue - totalCosts - adCostForOrder;
-    };
-
-    // Get ad cost per order by date
-    const orderCountByDate: Record<string, number> = {};
-    orders.forEach((o) => {
-      if (o.cancelledAt) return;
-      const d = getOrderDateKey(o.createdAt);
-      orderCountByDate[d] = (orderCountByDate[d] || 0) + 1;
-    });
-
-    const adCostPerOrderByDate: Record<string, number> = {};
-    Object.keys(adSpendByDate).forEach((d) => {
-      const count = orderCountByDate[d] || 0;
-      if (count > 0) adCostPerOrderByDate[d] = adSpendByDate[d] / count;
-    });
-
-    // Group orders by date
-    const ordersByDate: Record<string, ShopifyOrder[]> = {};
-    orders.forEach((o) => {
-      if (o.cancelledAt) return;
-      const d = getOrderDateKey(o.createdAt);
-      if (!ordersByDate[d]) ordersByDate[d] = [];
-      ordersByDate[d].push(o);
-    });
-
+    const data: Array<{ date: string; dateKey: string; bookedProfit: number; yetToBookProfit: number }> = [];
     const currentDate = new Date(startDate);
 
     while (currentDate <= endDate) {
       const dateKey = currentDate.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
-      const dayOrders = ordersByDate[dateKey] || [];
-      const adCostPerOrder = adCostPerOrderByDate[dateKey] || 0;
-      const totalAdSpend = adSpendByDate[dateKey] || 0;
-
-      let bookedProfit = 0;
-
-      // If date is in future (after today), don't show data
-      // We compare logic using dateKey to avoid time-of-day issues
-      const todayKey = now.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+      const rec = dbMap.get(dateKey);
       const isFuture = dateKey > todayKey;
 
-      if (isFuture) {
-        bookedProfit = null as any;
-      } else {
-        // Check if day is complete (all orders in final status)
-        const allComplete = dayOrders.length === 0 || dayOrders.every(o => isOrderFinalStatus(o));
-
-        if (allComplete) {
-          // All orders are delivered/failed - show booked profit
-          dayOrders.forEach(o => {
-            bookedProfit += calcOrderPnl(o, adCostPerOrder);
-          });
-          // Subtract ad spend if no orders
-          if (dayOrders.length === 0 && totalAdSpend > 0) {
-            bookedProfit -= totalAdSpend;
-          }
-        } else {
-          // Incomplete day - leave empty (null values won't render bars)
-          bookedProfit = null as any;
-        }
+      let bookedProfit: number | null = null;
+      if (!isFuture && rec?.isCompleted) {
+        bookedProfit = rec.barChartProfit;
       }
 
       data.push({
         date: currentDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: STORE_TIMEZONE }),
         dateKey,
-        bookedProfit,
-        yetToBookProfit: 0, // Never show light bars
+        bookedProfit: bookedProfit as any,
+        yetToBookProfit: 0,
       });
 
       currentDate.setDate(currentDate.getDate() + 1);
@@ -741,361 +313,49 @@ export function DashboardPage() {
     return data;
   })();
 
-  // Breakeven ROAS Calculation
-  const breakevenMetrics = (() => {
-    // Detect variant
-    const detectVariant = (order: ShopifyOrder): 'small' | 'large' => {
-      if (!order.lineItems?.length) return 'small';
-      const hasLarge = order.lineItems.some(
-        (item) =>
-          item.title?.toLowerCase().includes('large') ||
-          item.variantTitle?.toLowerCase().includes('large')
-      );
-      return hasLarge ? 'large' : 'small';
-    };
+  // Breakeven metrics from DB (null while loading)
+  const breakevenMetrics = breakevenDbMetrics ?? {
+    aov: 0, avgCOGS: 0, avgShipping: 0, avgTotalCost: 0,
+    contributionMargin: 0, breakevenROAS: 0,
+    deliveredCount: 0, failedCount: 0, totalOrders: 0, completedDaysCount: 0,
+  };
 
-    // Filter orders to only include "Completed Days" within the last 30 days
-    // A Completed Day is a day where ALL orders have a final status (Delivered, Failed, RTO).
-    // This removes bias from pending orders.
-
-    // 1. Group orders by date
-    const ordersByDate: Record<string, ShopifyOrder[]> = {};
-    const now = new Date();
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    thirtyDaysAgo.setHours(0, 0, 0, 0);
-
-    const cutoffDate = new Date('2026-01-28');
-    // Ensure we don't look back further than Jan 28
-    const effectiveStartDate = cutoffDate > thirtyDaysAgo ? cutoffDate : thirtyDaysAgo;
-
-    orders.forEach((o) => {
-      if (o.cancelledAt) return;
-      const d = getOrderDateKey(o.createdAt);
-      if (!ordersByDate[d]) ordersByDate[d] = [];
-      ordersByDate[d].push(o);
-    });
-
-    // 2. Identify Completed Days and aggregate data
-    let totalRevenue = 0;
-    let totalCOGS = 0;
-    let totalShipping = 0;
-    let deliveredCount = 0;
-    let failedCount = 0;
-    let completedDaysCount = 0;
-    const completedDates = new Set<string>();
-
-    // Helper to check final status (duplicated from lower scope, but needed here)
-    const isOrderFinal = (order: ShopifyOrder) => {
-      const status = order.deliveryStatus?.toLowerCase() || '';
-      const isDelivered = status === 'delivered';
-      const isFailed = rtoOrderIds.has(order.id) ||
-        status === 'failure' ||
-        status.includes('failed') ||
-        status.includes('rto');
-      // Prepaid orders are often assumed delivered if not failed, but for "Completed Day" validaton
-      // we should be strict. However, the existing logic assumes Prepaid = Delivered often.
-      // Let's stick to the strict definition used in profitChart:
-      // isOrderFinalStatus there checks Delivered OR Failed. 
-      // But wait, existing isOrderFinalStatus also returns true for Prepaid.
-      // Let's use the same logic as the profit chart to match "this widget".
-      const isPrepaid = order.paymentMethod?.toLowerCase() === 'prepaid';
-      return isDelivered || isFailed || isPrepaid;
-    };
-
-    Object.keys(ordersByDate).forEach((dateKey) => {
-      // Check if date is within last 30 days AND after cutoff
-      const dateObj = new Date(dateKey);
-      if (dateObj < effectiveStartDate || dateObj > now) return;
-
-      const dayOrders = ordersByDate[dateKey];
-      const allComplete = dayOrders.length > 0 && dayOrders.every(isOrderFinal);
-
-      if (allComplete) {
-        completedDaysCount++;
-        completedDates.add(dateKey);
-        dayOrders.forEach((order) => {
-          const variant = detectVariant(order);
-          const paymentMethod = order.paymentMethod?.toLowerCase() === 'prepaid' ? 'prepaid' : 'cod';
-          const status = order.deliveryStatus?.toLowerCase() || '';
-
-          const isDelivered = status === 'delivered' || (paymentMethod === 'prepaid' && !rtoOrderIds.has(order.id));
-          const isFailed = !isDelivered && (rtoOrderIds.has(order.id) || status === 'failure' || status.includes('failed') || status.includes('rto'));
-
-          // Determine if we should count this order's financials
-          // In "Completed Day", every order is either Delivered (Revenue + COGS + Ship) or Failed (0 Rev + NDR + Ship).
-
-          if (isDelivered) {
-            deliveredCount++;
-            totalRevenue += order.totalPrice || 0;
-
-            // COGS
-            const key = `${variant}${paymentMethod === 'prepaid' ? 'Prepaid' : 'COD'}Value` as keyof COGSField;
-            let orderCOGS = 0;
-            cogsFields.filter(f => f.type === 'cogs' || f.type === 'both').forEach(field => {
-              let value = field[key] as number || 0;
-              if (field.calculationType === 'fixed') {
-                orderCOGS += value;
-              } else {
-                const salePrice = order.totalPrice || 0;
-                const pct = field.percentageType || 'excluded';
-                orderCOGS += pct === 'included' ? (value / (100 + value)) * salePrice : (value / 100) * salePrice;
-              }
-            });
-            totalCOGS += orderCOGS;
-
-          } else if (isFailed) {
-            failedCount++;
-            // NDR Costs
-            const key = `${variant}${paymentMethod === 'prepaid' ? 'Prepaid' : 'COD'}Value` as keyof COGSField;
-            let orderNDR = 0;
-            cogsFields.filter(f => f.type === 'ndr' || f.type === 'both').forEach(field => {
-              let value = field[key] as number || 0;
-              if (field.calculationType === 'fixed') {
-                orderNDR += value;
-              } else {
-                const salePrice = order.totalPrice || 0;
-                const pct = field.percentageType || 'excluded';
-                orderNDR += pct === 'included' ? (value / (100 + value)) * salePrice : (value / 100) * salePrice;
-              }
-            });
-            totalCOGS += orderNDR;
-          }
-
-          if (order.shippingCharge) {
-            totalShipping += order.shippingCharge;
-          }
-        });
-      }
-    });
-
-    const totalOrders = deliveredCount + failedCount;
-    const avgRevenue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
-    const avgCOGS = totalOrders > 0 ? totalCOGS / totalOrders : 0;
-    const avgShipping = totalOrders > 0 ? totalShipping / totalOrders : 0;
-    const avgTotalCost = avgCOGS + avgShipping;
-    const contributionMargin = avgRevenue - avgTotalCost;
-
-    const breakevenROAS = contributionMargin > 0 ? avgRevenue / contributionMargin : 0;
-
-    return {
-      aov: avgRevenue,
-      avgCOGS,
-      avgShipping,
-      avgTotalCost,
-      contributionMargin,
-      breakevenROAS,
-      deliveredCount,
-      failedCount,
-      totalOrders,
-      completedDaysCount,
-      completedDates
-    };
-  })();
-
-  // Pie Charts data (Last 30 days, not before Jan 28, 2026)
+  // Pie Charts data — sourced from DB (pre-computed daily stats)
   const pieChartsData = (() => {
-    const now = new Date();
-    const startDate = new Date('2026-01-28');
-    const thirtyDaysAgo = new Date(now);
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    const effectiveStartDate = startDate > thirtyDaysAgo ? startDate : thirtyDaysAgo;
-
-    let prepaidCount = 0;
-    let codCount = 0;
-
-    let deliveredCount = 0;
-    let failedCount = 0;
-    let confirmedCount = 0;
-    let inTransitCount = 0;
-    let outForDeliveryCount = 0;
-    let attemptedDeliveryCount = 0;
-
-    let codDeliveredCount = 0;
-    let codFailedCount = 0;
-
-    orders.forEach((order) => {
-      if (order.cancelledAt) return;
-      const orderDate = new Date(order.createdAt);
-      if (orderDate < effectiveStartDate) return;
-
-      const paymentMethod = order.paymentMethod?.toLowerCase() === 'prepaid' ? 'prepaid' : 'cod';
-      const status = order.deliveryStatus?.toLowerCase() || '';
-      const isFailed = rtoOrderIds.has(order.id) ||
-        status === 'failure' ||
-        status.includes('failed') ||
-        status.includes('rto');
-
-      // Chart 1: Prepaid vs COD
-      if (paymentMethod === 'prepaid') prepaidCount++;
-      else codCount++;
-
-      // Chart 2: Delivered vs Failed vs Granular Statuses
-      // We prioritize EXPLICIT statuses over the "Prepaid = Delivered" assumption.
-      // The assumption should only apply if there is no other specific tracking info.
-      if (isFailed) {
-        failedCount++;
-      } else if (status === 'delivered') {
-        deliveredCount++;
-      } else if (status.includes('out for delivery') || status.includes('out_for_delivery')) {
-        outForDeliveryCount++;
-      } else if (status.includes('attempt')) {
-        attemptedDeliveryCount++;
-      } else if (status.includes('transit') || status.includes('shipped') || status.includes('picked') || status.includes('pickup')) {
-        inTransitCount++;
-      } else {
-        // Fallback for orders with no active/final status (e.g. '', 'confirmed', 'label created')
-        if (paymentMethod === 'prepaid') {
-          // Keep original logic: Prepaid assumed delivered if tracking is silent/confirmed only
-          deliveredCount++;
-        } else {
-          confirmedCount++;
-        }
-      }
-
-      // Chart 3: COD Delivered vs Failed (Final status only)
-      if (paymentMethod === 'cod') {
-        if (status === 'delivered') codDeliveredCount++;
-        else if (isFailed) codFailedCount++;
-      }
-    });
+    const s = orderStatsDb;
+    const prepaidCount = s?.prepaidCount ?? 0;
+    const codCount = s?.codCount ?? 0;
+    const deliveredCount = s?.deliveredCount ?? 0;
+    const failedCount = s?.failedCount ?? 0;
+    const inTransitCount = s?.inTransitCount ?? 0;
+    const outForDeliveryCount = s?.outForDeliveryCount ?? 0;
+    const attemptedDeliveryCount = s?.attemptedDeliveryCount ?? 0;
+    const confirmedCount = s?.confirmedCount ?? 0;
+    const codDeliveredCount = s?.codDeliveredCount ?? 0;
+    const codFailedCount = s?.codFailedCount ?? 0;
 
     return {
       paymentMethod: [
-        { name: 'Prepaid', value: prepaidCount, color: '#10b981' }, // Green
-        { name: 'COD', value: codCount, color: '#f59e0b' },       // Amber
+        { name: 'Prepaid', value: prepaidCount, color: '#10b981' },
+        { name: 'COD', value: codCount, color: '#f59e0b' },
       ],
       deliveryStatus: [
-        { name: 'Delivered', value: deliveredCount, color: '#10b981' }, // Green
-        { name: 'Out for Delivery', value: outForDeliveryCount, color: '#eab308' }, // Yellow-500
-        { name: 'Attempted Delivery', value: attemptedDeliveryCount, color: '#f97316' }, // Orange-500
-        { name: 'In Transit', value: inTransitCount, color: '#3b82f6' }, // Blue
-        { name: 'Confirmed', value: confirmedCount, color: '#64748b' }, // Slate
-        { name: 'Failed', value: failedCount, color: '#ef4444' },     // Red
-      ].filter(item => item.value > 0), // Filter out zero values to keep chart clean
+        { name: 'Delivered', value: deliveredCount, color: '#10b981' },
+        { name: 'Out for Delivery', value: outForDeliveryCount, color: '#eab308' },
+        { name: 'Attempted Delivery', value: attemptedDeliveryCount, color: '#f97316' },
+        { name: 'In Transit', value: inTransitCount, color: '#3b82f6' },
+        { name: 'Confirmed', value: confirmedCount, color: '#64748b' },
+        { name: 'Failed', value: failedCount, color: '#ef4444' },
+      ].filter(item => item.value > 0),
+      codTotal: codDeliveredCount + codFailedCount,
       codStatus: [
         { name: 'Delivered', value: codDeliveredCount, color: '#10b981' },
         { name: 'Failed', value: codFailedCount, color: '#ef4444' },
-      ],
+      ].filter(item => item.value > 0),
       totalOrders: prepaidCount + codCount,
     };
   })();
 
-  // Shipment Speed Stats (Last 30 days, not before Jan 28, 2026)
-  const shipmentSpeedStats = (() => {
-    const now = new Date();
-    const startDate = new Date('2026-01-28');
-    const thirtyDaysAgo = new Date(now);
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    const effectiveStartDate = startDate > thirtyDaysAgo ? startDate : thirtyDaysAgo;
-
-    let totalDispatchHours = 0;
-    let dispatchCount = 0;
-
-    let totalTransitToAttemptDays = 0;
-    let transitToAttemptCount = 0;
-
-    let totalTransitToDeliveryDays = 0;
-    let transitToDeliveryCount = 0;
-
-    let maxDispatchHours = -1;
-    let worstDispatchOrder = '';
-    let maxTransitToAttemptDays = -1;
-    let worstTransitToAttemptOrder = '';
-    let maxTransitToDeliveryDays = -1;
-    let worstTransitToDeliveryOrder = '';
-
-    const msToHours = 1000 * 60 * 60;
-    const msToDays = 1000 * 60 * 60 * 24;
-
-    orders.forEach((order) => {
-      if (order.cancelledAt) return;
-
-      const createdAt = new Date(order.createdAt);
-      if (createdAt < effectiveStartDate) return;
-
-      const hasPickup = order.pickupDate && !isNaN(new Date(order.pickupDate).getTime());
-      const hasAttempt = order.firstAttemptDate && !isNaN(new Date(order.firstAttemptDate).getTime());
-      const hasDelivery = order.deliveredDate && !isNaN(new Date(order.deliveredDate).getTime());
-
-      let pickupTime = 0;
-      if (hasPickup) {
-        pickupTime = new Date(order.pickupDate as string).getTime();
-        // Calculate Dispatch Time (Creation to Pickup)
-        const dispatchHours = (pickupTime - createdAt.getTime()) / msToHours;
-        // Basic sanity check to avoid outliers parsing weird dates
-        if (dispatchHours >= 0 && dispatchHours < 720) {
-          totalDispatchHours += dispatchHours;
-          dispatchCount++;
-          if (dispatchHours > maxDispatchHours) {
-            maxDispatchHours = dispatchHours;
-            worstDispatchOrder = order.name;
-          }
-        }
-      }
-
-      if (hasPickup) {
-        if (hasAttempt) {
-          const attemptTime = new Date(order.firstAttemptDate as string).getTime();
-          const transitDays = (attemptTime - pickupTime) / msToDays;
-          if (transitDays >= 0 && transitDays < 60) {
-            totalTransitToAttemptDays += transitDays;
-            transitToAttemptCount++;
-            if (transitDays > maxTransitToAttemptDays) {
-              maxTransitToAttemptDays = transitDays;
-              worstTransitToAttemptOrder = order.name;
-            }
-          }
-        }
-
-        if (hasDelivery) {
-          const deliveryTime = new Date(order.deliveredDate as string).getTime();
-          const transitDays = (deliveryTime - pickupTime) / msToDays;
-          if (transitDays >= 0 && transitDays < 60) {
-            totalTransitToDeliveryDays += transitDays;
-            transitToDeliveryCount++;
-            if (transitDays > maxTransitToDeliveryDays) {
-              maxTransitToDeliveryDays = transitDays;
-              worstTransitToDeliveryOrder = order.name;
-            }
-          }
-        }
-      }
-    });
-
-    const avgDispatchHours = dispatchCount > 0 ? (totalDispatchHours / dispatchCount) : null;
-    let dispatchLabel = '-';
-    if (avgDispatchHours !== null) {
-      if (avgDispatchHours > 24) {
-        dispatchLabel = `${(avgDispatchHours / 24).toFixed(1)} days`;
-      } else {
-        dispatchLabel = `${avgDispatchHours.toFixed(1)} hrs`;
-      }
-    }
-
-    let worstDispatchLabel = null;
-    if (maxDispatchHours >= 0) {
-      worstDispatchLabel = maxDispatchHours > 24
-        ? `${(maxDispatchHours / 24).toFixed(1)} days`
-        : `${Math.round(maxDispatchHours)} hrs`;
-    }
-
-    return {
-      avgDispatchHours,
-      dispatchLabel,
-      worstDispatchOrder,
-      worstDispatchLabel,
-      worstTransitToAttemptOrder,
-      maxTransitToAttemptDays: maxTransitToAttemptDays >= 0 ? maxTransitToAttemptDays.toFixed(1) : null,
-      worstTransitToDeliveryOrder,
-      maxTransitToDeliveryDays: maxTransitToDeliveryDays >= 0 ? maxTransitToDeliveryDays.toFixed(1) : null,
-      avgTransitToAttemptDays: transitToAttemptCount > 0 ? (totalTransitToAttemptDays / transitToAttemptCount).toFixed(1) : '-',
-      avgTransitToDeliveryDays: transitToDeliveryCount > 0 ? (totalTransitToDeliveryDays / transitToDeliveryCount).toFixed(1) : '-',
-      dispatchCount,
-      transitToAttemptCount,
-      transitToDeliveryCount
-    };
-  })();
 
 
   const handleTileHover = (e: React.MouseEvent, dateKey: string | null, dateLabel: string, pnl: number | null) => {
@@ -1162,244 +422,103 @@ export function DashboardPage() {
         </div>
       </header>
 
-      <section className={styles['comparison-section']}>
-        <div className={styles['comparison-header']}>
-          <h2 className={styles['section-title']}>Today's Performance vs Last {orderCountChartData.dayLabel}</h2>
-          <p className={styles['section-desc']}>
-            Real-time cumulative data comparison by hour (Store time: {STORE_TIMEZONE})
-          </p>
-        </div>
 
-        <div className={styles['comparison-grid']}>
-          <div className={styles['comparison-item']}>
-            <h3 className={styles['item-title']}>Orders</h3>
-            <div className={styles.chartWrap}>
-              <ResponsiveContainer width="100%" height={260}>
-                <LineChart
-                  data={orderCountChartData.chartData}
-                  margin={{ top: 12, right: 12, left: 0, bottom: 8 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
-                  <XAxis
-                    dataKey="label"
-                    tick={{ fontSize: 10, fill: 'var(--chart-muted)' }}
-                    tickLine={false}
-                    axisLine={{ stroke: 'var(--chart-axis)' }}
-                    interval={2}
-                  />
-                  <YAxis
-                    tick={{ fontSize: 10, fill: 'var(--chart-muted)' }}
-                    tickLine={false}
-                    axisLine={false}
-                    allowDecimals={false}
-                    width={24}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      border: 'none',
-                      borderRadius: 8,
-                      boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
-                      padding: '10px 14px',
-                    }}
-                    labelStyle={{ color: 'var(--chart-muted)', fontWeight: 500, marginBottom: 4 }}
-                  />
-                  <Legend
-                    wrapperStyle={{ paddingTop: 8 }}
-                    iconType="line"
-                    iconSize={10}
-                    formatter={(value) => <span className={styles.chartLegendText}>{value}</span>}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="today"
-                    name="Today"
-                    stroke="var(--chart-today)"
-                    strokeWidth={2}
-                    dot={false}
-                    activeDot={{ r: 4, strokeWidth: 0, fill: "var(--chart-today)" }}
-                    connectNulls={false}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="lastWeek"
-                    name={`Last ${orderCountChartData.dayLabel}`}
-                    stroke="var(--chart-lastweek)"
-                    strokeWidth={2}
-                    strokeDasharray="5 5"
-                    dot={false}
-                    activeDot={{ r: 4, strokeWidth: 0, fill: "var(--chart-lastweek)" }}
-                    connectNulls
-                  />
-                  {aiForecastData && (
-                    <Line
-                      type="monotone"
-                      dataKey="aiForecast"
-                      name="AI Forecast Today"
-                      stroke="#8b5cf6"
-                      strokeWidth={2}
-                      dot={false}
-                      strokeDasharray="3 3"
-                      activeDot={{ r: 4, strokeWidth: 0, fill: "#8b5cf6" }}
-                      connectNulls
-                    />
-                  )}
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
 
-          <div className={styles['comparison-item']}>
-            <h3 className={styles['item-title']}>Revenue</h3>
-            <div className={styles.chartWrap}>
-              <ResponsiveContainer width="100%" height={260}>
-                <LineChart
-                  data={revenueChartData.chartData}
-                  margin={{ top: 12, right: 12, left: 0, bottom: 8 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
-                  <XAxis
-                    dataKey="label"
-                    tick={{ fontSize: 10, fill: 'var(--chart-muted)' }}
-                    tickLine={false}
-                    axisLine={{ stroke: 'var(--chart-axis)' }}
-                    interval={2}
-                  />
-                  <YAxis
-                    tick={{ fontSize: 10, fill: 'var(--chart-muted)' }}
-                    tickLine={false}
-                    axisLine={false}
-                    width={40}
-                    tickFormatter={(v) => `₹${v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v}`}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      border: 'none',
-                      borderRadius: 8,
-                      boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
-                      padding: '10px 14px',
-                    }}
-                    labelStyle={{ color: 'var(--chart-muted)', fontWeight: 500, marginBottom: 4 }}
-                    formatter={(value, name) => [`₹${Number(value ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`, name]}
-                  />
-                  <Legend
-                    wrapperStyle={{ paddingTop: 8 }}
-                    iconType="line"
-                    iconSize={10}
-                    formatter={(value) => <span className={styles.chartLegendText}>{value}</span>}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="today"
-                    name="Today"
-                    stroke="var(--chart-today)"
-                    strokeWidth={2}
-                    dot={false}
-                    activeDot={{ r: 4, strokeWidth: 0, fill: "var(--chart-today)" }}
-                    connectNulls={false}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="lastWeek"
-                    name={`Last ${revenueChartData.dayLabel}`}
-                    stroke="var(--chart-lastweek)"
-                    strokeWidth={2}
-                    strokeDasharray="5 5"
-                    dot={false}
-                    activeDot={{ r: 4, strokeWidth: 0, fill: "var(--chart-lastweek)" }}
-                    connectNulls
-                  />
-                  {aiForecastData && (
-                    <Line
-                      type="monotone"
-                      dataKey="aiForecastRev"
-                      name="AI Forecast Revenue"
-                      stroke="#8b5cf6"
-                      strokeWidth={2}
-                      dot={false}
-                      strokeDasharray="3 3"
-                      activeDot={{ r: 4, strokeWidth: 0, fill: "#8b5cf6" }}
-                      connectNulls
-                    />
-                  )}
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
+      <section className={styles.section}>
+        <div className={styles['roas-header']}>
+          <div>
+            <h2 className={styles['section-title']}>
+              ROAS —{' '}
+              {roasStartDate && roasEndDate
+                ? `${new Date(roasStartDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} – ${new Date(roasEndDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`
+                : `Last ${roasDays} Days`}
+            </h2>
+            <p className={styles['section-desc']}>
+              Return on Ad Spend (ROAS) = Total Revenue ÷ Ad Spend for each day. Higher is better.
+            </p>
           </div>
-        </div>
-
-        <div className={styles['comparison-stats']}>
-          <div className={styles.chartStatBlock}>
-            <span className={styles.chartStatLabel}>Ad spend</span>
-            <span className={styles.chartStatRow}>
-              <span>Today</span>
-              <span className={styles.chartStatValue}>₹{adSpendToday.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
-            </span>
-            <span className={styles.chartStatRow}>
-              <span>Last {orderCountChartData.dayLabel}</span>
-              <span className={styles.chartStatValue}>₹{adSpendLastWeek.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
-            </span>
-          </div>
-          <div className={styles.chartStatBlock}>
-            <span className={styles.chartStatLabel}>Revenue</span>
-            <span className={styles.chartStatRow}>
-              <span>Today</span>
-              <span className={styles.chartStatValue}>₹{revenueChartData.totalRevenueToday.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
-            </span>
-            <span className={styles.chartStatRow}>
-              <span>Last {revenueChartData.dayLabel}</span>
-              <span className={styles.chartStatValue}>₹{revenueChartData.totalRevenueLastWeek.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
-            </span>
-          </div>
-
-          <div className={styles['ai-controls']}>
-            <div className={styles['ai-input-group']}>
-              <label className={styles['ai-input-label']}>Expected Ad Spend</label>
+          <div className={styles['roas-controls']}>
+            <div className={styles['roas-control-group']}>
+              <label className={styles['roas-control-label']}>Last N days</label>
               <input
+                ref={roasDaysRef}
                 type="number"
-                className={styles['ai-input']}
-                value={expectedAdSpend || ''}
-                onChange={(e) => setExpectedAdSpend(Number(e.target.value))}
-                placeholder="Enter amount..."
+                min={1}
+                max={365}
+                className={styles['roas-days-input']}
+                defaultValue={30}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    const days = Math.max(1, Number(roasDaysRef.current?.value) || 30);
+                    setRoasDays(days);
+                    setRoasStartDate('');
+                    setRoasEndDate('');
+                    if (roasStartRef.current) roasStartRef.current.value = '';
+                    if (roasEndRef.current) roasEndRef.current.value = '';
+                    loadROAS(days, '', '');
+                  }
+                }}
+              />
+            </div>
+            <span className={styles['roas-divider']}>or</span>
+            <div className={styles['roas-control-group']}>
+              <label className={styles['roas-control-label']}>From</label>
+              <input
+                ref={roasStartRef}
+                type="date"
+                className={styles['roas-date-input']}
+                defaultValue=""
+              />
+            </div>
+            <div className={styles['roas-control-group']}>
+              <label className={styles['roas-control-label']}>To</label>
+              <input
+                ref={roasEndRef}
+                type="date"
+                className={styles['roas-date-input']}
+                defaultValue=""
               />
             </div>
             <button
-              className={styles['ai-predict-btn']}
-              onClick={handleAiPredict}
-              disabled={isAiPredicting || !expectedAdSpend}
+              className={styles['roas-go-btn']}
+              onClick={() => {
+                const start = roasStartRef.current?.value || '';
+                const end = roasEndRef.current?.value || '';
+                const days = Math.max(1, Number(roasDaysRef.current?.value) || 30);
+                if (start && end) {
+                  setRoasStartDate(start);
+                  setRoasEndDate(end);
+                  loadROAS(days, start, end);
+                } else {
+                  setRoasDays(days);
+                  setRoasStartDate('');
+                  setRoasEndDate('');
+                  loadROAS(days, '', '');
+                }
+              }}
             >
-              {isAiPredicting ? 'AI Analyzing...' : 'Predict with AI'}
+              Go
             </button>
-          </div>
-        </div>
-
-        {aiForecastData && (
-          <div className={styles['ai-prediction-info']}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', alignItems: 'center' }}>
-              <span style={{ fontWeight: 600, color: '#0369a1', fontSize: '0.9rem' }}>
-                AI FORECAST FOR TODAY: {aiForecastData.totalOrders} ORDERS (₹{aiForecastData.totalRevenue.toLocaleString('en-IN')})
-              </span>
-              <button 
-                onClick={() => setAiForecastData(null)}
-                style={{ border: 'none', background: 'none', color: '#0369a1', cursor: 'pointer', fontSize: '0.8rem' }}
+            {(roasStartDate || roasEndDate) && (
+              <button
+                className={styles['roas-clear-btn']}
+                onClick={() => {
+                  setRoasStartDate('');
+                  setRoasEndDate('');
+                  if (roasStartRef.current) roasStartRef.current.value = '';
+                  if (roasEndRef.current) roasEndRef.current.value = '';
+                  loadROAS(roasDays, '', '');
+                }}
               >
                 Clear
               </button>
-            </div>
-            <div className={styles['ai-reasoning']}>
-              {aiForecastData.reasoning.split('\n').map((line, i) => (
-                <div key={i}>{line}</div>
-              ))}
-            </div>
+            )}
           </div>
-        )}
-      </section>
-
-      <section className={styles.section}>
-        <h2 className={styles['section-title']}>ROAS — Last 30 Days</h2>
-        <p className={styles['section-desc']}>
-          Return on Ad Spend (ROAS) = Total Revenue ÷ Ad Spend for each day. Higher is better.
-        </p>
+        </div>
         <div className={styles.chartWrap}>
+          {roasLoading ? (
+            <div className={styles['roas-skeleton']} />
+          ) : (
           <ResponsiveContainer width="100%" height={280}>
             <LineChart
               data={roasChartData}
@@ -1508,14 +627,14 @@ export function DashboardPage() {
               )}
             </LineChart>
           </ResponsiveContainer>
+          )}
         </div>
         <div className={styles.chartStats}>
           <div className={styles.chartStatBlock}>
             <span className={styles.chartStatLabel}>Completed Days Average ROAS</span>
             <span className={styles.chartStatValue} style={{ fontSize: '1.5rem', fontWeight: 600 }}>
               {(() => {
-                const completedDates = breakevenMetrics.completedDates;
-                const validRoas = roasChartData.filter(d => completedDates.has(d.dateKey) && d.roas !== null && d.roas > 0);
+                const validRoas = roasChartData.filter(d => completedDatesDb.has(d.dateKey) && d.roas !== null && d.roas > 0);
                 if (validRoas.length === 0) return 'N/A';
                 const avgRoas = validRoas.reduce((sum, d) => sum + (d.roas || 0), 0) / validRoas.length;
                 return avgRoas.toFixed(2);
@@ -1557,13 +676,13 @@ export function DashboardPage() {
           <div className={styles.chartStatBlock}>
             <span className={styles.chartStatLabel}>Completed Total Revenue</span>
             <span className={styles.chartStatValue} style={{ fontSize: '1.5rem', fontWeight: 600 }}>
-              ₹{roasChartData.filter(d => breakevenMetrics.completedDates.has(d.dateKey)).reduce((sum, d) => sum + d.revenue, 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+              ₹{roasChartData.filter(d => completedDatesDb.has(d.dateKey)).reduce((sum, d) => sum + d.revenue, 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
             </span>
           </div>
           <div className={styles.chartStatBlock}>
             <span className={styles.chartStatLabel}>Completed Total Ad Spend</span>
             <span className={styles.chartStatValue} style={{ fontSize: '1.5rem', fontWeight: 600 }}>
-              ₹{roasChartData.filter(d => breakevenMetrics.completedDates.has(d.dateKey)).reduce((sum, d) => sum + d.adSpend, 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+              ₹{roasChartData.filter(d => completedDatesDb.has(d.dateKey)).reduce((sum, d) => sum + d.adSpend, 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
             </span>
           </div>
         </div>
@@ -1578,7 +697,7 @@ export function DashboardPage() {
           color: 'var(--chart-muted)'
         }}>
           <div style={{ fontWeight: 600, marginBottom: '0.5rem', color: '#1f2937' }}>
-            Breakeven Analysis (based on {breakevenMetrics.completedDaysCount} completed days in last 30 days):
+            Breakeven Analysis (based on {breakevenMetrics.completedDaysCount} completed days in view):
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem' }}>
             <div>
@@ -1882,15 +1001,16 @@ export function DashboardPage() {
                   wrapperStyle={{ cursor: 'pointer' }}
                   formatter={(value, entry: any) => {
                     const { payload } = entry;
-                    const total = pieChartsData.codStatus.reduce((acc: number, curr: any) => acc + curr.value, 0);
-                    const percentage = total > 0 ? ((payload.value / total) * 100).toFixed(0) : 0;
+                    if (payload.name === 'In Progress') return null;
+                    const total = pieChartsData.codTotal || 1;
+                    const percentage = ((payload.value / total) * 100).toFixed(0);
                     return <span className={styles.chartLegendText}>{value}: {payload.value} ({percentage}%)</span>;
                   }}
                 />
                 <text x="50%" y={110} textAnchor="middle" dominantBaseline="middle" style={{ fontFamily: 'Inter, sans-serif' }}>
                   {(() => {
                     const failed = pieChartsData.codStatus.find(i => i.name === 'Failed')?.value || 0;
-                    const total = pieChartsData.codStatus.reduce((a, b: any) => a + b.value, 0) || 1;
+                    const total = pieChartsData.codTotal || 1;
                     const pct = ((failed / total) * 100).toFixed(0);
                     return (
                       <>
@@ -1906,212 +1026,93 @@ export function DashboardPage() {
         </div>
       </section>
 
-      <section className={styles.section}>
-        <h2 className={styles['section-title']}>Shipment Speed — Last 30 Days</h2>
-        <p className={styles['section-desc']}>
-          Analyze your fulfillment speed to identify bottlenecks and improve customer experience.
-        </p>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginTop: '1.5rem' }}>
-          <div className={styles.chartStatBlock} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', padding: '1.25rem', borderRadius: '8px' }}>
-            <span className={styles.chartStatLabel}>Avg Time to Dispatch</span>
-            <span className={styles.chartStatValue} style={{ fontSize: '1.5rem', fontWeight: 600, color: '#0f172a' }}>
-              {shipmentSpeedStats.dispatchLabel}
-            </span>
-            <span style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '8px', display: 'block' }}>
-              From Order Placed to Courier Pickup<br />
-              (Based on {shipmentSpeedStats.dispatchCount} orders)
-            </span>
-            {shipmentSpeedStats.worstDispatchOrder && (
-              <span style={{ fontSize: '0.7rem', color: '#ef4444', marginTop: '8px', display: 'block', borderTop: '1px solid #e2e8f0', paddingTop: '8px' }}>
-                <strong>Worst Order:</strong> {shipmentSpeedStats.worstDispatchOrder} ({shipmentSpeedStats.worstDispatchLabel})
-              </span>
-            )}
-          </div>
-
-          <div className={styles.chartStatBlock} style={{ background: '#fdf4ff', border: '1px solid #fae8ff', padding: '1.25rem', borderRadius: '8px' }}>
-            <span className={styles.chartStatLabel}>Avg Transit to First Attempt</span>
-            <span className={styles.chartStatValue} style={{ fontSize: '1.5rem', fontWeight: 600, color: '#c026d3' }}>
-              {shipmentSpeedStats.avgTransitToAttemptDays} days
-            </span>
-            <span style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '8px', display: 'block' }}>
-              From Pickup to First Delivery Attempt<br />
-              (Based on {shipmentSpeedStats.transitToAttemptCount} orders)
-            </span>
-            {shipmentSpeedStats.worstTransitToAttemptOrder && (
-              <span style={{ fontSize: '0.7rem', color: '#ef4444', marginTop: '8px', display: 'block', borderTop: '1px solid #fae8ff', paddingTop: '8px' }}>
-                <strong>Worst Order:</strong> {shipmentSpeedStats.worstTransitToAttemptOrder} ({shipmentSpeedStats.maxTransitToAttemptDays} days)
-              </span>
-            )}
-          </div>
-
-          <div className={styles.chartStatBlock} style={{ background: '#ecfdf5', border: '1px solid #d1fae5', padding: '1.25rem', borderRadius: '8px' }}>
-            <span className={styles.chartStatLabel}>Avg Transit to Delivery</span>
-            <span className={styles.chartStatValue} style={{ fontSize: '1.5rem', fontWeight: 600, color: '#059669' }}>
-              {shipmentSpeedStats.avgTransitToDeliveryDays} days
-            </span>
-            <span style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '8px', display: 'block' }}>
-              From Pickup to Successful Delivery<br />
-              (Based on {shipmentSpeedStats.transitToDeliveryCount} orders)
-            </span>
-            {shipmentSpeedStats.worstTransitToDeliveryOrder && (
-              <span style={{ fontSize: '0.7rem', color: '#ef4444', marginTop: '8px', display: 'block', borderTop: '1px solid #d1fae5', paddingTop: '8px' }}>
-                <strong>Worst Order:</strong> {shipmentSpeedStats.worstTransitToDeliveryOrder} ({shipmentSpeedStats.maxTransitToDeliveryDays} days)
-              </span>
-            )}
-          </div>
-        </div>
-      </section>
 
       {/* ─── Avg Shipping Charge on Fulfilled Orders ─── */}
       {(() => {
+        type DbRecord = { dateKey: string; avgShipping: number | null; avgShippingSmall: number | null; avgShippingLarge: number | null };
+        type ChartPoint = { date: string; dateKey?: string; avgShipping: number | null; avgShippingSmall: number | null; avgShippingLarge: number | null };
+
+        const avgOfNums = (arr: (number | null)[]): number | null => {
+          const valid = arr.filter((v): v is number => v !== null && v > 0);
+          return valid.length ? valid.reduce((s, v) => s + v, 0) / valid.length : null;
+        };
+
+        // Filter to 30-point lookback window
         const now = new Date();
-        // ── Compute lookback window based on granularity (always 30 data points) ──
-        const cutoff = new Date('2026-01-01');
-        const windowStart = new Date(now);
-        if (shippingGranularity === 'day') {
-          windowStart.setDate(windowStart.getDate() - 29);          // 30 days
-        } else if (shippingGranularity === 'week') {
-          windowStart.setDate(windowStart.getDate() - 29 * 7);      // 30 weeks
-        } else {
-          windowStart.setMonth(windowStart.getMonth() - 29);        // 30 months
-          windowStart.setDate(1);                                    // start of that month
-        }
-        const effectiveStart = cutoff > windowStart ? cutoff : windowStart;
-
-        // Classify variant mix
-        const classifyVariant = (o: ShopifyOrder): 'small' | 'large' | 'mixed' => {
-          const items = o.lineItems ?? [];
-          const hasLarge = items.some(
-            (i) => i.title?.toLowerCase().includes('large') || i.variantTitle?.toLowerCase().includes('large')
-          );
-          const hasSmall = items.some(
-            (i) => !i.title?.toLowerCase().includes('large') && !i.variantTitle?.toLowerCase().includes('large')
-          );
-          if (hasLarge && hasSmall) return 'mixed';
-          if (hasLarge) return 'large';
-          return 'small';
-        };
-
-        // Helper: avg shipping of a set of orders
-        const avgOf = (arr: typeof orders): number | null => {
-          const valid = arr.filter((o) => (o.shippingCharge ?? 0) > 0);
-          if (valid.length === 0) return null;
-          return valid.reduce((s, o) => s + (o.shippingCharge ?? 0), 0) / valid.length;
-        };
-
-        // Build ordersByDate once
-        const ordersByDate: Record<string, typeof orders[number][]> = {};
-        orders.forEach((o) => {
-          if (o.cancelledAt) return;
-          const d = getOrderDateKey(o.createdAt);
-          if (!ordersByDate[d]) ordersByDate[d] = [];
-          ordersByDate[d].push(o);
-        });
-
-        // ── Build daily data ──
-        type DayPoint = {
-          date: string;
-          dateKey: string;
-          avgShipping: number | null;
-          avgShippingSmall: number | null;
-          avgShippingLarge: number | null;
-          // raw orders for re-aggregation
-          _fulfilled: typeof orders;
-          _small: typeof orders;
-          _large: typeof orders;
-        };
-
-        const dailyPoints: DayPoint[] = [];
-        const cursor = new Date(effectiveStart);
-        cursor.setHours(0, 0, 0, 0);
         const todayKey = now.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+        const windowStart = new Date(now);
+        if (shippingGranularity === 'day') windowStart.setDate(windowStart.getDate() - 29);
+        else if (shippingGranularity === 'week') windowStart.setDate(windowStart.getDate() - 29 * 7);
+        else { windowStart.setMonth(windowStart.getMonth() - 29); windowStart.setDate(1); }
+        const cutoffKey = '2026-01-01';
+        const windowKey = windowStart.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+        const effectiveStartKey = cutoffKey > windowKey ? cutoffKey : windowKey;
 
-        while (cursor.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE }) <= todayKey) {
-          const dateKey = cursor.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
-          const dayOrders = ordersByDate[dateKey] || [];
-          const fulfilled = dayOrders.filter((o) => o.fulfillmentStatus?.toLowerCase() === 'fulfilled');
-          const pureSmall = fulfilled.filter((o) => classifyVariant(o) === 'small');
-          const pureLarge = fulfilled.filter((o) => classifyVariant(o) === 'large');
+        const windowedRecords = shippingDbRecords.filter(
+          (r) => r.dateKey >= effectiveStartKey && r.dateKey <= todayKey
+        );
 
-          dailyPoints.push({
-            date: cursor.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: STORE_TIMEZONE }),
-            dateKey,
-            avgShipping: avgOf(fulfilled),
-            avgShippingSmall: avgOf(pureSmall),
-            avgShippingLarge: avgOf(pureLarge),
-            _fulfilled: fulfilled,
-            _small: pureSmall,
-            _large: pureLarge,
-          });
-
-          cursor.setDate(cursor.getDate() + 1);
-        }
-
-        // ── Aggregate to chosen granularity ──
-        type ChartPoint = { date: string; avgShipping: number | null; avgShippingSmall: number | null; avgShippingLarge: number | null };
-
-        const aggregateGroup = (group: DayPoint[]): ChartPoint => {
-          const allFulfilled = group.flatMap((d) => d._fulfilled);
-          const allSmall     = group.flatMap((d) => d._small);
-          const allLarge     = group.flatMap((d) => d._large);
-          return {
-            date: group[0].date,
-            avgShipping:      avgOf(allFulfilled),
-            avgShippingSmall: avgOf(allSmall),
-            avgShippingLarge: avgOf(allLarge),
-          };
-        };
+        const toLabel = (dateKey: string) =>
+          new Date(dateKey).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: STORE_TIMEZONE });
 
         let shippingData: ChartPoint[];
 
         if (shippingGranularity === 'day') {
-          shippingData = dailyPoints.map((d) => ({
-            date: d.date,
-            avgShipping: d.avgShipping,
-            avgShippingSmall: d.avgShippingSmall,
-            avgShippingLarge: d.avgShippingLarge,
+          // 7-day centred rolling average
+          const rollingAvg = (arr: (number | null)[], i: number, half = 3): number | null => {
+            const win = arr.slice(Math.max(0, i - half), i + half + 1).filter((v): v is number => v !== null);
+            return win.length ? win.reduce((s, v) => s + v, 0) / win.length : null;
+          };
+          const allVal   = windowedRecords.map((r) => r.avgShipping);
+          const smallVal = windowedRecords.map((r) => r.avgShippingSmall);
+          const largeVal = windowedRecords.map((r) => r.avgShippingLarge);
+          shippingData = windowedRecords.map((r, i) => ({
+            date: toLabel(r.dateKey),
+            dateKey: r.dateKey,
+            avgShipping:      rollingAvg(allVal,   i),
+            avgShippingSmall: rollingAvg(smallVal, i),
+            avgShippingLarge: rollingAvg(largeVal, i),
           }));
         } else if (shippingGranularity === 'week') {
-          // Group by Mon–Sun week
-          const weeks: DayPoint[][] = [];
-          let current: DayPoint[] = [];
-          dailyPoints.forEach((d) => {
-            const dow = new Date(d.dateKey).getDay(); // 0=Sun
-            if (dow === 1 && current.length > 0) { weeks.push(current); current = []; }
-            current.push(d);
+          const weeks: DbRecord[][] = [];
+          let cur: DbRecord[] = [];
+          windowedRecords.forEach((r) => {
+            const dow = new Date(r.dateKey).getDay();
+            if (dow === 1 && cur.length > 0) { weeks.push(cur); cur = []; }
+            cur.push(r);
           });
-          if (current.length) weeks.push(current);
-          shippingData = weeks.map((group) => ({
-            ...aggregateGroup(group),
-            // Label: "3 Mar – 9 Mar" (or "3 Mar – today" for the last partial week)
-            date: `${group[0].date} – ${group[group.length - 1].date}`,
+          if (cur.length) weeks.push(cur);
+          shippingData = weeks.map((g) => ({
+            date: `${toLabel(g[0].dateKey)} – ${toLabel(g[g.length - 1].dateKey)}`,
+            avgShipping:      avgOfNums(g.map((r) => r.avgShipping)),
+            avgShippingSmall: avgOfNums(g.map((r) => r.avgShippingSmall)),
+            avgShippingLarge: avgOfNums(g.map((r) => r.avgShippingLarge)),
           }));
         } else {
-          // month
-          const months: Record<string, DayPoint[]> = {};
-          dailyPoints.forEach((d) => {
-            const key = d.dateKey.slice(0, 7); // YYYY-MM
+          const months: Record<string, DbRecord[]> = {};
+          windowedRecords.forEach((r) => {
+            const key = r.dateKey.slice(0, 7);
             if (!months[key]) months[key] = [];
-            months[key].push(d);
+            months[key].push(r);
           });
-          shippingData = Object.values(months).map((group) => ({
-            ...aggregateGroup(group),
-            date: new Date(group[0].dateKey).toLocaleDateString('en-IN', { month: 'short', year: '2-digit', timeZone: STORE_TIMEZONE }),
+          shippingData = Object.entries(months).map(([, g]) => ({
+            date: new Date(g[0].dateKey).toLocaleDateString('en-IN', { month: 'short', year: '2-digit', timeZone: STORE_TIMEZONE }),
+            avgShipping:      avgOfNums(g.map((r) => r.avgShipping)),
+            avgShippingSmall: avgOfNums(g.map((r) => r.avgShippingSmall)),
+            avgShippingLarge: avgOfNums(g.map((r) => r.avgShippingLarge)),
           }));
         }
 
-        // ── Summary stats (always over full daily dataset) ──
-        const avg30 = (key: 'avgShipping' | 'avgShippingSmall' | 'avgShippingLarge') => {
-          const days = dailyPoints.filter((d) => d[key] !== null);
-          if (days.length === 0) return null;
-          return days.reduce((s, d) => s + (d[key] as number), 0) / days.length;
-        };
-        const avg30All   = avg30('avgShipping');
-        const avg30Small = avg30('avgShippingSmall');
-        const avg30Large = avg30('avgShippingLarge');
+        // Summary stats over last-30-day daily records
+        const last30 = shippingDbRecords.filter((r) => {
+          const s = new Date(now); s.setDate(s.getDate() - 29);
+          return r.dateKey >= s.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+        });
         const fmt = (v: number | null) => v !== null ? `₹${v.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : 'N/A';
+        const avg30All   = avgOfNums(last30.map((r) => r.avgShipping));
+        const avg30Small = avgOfNums(last30.map((r) => r.avgShippingSmall));
+        const avg30Large = avgOfNums(last30.map((r) => r.avgShippingLarge));
 
-        // ── Line definitions ──
         const lines = [
           { key: 'all'   as const, dataKey: 'avgShipping',      name: 'All Fulfilled', color: '#0ea5e9', width: 2.5, dash: undefined },
           { key: 'small' as const, dataKey: 'avgShippingSmall', name: 'Small Variant', color: '#10b981', width: 2,   dash: '6 3' },
@@ -2120,6 +1121,20 @@ export function DashboardPage() {
 
         const toggleLine = (key: 'all' | 'small' | 'large') =>
           setActiveShippingLines((prev) => ({ ...prev, [key]: !prev[key] }));
+
+        const shippingAvgKey = activeShippingLines.all ? 'avgShipping' : activeShippingLines.small ? 'avgShippingSmall' : 'avgShippingLarge';
+        const shippingAvgValues = shippingData.map((d) => (d as any)[shippingAvgKey]).filter((v: unknown): v is number => v !== null && v !== undefined);
+        const shippingAvg = shippingAvgValues.length ? shippingAvgValues.reduce((s: number, v: number) => s + v, 0) / shippingAvgValues.length : null;
+
+        const shippingValues = shippingData.flatMap((d) => [
+          activeShippingLines.all   ? (d.avgShipping      ?? null) : null,
+          activeShippingLines.small ? (d.avgShippingSmall ?? null) : null,
+          activeShippingLines.large ? (d.avgShippingLarge ?? null) : null,
+        ]).filter((v): v is number => v !== null);
+        const shippingTickMin = shippingValues.length ? Math.floor(Math.min(...shippingValues) / 30) * 30 : 0;
+        const shippingTickMax = shippingValues.length ? Math.ceil(Math.max(...shippingValues)  / 30) * 30 : 120;
+        const shippingTicks: number[] = [];
+        for (let t = shippingTickMin; t <= shippingTickMax; t += 30) shippingTicks.push(t);
 
         const granularityBtns: { label: string; value: 'day' | 'week' | 'month' }[] = [
           { label: 'Day',   value: 'day'   },
@@ -2205,7 +1220,9 @@ export function DashboardPage() {
                     axisLine={false}
                     width={56}
                     tickFormatter={(v) => `₹${v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v}`}
-                    domain={[0, 'auto']}
+                    ticks={shippingTicks}
+                    domain={[shippingTickMin, shippingTickMax]}
+
                   />
                   <Tooltip
                     contentStyle={{ border: 'none', borderRadius: 8, boxShadow: '0 4px 12px rgba(0,0,0,0.08)', padding: '10px 14px' }}
@@ -2232,6 +1249,15 @@ export function DashboardPage() {
                         connectNulls={false}
                       />
                     ) : null
+                  )}
+                  {shippingAvg !== null && (
+                    <ReferenceLine
+                      y={shippingAvg}
+                      stroke="#94a3b8"
+                      strokeDasharray="4 4"
+                      strokeWidth={1.5}
+                      label={{ value: `Avg ₹${shippingAvg.toFixed(0)}`, position: 'insideTopRight', fontSize: 11, fill: '#94a3b8', dy: -6 }}
+                    />
                   )}
                 </LineChart>
               </ResponsiveContainer>

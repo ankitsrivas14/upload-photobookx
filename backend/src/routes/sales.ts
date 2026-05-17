@@ -1,8 +1,13 @@
 import express, { Response } from 'express';
-import { DiscardedOrder, RTOOrder, ProfitPrediction, DailyPerformancePrediction, ShippingCharge, OrderDeliveryDate, ShopifyOrderCache, MetaAdPerformance, MetaAdAnalysis, AcknowledgedOrder, TicketRaisedOrder } from '../models';
+import { DiscardedOrder, RTOOrder, ProfitPrediction, ShippingCharge, OrderDeliveryDate, ShopifyOrderCache, MetaAdPerformance, MetaAdAnalysis, AcknowledgedOrder, TicketRaisedOrder, DailyROAS, DailyShipping, DailyOrderStats, DailyPnl } from '../models';
 import { requireAdmin } from './adminAuth';
 import { AuthenticatedRequest } from '../types';
 import aiService from '../services/aiService';
+import { backfillAllDates } from '../services/roasService';
+import { backfillShippingStats } from '../services/shippingStatsService';
+import { backfillOrderStats } from '../services/orderStatsService';
+import { backfillDailyPnl } from '../services/dailyPnlService';
+import { computeBreakevenMetrics } from '../services/breakevenService';
 
 const router = express.Router();
 
@@ -330,11 +335,15 @@ router.post('/mark-rto', requireAdmin, async (req: AuthenticatedRequest, res: Re
     }));
     
     await RTOOrder.insertMany(rtoOrders, { ordered: false });
-    
+
     res.json({
       success: true,
       message: `${orderIds.length} order(s) marked as RTO`,
     });
+
+    // RTO changes flip order delivery status — recompute P&L and order stats async
+    backfillDailyPnl().catch(console.error);
+    backfillOrderStats().catch(console.error);
   } catch (error: any) {
     // Handle duplicate key errors gracefully
     if (error.code === 11000) {
@@ -342,6 +351,8 @@ router.post('/mark-rto', requireAdmin, async (req: AuthenticatedRequest, res: Re
         success: true,
         message: 'Orders marked as RTO (some were already marked)',
       });
+      backfillDailyPnl().catch(console.error);
+      backfillOrderStats().catch(console.error);
       return;
     }
     
@@ -364,11 +375,14 @@ router.delete('/mark-rto', requireAdmin, async (req: AuthenticatedRequest, res: 
     }
     
     await RTOOrder.deleteMany({ shopifyOrderId: { $in: orderIds } });
-    
+
     res.json({
       success: true,
       message: `${orderIds.length} order(s) unmarked from RTO`,
     });
+
+    backfillDailyPnl().catch(console.error);
+    backfillOrderStats().catch(console.error);
   } catch (error) {
     res.status(500).json({ success: false, error: 'Failed to unmark RTO orders' });
   }
@@ -471,55 +485,6 @@ router.post('/predict', requireAdmin, async (req: AuthenticatedRequest, res: Res
    }
  });
 
-  /**
-   * GET /api/admin/sales/predict-daily-performance/:dateKey
-   */
-  router.get('/predict-daily-performance/:dateKey', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const { dateKey } = req.params;
-      const prediction = await DailyPerformancePrediction.findOne({ dateKey }).sort({ createdAt: -1 });
-      res.json({ success: true, prediction });
-    } catch (error) {
-      res.status(500).json({ success: false, error: 'Failed to fetch prediction' });
-    }
-  });
-
-  /**
-   * POST /api/admin/sales/predict-daily-performance
-   */
-  router.post('/predict-daily-performance', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
-    try {
-      const { dayName, expectedAdSpend, historicalSameDayData, dateKey, todayData } = req.body;
-      
-      const aiResult = await aiService.predictDailyPerformance({
-        dayName,
-        expectedAdSpend,
-        historicalSameDayData,
-        todayData
-      });
-
-      // Save to DB
-      const dbPrediction = new DailyPerformancePrediction({
-        dateKey,
-        expectedAdSpend,
-        predictedHourlyCumul: aiResult.predictedHourlyCumul,
-        predictedHourlyRevenueCumul: aiResult.predictedHourlyRevenueCumul,
-        predictedTotalOrders: aiResult.predictedTotalOrders,
-        predictedTotalRevenue: aiResult.predictedTotalRevenue,
-        reasoning: aiResult.reasoning
-      });
-      await dbPrediction.save();
-  
-      res.json({ 
-        success: true, 
-        prediction: aiResult 
-      });
-    } catch (error) {
-      console.error('AI Daily Performance Prediction Error:', error);
-      res.status(500).json({ success: false, error: 'AI Daily Performance Prediction failed' });
-    }
-  });
-  
   /**
    * GET /api/admin/sales/search-orders
    * Search orders in database by name or order number
@@ -1041,5 +1006,237 @@ router.post('/predict', requireAdmin, async (req: AuthenticatedRequest, res: Res
       res.status(500).json({ success: false, error: error.message });
     }
   });
+
+/**
+ * GET /api/admin/sales/daily-roas
+ * Fetch stored daily ROAS records. Optional query params: startDate, endDate (YYYY-MM-DD).
+ */
+router.get('/daily-roas', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
+    const filter: Record<string, any> = {};
+    if (startDate || endDate) {
+      filter.dateKey = {};
+      if (startDate) filter.dateKey.$gte = startDate;
+      if (endDate) filter.dateKey.$lte = endDate;
+    }
+
+    const records = await DailyROAS.find(filter).sort({ dateKey: 1 }).lean();
+
+    res.json({
+      success: true,
+      records: records.map((r: any) => ({
+        dateKey: r.dateKey,
+        revenue: r.revenue,
+        adSpend: r.adSpend,
+        roas: r.roas,
+        updatedAt: r.updatedAt,
+      })),
+    });
+  } catch (error) {
+    console.error('Error fetching daily ROAS:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch daily ROAS' });
+  }
+});
+
+/**
+ * POST /api/admin/sales/daily-roas/backfill
+ * Recompute and store DailyROAS for all dates with order or ad-spend data.
+ */
+router.post('/daily-roas/backfill', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const result = await backfillAllDates();
+    res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('Error backfilling daily ROAS:', error);
+    res.status(500).json({ success: false, error: 'Backfill failed' });
+  }
+});
+
+/**
+ * GET /api/admin/sales/daily-shipping
+ * Fetch stored daily shipping stats. Optional query params: startDate, endDate (YYYY-MM-DD).
+ */
+router.get('/daily-shipping', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
+    const filter: Record<string, any> = {};
+    if (startDate || endDate) {
+      filter.dateKey = {};
+      if (startDate) filter.dateKey.$gte = startDate;
+      if (endDate) filter.dateKey.$lte = endDate;
+    }
+
+    const records = await DailyShipping.find(filter).sort({ dateKey: 1 }).lean();
+
+    res.json({
+      success: true,
+      records: records.map((r: any) => ({
+        dateKey: r.dateKey,
+        avgShipping: r.avgShipping,
+        avgShippingSmall: r.avgShippingSmall,
+        avgShippingLarge: r.avgShippingLarge,
+        orderCount: r.orderCount,
+        smallCount: r.smallCount,
+        largeCount: r.largeCount,
+        updatedAt: r.updatedAt,
+      })),
+    });
+  } catch (error) {
+    console.error('Error fetching daily shipping:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch daily shipping stats' });
+  }
+});
+
+/**
+ * POST /api/admin/sales/daily-shipping/backfill
+ * Recompute and store DailyShipping for all dates with fulfilled order + shipping charge data.
+ */
+router.post('/daily-shipping/backfill', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const result = await backfillShippingStats();
+    res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('Error backfilling daily shipping:', error);
+    res.status(500).json({ success: false, error: 'Backfill failed' });
+  }
+});
+
+/**
+ * GET /api/admin/sales/daily-order-stats
+ * Fetch stored daily order stats for pie charts. Optional query: startDate, endDate (YYYY-MM-DD).
+ */
+router.get('/daily-order-stats', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
+    const filter: Record<string, any> = {};
+    if (startDate || endDate) {
+      filter.dateKey = {};
+      if (startDate) filter.dateKey.$gte = startDate;
+      if (endDate) filter.dateKey.$lte = endDate;
+    }
+
+    const records = await DailyOrderStats.find(filter).sort({ dateKey: 1 }).lean();
+
+    // Aggregate across all returned dates
+    const agg = {
+      prepaidCount: 0,
+      codCount: 0,
+      deliveredCount: 0,
+      failedCount: 0,
+      inTransitCount: 0,
+      outForDeliveryCount: 0,
+      attemptedDeliveryCount: 0,
+      confirmedCount: 0,
+      codDeliveredCount: 0,
+      codFailedCount: 0,
+    };
+
+    for (const r of records as any[]) {
+      agg.prepaidCount += r.prepaidCount ?? 0;
+      agg.codCount += r.codCount ?? 0;
+      agg.deliveredCount += r.deliveredCount ?? 0;
+      agg.failedCount += r.failedCount ?? 0;
+      agg.inTransitCount += r.inTransitCount ?? 0;
+      agg.outForDeliveryCount += r.outForDeliveryCount ?? 0;
+      agg.attemptedDeliveryCount += r.attemptedDeliveryCount ?? 0;
+      agg.confirmedCount += r.confirmedCount ?? 0;
+      agg.codDeliveredCount += r.codDeliveredCount ?? 0;
+      agg.codFailedCount += r.codFailedCount ?? 0;
+    }
+
+    const completedDates = (records as any[]).filter((r) => r.isCompleted).map((r) => r.dateKey as string);
+
+    res.json({ success: true, stats: agg, completedDates });
+  } catch (error) {
+    console.error('Error fetching daily order stats:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch order stats' });
+  }
+});
+
+/**
+ * POST /api/admin/sales/daily-order-stats/backfill
+ * Recompute DailyOrderStats for all dates.
+ */
+router.post('/daily-order-stats/backfill', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const result = await backfillOrderStats();
+    res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('Error backfilling order stats:', error);
+    res.status(500).json({ success: false, error: 'Backfill failed' });
+  }
+});
+
+/**
+ * GET /api/admin/sales/daily-pnl
+ * Returns per-day P&L records.
+ * Query params:
+ *   month=YYYY-MM  → returns all days in that month (bar chart)
+ *   year=YYYY      → returns all days in that year  (heatmap)
+ *   startDate / endDate (YYYY-MM-DD) for arbitrary ranges
+ */
+router.get('/daily-pnl', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { month, year, startDate, endDate } = req.query as Record<string, string | undefined>;
+    const filter: Record<string, any> = {};
+
+    if (month) {
+      // YYYY-MM → match dateKey starting with that prefix
+      filter.dateKey = { $gte: `${month}-01`, $lte: `${month}-31` };
+    } else if (year) {
+      filter.dateKey = { $gte: `${year}-01-01`, $lte: `${year}-12-31` };
+    } else if (startDate || endDate) {
+      filter.dateKey = {};
+      if (startDate) filter.dateKey.$gte = startDate;
+      if (endDate) filter.dateKey.$lte = endDate;
+    }
+
+    const records = await DailyPnl.find(filter).sort({ dateKey: 1 }).lean();
+
+    res.json({
+      success: true,
+      records: (records as any[]).map((r) => ({
+        dateKey: r.dateKey,
+        isCompleted: r.isCompleted,
+        barChartProfit: r.barChartProfit,
+        heatmapProfit: r.heatmapProfit,
+        orderCount: r.orderCount,
+        adSpend: r.adSpend,
+      })),
+    });
+  } catch (error) {
+    console.error('Error fetching daily P&L:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch daily P&L' });
+  }
+});
+
+/**
+ * POST /api/admin/sales/daily-pnl/backfill
+ * Recompute DailyPnl for all dates.
+ */
+router.post('/daily-pnl/backfill', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const result = await backfillDailyPnl();
+    res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('Error backfilling daily P&L:', error);
+    res.status(500).json({ success: false, error: 'Backfill failed' });
+  }
+});
+
+/**
+ * GET /api/admin/sales/breakeven-metrics
+ * Compute breakeven ROAS metrics from completed days (last 30 days, DailyOrderStats + raw orders)
+ */
+router.get('/breakeven-metrics', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const metrics = await computeBreakevenMetrics();
+    res.json({ success: true, ...metrics });
+  } catch (error) {
+    console.error('Error computing breakeven metrics:', error);
+    res.status(500).json({ success: false, error: 'Failed to compute breakeven metrics' });
+  }
+});
 
 export default router;

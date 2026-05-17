@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { COGSConfiguration } from '../models';
 import { requireAdmin } from './adminAuth';
+import { backfillDailyPnl } from '../services/dailyPnlService';
 
 const router = Router();
 
@@ -64,6 +65,9 @@ router.post('/configuration', requireAdmin, async (req, res) => {
       success: true,
       message: 'COGS configuration saved successfully',
     });
+
+    // COGS change invalidates all historical P&L — recompute async
+    backfillDailyPnl().catch(console.error);
   } catch (error) {
     console.error('Error saving COGS configuration:', error);
     res.status(500).json({ error: 'Failed to save COGS configuration' });
