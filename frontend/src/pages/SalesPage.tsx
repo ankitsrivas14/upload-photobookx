@@ -387,7 +387,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       });
       const adSpendByDate: Record<string, number> = {};
       adSpendEntries.forEach((e) => {
-        const d = new Date(e.date).toISOString().split('T')[0];
+        const d = new Date(e.date).toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
         adSpendByDate[d] = (adSpendByDate[d] || 0) + e.amount;
       });
       const adCostPerOrder: Record<string, number> = {};
