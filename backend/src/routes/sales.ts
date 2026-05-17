@@ -1239,4 +1239,81 @@ router.get('/breakeven-metrics', requireAdmin, async (_req: AuthenticatedRequest
   }
 });
 
+/**
+ * GET /api/admin/sales/ai-prediction-data?startDate=YYYY-MM-DD
+ * Returns pre-computed sixMonthsStats and sixMonthsDailyData for AI profit prediction,
+ * sourced from DailyOrderStats + DailyPnl — no raw order scan needed.
+ */
+router.get('/ai-prediction-data', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const startDate = (req.query.startDate as string) || '2026-02-01';
+
+    const [orderStatsDocs, pnlDocs] = await Promise.all([
+      DailyOrderStats.find({ dateKey: { $gte: startDate } }).sort({ dateKey: 1 }).lean(),
+      DailyPnl.find({ dateKey: { $gte: startDate } }).sort({ dateKey: 1 }).lean(),
+    ]);
+
+    // Build a pnl lookup by dateKey
+    const pnlByDate = new Map<string, number>();
+    for (const p of pnlDocs as any[]) {
+      pnlByDate.set(p.dateKey as string, (p.heatmapProfit as number) ?? 0);
+    }
+
+    // Per-day data for AI context
+    const sixMonthsDailyData = (orderStatsDocs as any[]).map((r) => ({
+      date: r.dateKey as string,
+      placed: (r.prepaidCount ?? 0) + (r.codCount ?? 0),
+      delivered: r.deliveredCount ?? 0,
+      failed: r.failedCount ?? 0,
+    }));
+
+    // Monthly aggregates
+    const monthlyMap = new Map<string, {
+      totalOrders: number;
+      codOrders: number; prepaidOrders: number;
+      codFailed: number; prepaidFailed: number;
+      codDelivered: number; prepaidDelivered: number;
+      totalPL: number;
+    }>();
+
+    for (const r of orderStatsDocs as any[]) {
+      const monthKey = (r.dateKey as string).substring(0, 7);
+      if (!monthlyMap.has(monthKey)) {
+        monthlyMap.set(monthKey, { totalOrders: 0, codOrders: 0, prepaidOrders: 0, codFailed: 0, prepaidFailed: 0, codDelivered: 0, prepaidDelivered: 0, totalPL: 0 });
+      }
+      const m = monthlyMap.get(monthKey)!;
+      const prepaid = r.prepaidCount ?? 0;
+      const cod = r.codCount ?? 0;
+      m.totalOrders += prepaid + cod;
+      m.prepaidOrders += prepaid;
+      m.codOrders += cod;
+      m.codDelivered += r.codDeliveredCount ?? 0;
+      m.codFailed += r.codFailedCount ?? 0;
+      // prepaid delivered/failed = total minus COD
+      m.prepaidDelivered += Math.max(0, (r.deliveredCount ?? 0) - (r.codDeliveredCount ?? 0));
+      m.prepaidFailed += Math.max(0, (r.failedCount ?? 0) - (r.codFailedCount ?? 0));
+      m.totalPL += pnlByDate.get(r.dateKey as string) ?? 0;
+    }
+
+    const sixMonthsStats = Array.from(monthlyMap.entries()).map(([month, s]) => {
+      const codFinal = s.codDelivered + s.codFailed;
+      const prepaidFinal = s.prepaidDelivered + s.prepaidFailed;
+      const totalFinal = codFinal + prepaidFinal;
+      return {
+        month,
+        totalOrders: s.totalOrders,
+        ndrRateTotal: totalFinal > 0 ? parseFloat(((s.codFailed + s.prepaidFailed) / totalFinal * 100).toFixed(1)) : 0,
+        ndrRateCOD: codFinal > 0 ? parseFloat((s.codFailed / codFinal * 100).toFixed(1)) : 0,
+        ndrRatePrepaid: prepaidFinal > 0 ? parseFloat((s.prepaidFailed / prepaidFinal * 100).toFixed(1)) : 0,
+        totalPL: Math.round(s.totalPL),
+      };
+    }).sort((a, b) => a.month.localeCompare(b.month));
+
+    res.json({ success: true, sixMonthsStats, sixMonthsDailyData });
+  } catch (error) {
+    console.error('Error fetching AI prediction data:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch AI prediction data' });
+  }
+});
+
 export default router;

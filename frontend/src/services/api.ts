@@ -1192,6 +1192,27 @@ class ApiService {
     return this.request('/api/admin/sales/daily-pnl/backfill', { method: 'POST' });
   }
 
+  async getAiPredictionData(startDate: string): Promise<{
+    success: boolean;
+    sixMonthsStats?: Array<{
+      month: string;
+      totalOrders: number;
+      ndrRateTotal: number;
+      ndrRateCOD: number;
+      ndrRatePrepaid: number;
+      totalPL: number;
+    }>;
+    sixMonthsDailyData?: Array<{
+      date: string;
+      placed: number;
+      delivered: number;
+      failed: number;
+    }>;
+    error?: string;
+  }> {
+    return this.request(`/api/admin/sales/ai-prediction-data?startDate=${startDate}`);
+  }
+
   async getBreakevenMetrics(): Promise<{
     success: boolean;
     aov?: number;
