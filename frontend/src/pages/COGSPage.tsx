@@ -104,8 +104,8 @@ export function COGSPage() {
   const startNewVersion = () => {
     setIsNewDraft(true);
     setSelectedId(null);
-    // Pre-populate with current active version's fields as a starting point
-    const base = currentVersion ? normaliseFields(currentVersion.fields) : [];
+    // Pre-populate from the latest version (versions sorted newest-first)
+    const base = versions.length > 0 ? normaliseFields(versions[0].fields) : [];
     setEditFields(base);
     setEditEffectiveFrom('');
     setNewFieldName('');
