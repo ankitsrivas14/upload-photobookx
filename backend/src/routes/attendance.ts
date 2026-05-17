@@ -70,7 +70,7 @@ router.get('/employees/stats', requireAdmin, async (req: AuthenticatedRequest, r
     const endDate = new Date(year, monthNum, 0, 23, 59, 59);
     const daysInMonth = endDate.getDate();
 
-    const employees = await Employee.find({ isActive: true }).lean();
+    const employees = await Employee.find({ isActive: true, employeeType: 'monthly' }).lean();
     const employeeIds = employees.map(e => e._id);
 
     const attendances = await Attendance.find({
