@@ -67,7 +67,12 @@ export function DashboardPage() {
   // ROAS data fetched from DB
   const [roasDbRecords, setRoasDbRecords] = useState<Array<{ dateKey: string; revenue: number; adSpend: number; roas: number | null }>>([]);
   const [roasLoading, setRoasLoading] = useState(false);
-  const [dailyPnlMap, setDailyPnlMap] = useState<Record<string, number>>({});
+  // Heatmap P&L from DB — keyed by dateKey
+  const [heatmapByDate, setHeatmapByDate] = useState<Record<string, number>>({});
+  // Monthly bar chart records from DB
+  const [pnlChartRecords, setPnlChartRecords] = useState<Array<{
+    dateKey: string; isCompleted: boolean; barChartProfit: number;
+  }>>([]);
   const [orders, setOrders] = useState<ShopifyOrder[]>([]);
 
   // Sales Modal State
@@ -101,6 +106,8 @@ export function DashboardPage() {
     outForDeliveryCount: number; attemptedDeliveryCount: number; confirmedCount: number;
     codDeliveredCount: number; codFailedCount: number;
   } | null>(null);
+  // Completed dates from DB — days where every order is in a final state
+  const [completedDatesDb, setCompletedDatesDb] = useState<Set<string>>(new Set());
 
 
   useEffect(() => {
@@ -244,33 +251,8 @@ export function DashboardPage() {
         return revenue - totalCosts - adCost;
       };
 
-      const orderPnlByOrderId = new Map<number, number>();
-      orders.forEach((o) => orderPnlByOrderId.set(o.id, calcOrderPnl(o)));
-
-      const datesWithFinalOrders = new Set<string>();
-      const dailyPnl: Record<string, number> = {};
-
-      // Count orders in daily P/L: delivered, failed, or prepaid (prepaid won't fail so count as realized)
-      const isOrderCountedInDayPnl = (order: ShopifyOrder) =>
-        isOrderFinalStatus(order) || (order.paymentMethod?.toLowerCase() === 'prepaid');
-      orders.forEach((o) => {
-        if (o.cancelledAt) return;
-        const d = getOrderDateKey(o.createdAt);
-        if (!isOrderCountedInDayPnl(o)) return;
-        datesWithFinalOrders.add(d);
-        dailyPnl[d] = (dailyPnl[d] || 0) + (orderPnlByOrderId.get(o.id) ?? 0);
-      });
-
-      // Add ad-spend-only days (days without any final-status orders)
-      Object.entries(adSpendByDate).forEach(([dateKey, amount]) => {
-        if (!datesWithFinalOrders.has(dateKey)) {
-          dailyPnl[dateKey] = (dailyPnl[dateKey] ?? 0) - amount;
-        }
-      });
-
       setOrders(orders);
       setAdSpendByDate(adSpendByDate);
-      setDailyPnlMap(dailyPnl);
       setCogsFields(cogsFields);
       setRtoOrderIds(rtoOrderIds);
     } catch (err) {
@@ -330,8 +312,40 @@ export function DashboardPage() {
       if (res.success && res.stats) {
         setOrderStatsDb(res.stats);
       }
+      if (res.success && res.completedDates) {
+        setCompletedDatesDb(new Set(res.completedDates));
+      }
     } catch (err) {
       console.error('Failed to load order stats:', err);
+    }
+  }, []);
+
+  const loadPnlChart = useCallback(async (year: number, month: number) => {
+    try {
+      const monthStr = `${year}-${String(month + 1).padStart(2, '0')}`;
+      const res = await api.getDailyPnl({ month: monthStr });
+      if (res.success && res.records) {
+        setPnlChartRecords(res.records.map((r) => ({
+          dateKey: r.dateKey,
+          isCompleted: r.isCompleted,
+          barChartProfit: r.barChartProfit,
+        })));
+      }
+    } catch (err) {
+      console.error('Failed to load P&L chart data:', err);
+    }
+  }, []);
+
+  const loadHeatmap = useCallback(async (year: number) => {
+    try {
+      const res = await api.getDailyPnl({ year: String(year) });
+      if (res.success && res.records) {
+        const map: Record<string, number> = {};
+        res.records.forEach((r) => { map[r.dateKey] = r.heatmapProfit; });
+        setHeatmapByDate(map);
+      }
+    } catch (err) {
+      console.error('Failed to load heatmap data:', err);
     }
   }, []);
 
@@ -341,15 +355,29 @@ export function DashboardPage() {
       loadROAS(roasDays, roasStartDate, roasEndDate);
       loadShipping();
       loadOrderStats();
+      loadPnlChart(selectedYear, selectedMonth);
+      loadHeatmap(selectedYear);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount
-  }, [user, loadDailyPnl, loadROAS, loadShipping, loadOrderStats]);
+  }, [user, loadDailyPnl, loadROAS, loadShipping, loadOrderStats, loadPnlChart, loadHeatmap]);
+
+  // Re-fetch bar chart when selected month/year changes
+  useEffect(() => {
+    if (user) loadPnlChart(selectedYear, selectedMonth);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedYear, selectedMonth]);
+
+  // Re-fetch heatmap when selected year changes
+  useEffect(() => {
+    if (user) loadHeatmap(selectedYear);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedYear]);
 
   const weekLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S']; // Monday to Sunday
   const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
   const getPnlForDateKey = (dateKey: string): number | null => {
-    const val = dailyPnlMap[dateKey];
+    const val = heatmapByDate[dateKey];
     return val !== undefined ? val : null;
   };
 
@@ -377,166 +405,37 @@ export function DashboardPage() {
     roas: r.roas,
     revenue: r.revenue,
     adSpend: r.adSpend,
-    profit: dailyPnlMap[r.dateKey] || 0,
+    profit: heatmapByDate[r.dateKey] || 0,
   }));
 
-  // Profit Chart Data - Show Selected Month Only
+  // Profit Chart Data — built from DB records (no orders array needed)
   const profitChartData = (() => {
     const now = new Date();
+    const todayKey = now.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
     const startDate = new Date(selectedYear, selectedMonth, 1);
     const endDate = new Date(selectedYear, selectedMonth + 1, 0);
 
-    const data: Array<{
-      date: string;
-      dateKey: string;
-      bookedProfit: number;
-      yetToBookProfit: number;
-    }> = [];
+    // Build a quick lookup from DB records
+    const dbMap = new Map(pnlChartRecords.map((r) => [r.dateKey, r]));
 
-    // Helper functions from loadDailyPnl
-    const isOrderDelivered = (order: ShopifyOrder) => {
-      if (rtoOrderIds.has(order.id)) return false;
-      const status = order.deliveryStatus?.toLowerCase() || '';
-      const ndrStatuses = ['failed', 'rto', 'return'];
-      if (ndrStatuses.some(s => status.includes(s))) return false;
-      if (status === 'delivered') return true;
-      if (order.paymentMethod?.toLowerCase() === 'prepaid') return true;
-      return false;
-    };
-
-    const isOrderFinalStatus = (order: ShopifyOrder) => {
-      const status = order.deliveryStatus?.toLowerCase() || '';
-      const isDelivered = status === 'delivered';
-      const isFailed = rtoOrderIds.has(order.id) ||
-        status === 'failure' ||
-        status.includes('failed') ||
-        status.includes('rto');
-      return isDelivered || isFailed;
-    };
-
-    const detectVariant = (order: ShopifyOrder): 'small' | 'large' => {
-      if (!order.lineItems?.length) return 'small';
-      const hasLarge = order.lineItems.some(
-        (item) =>
-          item.title?.toLowerCase().includes('large') ||
-          item.variantTitle?.toLowerCase().includes('large')
-      );
-      return hasLarge ? 'large' : 'small';
-    };
-
-    const calcOrderPnl = (order: ShopifyOrder, adCostForOrder: number): number => {
-      if (cogsFields.length === 0) return 0;
-      const variant = detectVariant(order);
-      const isDelivered = isOrderDelivered(order);
-      const status = order.deliveryStatus?.toLowerCase() || '';
-      const isFailed = rtoOrderIds.has(order.id) ||
-        status === 'failure' ||
-        status.includes('failed') ||
-        status.includes('rto');
-      const paymentMethod = order.paymentMethod?.toLowerCase() === 'prepaid' ? 'prepaid' : 'cod';
-
-      let revenue = 0;
-      let fieldsToUse: COGSField[] = [];
-
-      if (isDelivered) {
-        revenue = order.totalPrice || 0;
-        fieldsToUse = cogsFields.filter(f => f.type === 'cogs' || f.type === 'both');
-      } else if (isFailed) {
-        revenue = 0;
-        fieldsToUse = cogsFields.filter(f => f.type === 'ndr' || f.type === 'both');
-      } else {
-        revenue = 0;
-        fieldsToUse = cogsFields.filter(f => f.type === 'cogs' || f.type === 'both');
-      }
-
-      let totalCosts = 0;
-      const key = `${variant}${paymentMethod === 'prepaid' ? 'Prepaid' : 'COD'}Value` as keyof COGSField;
-      fieldsToUse.forEach((field) => {
-        let value = field[key] as number;
-        if (value === undefined || value === null) value = 0;
-        if (field.calculationType === 'fixed') {
-          totalCosts += value;
-        } else {
-          const salePrice = order.totalPrice || 0;
-          const pct = field.percentageType || 'excluded';
-          totalCosts += pct === 'included'
-            ? (value / (100 + value)) * salePrice
-            : (value / 100) * salePrice;
-        }
-      });
-
-      // Add shipping cost
-      if (order.shippingCharge) {
-        totalCosts += order.shippingCharge;
-      }
-
-      return revenue - totalCosts - adCostForOrder;
-    };
-
-    // Get ad cost per order by date
-    const orderCountByDate: Record<string, number> = {};
-    orders.forEach((o) => {
-      if (o.cancelledAt) return;
-      const d = getOrderDateKey(o.createdAt);
-      orderCountByDate[d] = (orderCountByDate[d] || 0) + 1;
-    });
-
-    const adCostPerOrderByDate: Record<string, number> = {};
-    Object.keys(adSpendByDate).forEach((d) => {
-      const count = orderCountByDate[d] || 0;
-      if (count > 0) adCostPerOrderByDate[d] = adSpendByDate[d] / count;
-    });
-
-    // Group orders by date
-    const ordersByDate: Record<string, ShopifyOrder[]> = {};
-    orders.forEach((o) => {
-      if (o.cancelledAt) return;
-      const d = getOrderDateKey(o.createdAt);
-      if (!ordersByDate[d]) ordersByDate[d] = [];
-      ordersByDate[d].push(o);
-    });
-
+    const data: Array<{ date: string; dateKey: string; bookedProfit: number; yetToBookProfit: number }> = [];
     const currentDate = new Date(startDate);
 
     while (currentDate <= endDate) {
       const dateKey = currentDate.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
-      const dayOrders = ordersByDate[dateKey] || [];
-      const adCostPerOrder = adCostPerOrderByDate[dateKey] || 0;
-      const totalAdSpend = adSpendByDate[dateKey] || 0;
-
-      let bookedProfit = 0;
-
-      // If date is in future (after today), don't show data
-      // We compare logic using dateKey to avoid time-of-day issues
-      const todayKey = now.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+      const rec = dbMap.get(dateKey);
       const isFuture = dateKey > todayKey;
 
-      if (isFuture) {
-        bookedProfit = null as any;
-      } else {
-        // Check if day is complete (all orders in final status)
-        const allComplete = dayOrders.length === 0 || dayOrders.every(o => isOrderFinalStatus(o));
-
-        if (allComplete) {
-          // All orders are delivered/failed - show booked profit
-          dayOrders.forEach(o => {
-            bookedProfit += calcOrderPnl(o, adCostPerOrder);
-          });
-          // Subtract ad spend if no orders
-          if (dayOrders.length === 0 && totalAdSpend > 0) {
-            bookedProfit -= totalAdSpend;
-          }
-        } else {
-          // Incomplete day - leave empty (null values won't render bars)
-          bookedProfit = null as any;
-        }
+      let bookedProfit: number | null = null;
+      if (!isFuture && rec?.isCompleted) {
+        bookedProfit = rec.barChartProfit;
       }
 
       data.push({
         date: currentDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: STORE_TIMEZONE }),
         dateKey,
-        bookedProfit,
-        yetToBookProfit: 0, // Never show light bars
+        bookedProfit: bookedProfit as any,
+        yetToBookProfit: 0,
       });
 
       currentDate.setDate(currentDate.getDate() + 1);
@@ -1011,8 +910,7 @@ export function DashboardPage() {
             <span className={styles.chartStatLabel}>Completed Days Average ROAS</span>
             <span className={styles.chartStatValue} style={{ fontSize: '1.5rem', fontWeight: 600 }}>
               {(() => {
-                const completedDates = breakevenMetrics.completedDates;
-                const validRoas = roasChartData.filter(d => completedDates.has(d.dateKey) && d.roas !== null && d.roas > 0);
+                const validRoas = roasChartData.filter(d => completedDatesDb.has(d.dateKey) && d.roas !== null && d.roas > 0);
                 if (validRoas.length === 0) return 'N/A';
                 const avgRoas = validRoas.reduce((sum, d) => sum + (d.roas || 0), 0) / validRoas.length;
                 return avgRoas.toFixed(2);
@@ -1054,13 +952,13 @@ export function DashboardPage() {
           <div className={styles.chartStatBlock}>
             <span className={styles.chartStatLabel}>Completed Total Revenue</span>
             <span className={styles.chartStatValue} style={{ fontSize: '1.5rem', fontWeight: 600 }}>
-              ₹{roasChartData.filter(d => breakevenMetrics.completedDates.has(d.dateKey)).reduce((sum, d) => sum + d.revenue, 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+              ₹{roasChartData.filter(d => completedDatesDb.has(d.dateKey)).reduce((sum, d) => sum + d.revenue, 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
             </span>
           </div>
           <div className={styles.chartStatBlock}>
             <span className={styles.chartStatLabel}>Completed Total Ad Spend</span>
             <span className={styles.chartStatValue} style={{ fontSize: '1.5rem', fontWeight: 600 }}>
-              ₹{roasChartData.filter(d => breakevenMetrics.completedDates.has(d.dateKey)).reduce((sum, d) => sum + d.adSpend, 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+              ₹{roasChartData.filter(d => completedDatesDb.has(d.dateKey)).reduce((sum, d) => sum + d.adSpend, 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
             </span>
           </div>
         </div>

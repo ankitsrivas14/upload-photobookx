@@ -1153,6 +1153,7 @@ class ApiService {
       outForDeliveryCount: number; attemptedDeliveryCount: number; confirmedCount: number;
       codDeliveredCount: number; codFailedCount: number;
     };
+    completedDates?: string[];
     error?: string;
   }> {
     const params = new URLSearchParams();
@@ -1164,6 +1165,31 @@ class ApiService {
 
   async backfillDailyOrderStats(): Promise<{ success: boolean; upserted?: number; error?: string }> {
     return this.request('/api/admin/sales/daily-order-stats/backfill', { method: 'POST' });
+  }
+
+  async getDailyPnl(params: { month?: string; year?: string; startDate?: string; endDate?: string } = {}): Promise<{
+    success: boolean;
+    records?: Array<{
+      dateKey: string;
+      isCompleted: boolean;
+      barChartProfit: number;
+      heatmapProfit: number;
+      orderCount: number;
+      adSpend: number;
+    }>;
+    error?: string;
+  }> {
+    const qs = new URLSearchParams();
+    if (params.month) qs.set('month', params.month);
+    if (params.year) qs.set('year', params.year);
+    if (params.startDate) qs.set('startDate', params.startDate);
+    if (params.endDate) qs.set('endDate', params.endDate);
+    const q = qs.toString();
+    return this.request(`/api/admin/sales/daily-pnl${q ? `?${q}` : ''}`);
+  }
+
+  async backfillDailyPnl(): Promise<{ success: boolean; upserted?: number; error?: string }> {
+    return this.request('/api/admin/sales/daily-pnl/backfill', { method: 'POST' });
   }
 }
 

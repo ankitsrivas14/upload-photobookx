@@ -100,10 +100,15 @@ export async function recomputeOrderStatsForDate(
   let confirmedCount = 0;
   let codDeliveredCount = 0;
   let codFailedCount = 0;
+  let nonFinalCount = 0; // orders not in a final state (mirrors frontend isOrderFinal logic)
 
   for (const order of orders) {
     const paymentMethod = classifyPaymentMethod(order);
     const deliveryStatus = classifyDeliveryStatus(order, rto);
+
+    // Mirror frontend: prepaid is always "final"; COD only final when delivered/failed
+    const isFinal = paymentMethod === 'prepaid' || deliveryStatus === 'delivered' || deliveryStatus === 'failed';
+    if (!isFinal) nonFinalCount++;
 
     if (paymentMethod === 'prepaid') prepaidCount++;
     else codCount++;
@@ -133,6 +138,8 @@ export async function recomputeOrderStatsForDate(
     }
   }
 
+  const isCompleted = orders.length > 0 && nonFinalCount === 0;
+
   await DailyOrderStats.findOneAndUpdate(
     { dateKey },
     {
@@ -147,6 +154,7 @@ export async function recomputeOrderStatsForDate(
         confirmedCount,
         codDeliveredCount,
         codFailedCount,
+        isCompleted,
       },
     },
     { upsert: true, new: true }

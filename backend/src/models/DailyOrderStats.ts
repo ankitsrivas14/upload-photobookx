@@ -15,6 +15,8 @@ export interface IDailyOrderStats extends Document {
   // COD terminal status
   codDeliveredCount: number;
   codFailedCount: number;
+  // True when every order on this day is in a final state (delivered, failed, or prepaid)
+  isCompleted: boolean;
   updatedAt: Date;
 }
 
@@ -31,6 +33,7 @@ const schema = new Schema<IDailyOrderStats>(
     confirmedCount: { type: Number, default: 0 },
     codDeliveredCount: { type: Number, default: 0 },
     codFailedCount: { type: Number, default: 0 },
+    isCompleted: { type: Boolean, default: false },
   },
   { timestamps: true }
 );

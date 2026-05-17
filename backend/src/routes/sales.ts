@@ -1,11 +1,12 @@
 import express, { Response } from 'express';
-import { DiscardedOrder, RTOOrder, ProfitPrediction, ShippingCharge, OrderDeliveryDate, ShopifyOrderCache, MetaAdPerformance, MetaAdAnalysis, AcknowledgedOrder, TicketRaisedOrder, DailyROAS, DailyShipping, DailyOrderStats } from '../models';
+import { DiscardedOrder, RTOOrder, ProfitPrediction, ShippingCharge, OrderDeliveryDate, ShopifyOrderCache, MetaAdPerformance, MetaAdAnalysis, AcknowledgedOrder, TicketRaisedOrder, DailyROAS, DailyShipping, DailyOrderStats, DailyPnl } from '../models';
 import { requireAdmin } from './adminAuth';
 import { AuthenticatedRequest } from '../types';
 import aiService from '../services/aiService';
 import { backfillAllDates } from '../services/roasService';
 import { backfillShippingStats } from '../services/shippingStatsService';
 import { backfillOrderStats } from '../services/orderStatsService';
+import { backfillDailyPnl } from '../services/dailyPnlService';
 
 const router = express.Router();
 
@@ -333,11 +334,15 @@ router.post('/mark-rto', requireAdmin, async (req: AuthenticatedRequest, res: Re
     }));
     
     await RTOOrder.insertMany(rtoOrders, { ordered: false });
-    
+
     res.json({
       success: true,
       message: `${orderIds.length} order(s) marked as RTO`,
     });
+
+    // RTO changes flip order delivery status — recompute P&L and order stats async
+    backfillDailyPnl().catch(console.error);
+    backfillOrderStats().catch(console.error);
   } catch (error: any) {
     // Handle duplicate key errors gracefully
     if (error.code === 11000) {
@@ -345,6 +350,8 @@ router.post('/mark-rto', requireAdmin, async (req: AuthenticatedRequest, res: Re
         success: true,
         message: 'Orders marked as RTO (some were already marked)',
       });
+      backfillDailyPnl().catch(console.error);
+      backfillOrderStats().catch(console.error);
       return;
     }
     
@@ -367,11 +374,14 @@ router.delete('/mark-rto', requireAdmin, async (req: AuthenticatedRequest, res: 
     }
     
     await RTOOrder.deleteMany({ shopifyOrderId: { $in: orderIds } });
-    
+
     res.json({
       success: true,
       message: `${orderIds.length} order(s) unmarked from RTO`,
     });
+
+    backfillDailyPnl().catch(console.error);
+    backfillOrderStats().catch(console.error);
   } catch (error) {
     res.status(500).json({ success: false, error: 'Failed to unmark RTO orders' });
   }
@@ -1134,7 +1144,9 @@ router.get('/daily-order-stats', requireAdmin, async (req: AuthenticatedRequest,
       agg.codFailedCount += r.codFailedCount ?? 0;
     }
 
-    res.json({ success: true, stats: agg });
+    const completedDates = (records as any[]).filter((r) => r.isCompleted).map((r) => r.dateKey as string);
+
+    res.json({ success: true, stats: agg, completedDates });
   } catch (error) {
     console.error('Error fetching daily order stats:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch order stats' });
@@ -1151,6 +1163,63 @@ router.post('/daily-order-stats/backfill', requireAdmin, async (_req: Authentica
     res.json({ success: true, ...result });
   } catch (error) {
     console.error('Error backfilling order stats:', error);
+    res.status(500).json({ success: false, error: 'Backfill failed' });
+  }
+});
+
+/**
+ * GET /api/admin/sales/daily-pnl
+ * Returns per-day P&L records.
+ * Query params:
+ *   month=YYYY-MM  → returns all days in that month (bar chart)
+ *   year=YYYY      → returns all days in that year  (heatmap)
+ *   startDate / endDate (YYYY-MM-DD) for arbitrary ranges
+ */
+router.get('/daily-pnl', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { month, year, startDate, endDate } = req.query as Record<string, string | undefined>;
+    const filter: Record<string, any> = {};
+
+    if (month) {
+      // YYYY-MM → match dateKey starting with that prefix
+      filter.dateKey = { $gte: `${month}-01`, $lte: `${month}-31` };
+    } else if (year) {
+      filter.dateKey = { $gte: `${year}-01-01`, $lte: `${year}-12-31` };
+    } else if (startDate || endDate) {
+      filter.dateKey = {};
+      if (startDate) filter.dateKey.$gte = startDate;
+      if (endDate) filter.dateKey.$lte = endDate;
+    }
+
+    const records = await DailyPnl.find(filter).sort({ dateKey: 1 }).lean();
+
+    res.json({
+      success: true,
+      records: (records as any[]).map((r) => ({
+        dateKey: r.dateKey,
+        isCompleted: r.isCompleted,
+        barChartProfit: r.barChartProfit,
+        heatmapProfit: r.heatmapProfit,
+        orderCount: r.orderCount,
+        adSpend: r.adSpend,
+      })),
+    });
+  } catch (error) {
+    console.error('Error fetching daily P&L:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch daily P&L' });
+  }
+});
+
+/**
+ * POST /api/admin/sales/daily-pnl/backfill
+ * Recompute DailyPnl for all dates.
+ */
+router.post('/daily-pnl/backfill', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const result = await backfillDailyPnl();
+    res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('Error backfilling daily P&L:', error);
     res.status(500).json({ success: false, error: 'Backfill failed' });
   }
 });

@@ -15,6 +15,7 @@ import { Ticket } from '../models';
 import archiver from 'archiver';
 import { recomputeShippingForDate, getOrderDateKey as getShippingOrderDateKey, backfillShippingStats } from '../services/shippingStatsService';
 import { recomputeOrderStatsForDate, backfillOrderStats } from '../services/orderStatsService';
+import { backfillDailyPnl } from '../services/dailyPnlService';
 
 const router = Router();
 
@@ -312,8 +313,9 @@ router.post('/shopify/orders/clear-cache', requireAdmin, async (_req: Authentica
       syncedCount
     });
 
-    // Async full recompute of order stats after sync
+    // Async full recompute of order stats and P&L after sync
     backfillOrderStats().catch(console.error);
+    backfillDailyPnl().catch(console.error);
   } catch (error) {
     console.error('Error syncing orders:', error);
     res.status(500).json({ success: false, error: 'Failed to sync orders' });
