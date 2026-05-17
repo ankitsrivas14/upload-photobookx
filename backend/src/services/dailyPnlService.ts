@@ -66,9 +66,19 @@ async function loadAdSpendByDate(): Promise<Map<string, number>> {
   return map;
 }
 
+type ValueKey = 'smallPrepaidValue' | 'smallCODValue' | 'largePrepaidValue' | 'largeCODValue';
+
+interface TotalOverrides {
+  smallPrepaidValue?: number;
+  smallCODValue?: number;
+  largePrepaidValue?: number;
+  largeCODValue?: number;
+}
+
 interface CogsVersion {
   effectiveFrom: string; // YYYY-MM-DD
   fields: any[];
+  totalOverrides?: { pre?: TotalOverrides; post?: TotalOverrides };
 }
 
 async function loadCogsVersions(): Promise<CogsVersion[]> {
@@ -76,17 +86,17 @@ async function loadCogsVersions(): Promise<CogsVersion[]> {
   return (docs as any[]).map((d) => ({
     effectiveFrom: toDateKey(new Date(d.effectiveFrom)),
     fields: d.fields ?? [],
+    totalOverrides: d.totalOverrides,
   }));
 }
 
-function getCogsFieldsForDate(dateKey: string, versions: CogsVersion[]): any[] {
-  // Versions sorted oldest-first; walk forward and keep updating until effectiveFrom > dateKey
-  let fields: any[] = [];
+function getCogsVersionForDate(dateKey: string, versions: CogsVersion[]): CogsVersion | null {
+  let version: CogsVersion | null = null;
   for (const v of versions) {
-    if (v.effectiveFrom <= dateKey) fields = v.fields;
+    if (v.effectiveFrom <= dateKey) version = v;
     else break;
   }
-  return fields;
+  return version;
 }
 
 // ─── per-order helpers ────────────────────────────────────────────────────────
@@ -143,14 +153,36 @@ function detectVariant(order: any): 'small' | 'large' {
   return hasLarge ? 'large' : 'small';
 }
 
+function sumCategoryFields(
+  fields: any[],
+  category: 'pre' | 'post',
+  key: ValueKey,
+  revenue: number
+): number {
+  let total = 0;
+  for (const field of fields.filter((f) => (f.category ?? 'pre') === category)) {
+    const value: number = field[key] ?? 0;
+    if (field.calculationType === 'fixed') {
+      total += value;
+    } else {
+      const pct = field.percentageType || 'excluded';
+      total += pct === 'included'
+        ? (value / (100 + value)) * revenue
+        : (value / 100) * revenue;
+    }
+  }
+  return total;
+}
+
 function calcOrderPnl(
   order: any,
   adCostPerOrder: number,
   rtoSet: Set<number>,
   shippingMap: Map<string, number>,
-  cogsFields: any[]
+  cogsFields: any[],
+  overrides?: { pre?: TotalOverrides; post?: TotalOverrides }
 ): number {
-  if (cogsFields.length === 0) return 0;
+  if (cogsFields.length === 0 && !overrides) return 0;
 
   const variant = detectVariant(order);
   const delivered = orderIsDelivered(order, rtoSet);
@@ -176,18 +208,15 @@ function calcOrderPnl(
     fieldsToUse = cogsFields.filter((f) => f.type === 'cogs' || f.type === 'both');
   }
 
+  const key = `${variant}${pm}Value` as ValueKey;
+
   let totalCosts = 0;
-  const key = `${variant}${pm}Value`;
-  for (const field of fieldsToUse) {
-    const value: number = field[key] ?? 0;
-    if (field.calculationType === 'fixed') {
-      totalCosts += value;
+  for (const cat of ['pre', 'post'] as const) {
+    const override = overrides?.[cat]?.[key];
+    if (override !== undefined) {
+      totalCosts += override;
     } else {
-      const salePrice = parseFloat(order.current_total_price ?? order.total_price ?? '0') || 0;
-      const pct = field.percentageType || 'excluded';
-      totalCosts += pct === 'included'
-        ? (value / (100 + value)) * salePrice
-        : (value / 100) * salePrice;
+      totalCosts += sumCategoryFields(fieldsToUse, cat, key, revenue);
     }
   }
 
@@ -217,7 +246,9 @@ export async function recomputePnlForDate(
   const shipMap = shippingMap ?? (await loadShippingMap());
   const adSpendMap = adSpendByDate ?? (await loadAdSpendByDate());
   const versions = cogsVersions ?? (await loadCogsVersions());
-  const cogs = getCogsFieldsForDate(dateKey, versions);
+  const version = getCogsVersionForDate(dateKey, versions);
+  const cogs = version?.fields ?? [];
+  const overrides = version?.totalOverrides;
 
   const adSpend = adSpendMap.get(dateKey) ?? 0;
   const orderCount = orders.length;
@@ -231,7 +262,7 @@ export async function recomputePnlForDate(
   let hasHeatmapOrders = false;
 
   for (const order of orders) {
-    const pnl = calcOrderPnl(order, adCostPerOrder, rto, shipMap, cogs);
+    const pnl = calcOrderPnl(order, adCostPerOrder, rto, shipMap, cogs, overrides);
 
     // Bar chart: all orders contribute when completed
     barChartProfit += pnl;

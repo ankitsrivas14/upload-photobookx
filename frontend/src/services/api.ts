@@ -29,10 +29,18 @@ interface COGSConfiguration {
   fields: COGSField[];
 }
 
+export interface COGSTotalOverrides {
+  smallPrepaidValue?: number;
+  smallCODValue?: number;
+  largePrepaidValue?: number;
+  largeCODValue?: number;
+}
+
 export interface COGSVersion {
   _id: string;
   fields: COGSField[];
-  effectiveFrom: string; // ISO date string
+  totalOverrides?: { pre?: COGSTotalOverrides; post?: COGSTotalOverrides };
+  effectiveFrom: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -794,7 +802,7 @@ class ApiService {
     return response.json();
   }
 
-  async saveCOGSConfiguration(config: COGSConfiguration & { effectiveFrom: string }): Promise<{ success: boolean; message?: string; version?: COGSVersion }> {
+  async saveCOGSConfiguration(config: COGSConfiguration & { effectiveFrom: string; totalOverrides?: COGSVersion['totalOverrides'] }): Promise<{ success: boolean; message?: string; version?: COGSVersion }> {
     const token = localStorage.getItem('adminToken');
     const response = await fetch(`${this.baseUrl}/api/admin/cogs/configuration`, {
       method: 'POST',
@@ -817,7 +825,7 @@ class ApiService {
     return this.request('/api/admin/cogs/configuration/versions');
   }
 
-  async updateCOGSVersion(id: string, update: { fields?: COGSField[]; effectiveFrom?: string }): Promise<{ success: boolean; version?: COGSVersion }> {
+  async updateCOGSVersion(id: string, update: { fields?: COGSField[]; effectiveFrom?: string; totalOverrides?: COGSVersion['totalOverrides'] }): Promise<{ success: boolean; version?: COGSVersion }> {
     const token = localStorage.getItem('adminToken');
     const response = await fetch(`${this.baseUrl}/api/admin/cogs/configuration/${id}`, {
       method: 'PUT',

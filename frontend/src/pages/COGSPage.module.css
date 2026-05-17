@@ -239,12 +239,68 @@
 .totals-label {
   color: #475569;
   font-size: 0.875rem;
+  font-weight: 600;
 }
 
 .totals-cell {
   text-align: center;
   color: #0369a1;
   font-size: 0.875rem;
+}
+
+.totals-cell-editable {
+  padding: 0.5rem 0.75rem !important;
+}
+
+.total-input {
+  width: 100%;
+  min-width: 90px;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: #0369a1;
+  background: white;
+  border: 1px solid #bae6fd;
+  border-radius: 4px;
+  text-align: center;
+  transition: all 0.15s;
+  cursor: text;
+}
+
+.total-input:hover {
+  border-color: #00B8D4;
+}
+
+.total-input:focus {
+  outline: none;
+  border-color: #00B8D4;
+  box-shadow: 0 0 0 2px rgba(0, 184, 212, 0.15);
+  background: #fafbff;
+}
+
+.total-overridden {
+  background: #fefce8;
+  border-color: #fde047;
+  color: #854d0e;
+}
+
+.total-overridden:hover {
+  border-color: #eab308;
+}
+
+.total-overridden:focus {
+  border-color: #eab308;
+  box-shadow: 0 0 0 2px rgba(234, 179, 8, 0.15);
+}
+
+.cell-dash {
+  display: block;
+  text-align: center;
+  color: #cbd5e1;
+  font-size: 1rem;
+  font-weight: 600;
+  padding: 0.5rem 0;
+  user-select: none;
 }
 
 /* Loading */

@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
-import { api, type COGSVersion } from '../services/api';
+import { api, type COGSVersion, type COGSTotalOverrides } from '../services/api';
 import styles from './COGSPage.module.css';
 
 interface CostField {
@@ -67,14 +67,26 @@ function emptyField(category: 'pre' | 'post'): CostField {
 
 // ── sub-component: one cost table ────────────────────────────────────────────
 
+const VALUE_KEYS: ValueKey[] = ['smallPrepaidValue', 'smallCODValue', 'largePrepaidValue', 'largeCODValue'];
+const VALUE_LABELS: Record<ValueKey, string> = {
+  smallPrepaidValue: 'Small Prepaid',
+  smallCODValue: 'Small COD',
+  largePrepaidValue: 'Large Prepaid',
+  largeCODValue: 'Large COD',
+};
+
 interface CostTableProps {
   category: 'pre' | 'post';
   fields: CostField[];
+  overrides: COGSTotalOverrides;
   onChange: (fields: CostField[]) => void;
+  onOverrideChange: (key: ValueKey, value: number | undefined) => void;
 }
 
-function CostTable({ category, fields, onChange }: CostTableProps) {
+function CostTable({ category, fields, overrides, onChange, onOverrideChange }: CostTableProps) {
   const [newName, setNewName] = useState('');
+  // Track raw string input per total cell so user can type freely before blur
+  const totalInputRefs = useRef<Partial<Record<ValueKey, string>>>({});
 
   const rows = fields.filter((f) => f.category === category);
   const otherRows = fields.filter((f) => f.category !== category);
@@ -92,10 +104,13 @@ function CostTable({ category, fields, onChange }: CostTableProps) {
   const setField = (id: string, patch: Partial<CostField>) =>
     update(rows.map((f) => f.id === id ? { ...f, ...patch } : f));
 
-  const updateValue = (id: string, key: ValueKey, value: number) =>
+  const updateValue = (id: string, key: ValueKey, value: number) => {
+    // Editing a cell clears the override for that column
+    onOverrideChange(key, undefined);
     setField(id, { [key]: value });
+  };
 
-  const total = (key: ValueKey) => rows.reduce((s, f) => s + (f[key] || 0), 0);
+  const computedTotal = (key: ValueKey) => rows.reduce((s, f) => s + (f[key] || 0), 0);
 
   const title = category === 'pre' ? 'Pre Cost' : 'Post Cost';
   const subtitle = category === 'pre'
@@ -130,10 +145,9 @@ function CostTable({ category, fields, onChange }: CostTableProps) {
           <thead>
             <tr>
               <th>Cost Field</th>
-              <th className={styles['value-header']}>Small Prepaid</th>
-              <th className={styles['value-header']}>Small COD</th>
-              <th className={styles['value-header']}>Large Prepaid</th>
-              <th className={styles['value-header']}>Large COD</th>
+              {VALUE_KEYS.map((k) => (
+                <th key={k} className={styles['value-header']}>{VALUE_LABELS[k]}</th>
+              ))}
               <th></th>
             </tr>
           </thead>
@@ -172,18 +186,25 @@ function CostTable({ category, fields, onChange }: CostTableProps) {
                     )}
                   </div>
                 </td>
-                {(['smallPrepaidValue', 'smallCODValue', 'largePrepaidValue', 'largeCODValue'] as ValueKey[]).map((key) => (
-                  <td key={key}>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={field[key]}
-                      onChange={(e) => updateValue(field.id, key, parseFloat(e.target.value) || 0)}
-                      className={styles['table-input']}
-                    />
-                  </td>
-                ))}
+                {VALUE_KEYS.map((key) => {
+                  const isOverridden = overrides[key] !== undefined;
+                  return (
+                    <td key={key}>
+                      {isOverridden ? (
+                        <span className={styles['cell-dash']}>—</span>
+                      ) : (
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={field[key]}
+                          onChange={(e) => updateValue(field.id, key, parseFloat(e.target.value) || 0)}
+                          className={styles['table-input']}
+                        />
+                      )}
+                    </td>
+                  );
+                })}
                 <td>
                   <button onClick={() => deleteField(field.id)} className={styles['table-delete-btn']} title="Delete">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -204,10 +225,36 @@ function CostTable({ category, fields, onChange }: CostTableProps) {
           <tfoot>
             <tr>
               <td className={styles['totals-label']}>{title} Total</td>
-              <td className={styles['totals-cell']}>₹{total('smallPrepaidValue').toFixed(0)}</td>
-              <td className={styles['totals-cell']}>₹{total('smallCODValue').toFixed(0)}</td>
-              <td className={styles['totals-cell']}>₹{total('largePrepaidValue').toFixed(0)}</td>
-              <td className={styles['totals-cell']}>₹{total('largeCODValue').toFixed(0)}</td>
+              {VALUE_KEYS.map((key) => {
+                const isOverridden = overrides[key] !== undefined;
+                const displayValue = isOverridden ? overrides[key]! : computedTotal(key);
+                return (
+                  <td key={key} className={styles['totals-cell-editable']}>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={totalInputRefs.current[key] ?? displayValue}
+                      className={`${styles['total-input']} ${isOverridden ? styles['total-overridden'] : ''}`}
+                      onChange={(e) => {
+                        totalInputRefs.current[key] = e.target.value;
+                        const v = parseFloat(e.target.value);
+                        if (!isNaN(v)) onOverrideChange(key, v);
+                      }}
+                      onFocus={(e) => {
+                        totalInputRefs.current[key] = String(displayValue);
+                        e.target.select();
+                      }}
+                      onBlur={() => {
+                        delete totalInputRefs.current[key];
+                        // If user cleared the field, remove override
+                        if (overrides[key] === undefined) return;
+                      }}
+                      title={isOverridden ? 'Override active — edit a cell above to revert to computed total' : 'Edit to override the total for this column'}
+                    />
+                  </td>
+                );
+              })}
               <td></td>
             </tr>
           </tfoot>
@@ -229,6 +276,8 @@ export function COGSPage() {
 
   const [editFields, setEditFields] = useState<CostField[]>([]);
   const [editEffectiveFrom, setEditEffectiveFrom] = useState('');
+  const [preOverrides, setPreOverrides] = useState<COGSTotalOverrides>({});
+  const [postOverrides, setPostOverrides] = useState<COGSTotalOverrides>({});
 
   const now = new Date();
 
@@ -257,6 +306,8 @@ export function COGSPage() {
     setSelectedId(v._id);
     setEditFields(normaliseFields(v.fields));
     setEditEffectiveFrom(toDateInputValue(v.effectiveFrom));
+    setPreOverrides(v.totalOverrides?.pre ?? {});
+    setPostOverrides(v.totalOverrides?.post ?? {});
   };
 
   const startNewVersion = () => {
@@ -265,17 +316,29 @@ export function COGSPage() {
     const base = versions.length > 0 ? normaliseFields(versions[0].fields) : [];
     setEditFields(base);
     setEditEffectiveFrom('');
+    setPreOverrides(versions[0]?.totalOverrides?.pre ?? {});
+    setPostOverrides(versions[0]?.totalOverrides?.post ?? {});
   };
+
+  const makeOverrideHandler = (setter: React.Dispatch<React.SetStateAction<COGSTotalOverrides>>) =>
+    (key: ValueKey, value: number | undefined) =>
+      setter((prev) => {
+        const next = { ...prev };
+        if (value === undefined) delete next[key];
+        else next[key] = value;
+        return next;
+      });
 
   const handleSave = async () => {
     if (!editEffectiveFrom) { toast.error('Please set an effective-from date'); return; }
     setIsSaving(true);
+    const totalOverrides = { pre: preOverrides, post: postOverrides };
     try {
       if (isNewDraft) {
-        await api.saveCOGSConfiguration({ fields: editFields, effectiveFrom: editEffectiveFrom });
+        await api.saveCOGSConfiguration({ fields: editFields, effectiveFrom: editEffectiveFrom, totalOverrides });
         toast.success('New COGS version created — P&L recomputing in background');
       } else {
-        await api.updateCOGSVersion(selectedId!, { fields: editFields, effectiveFrom: editEffectiveFrom });
+        await api.updateCOGSVersion(selectedId!, { fields: editFields, effectiveFrom: editEffectiveFrom, totalOverrides });
         toast.success('COGS version updated — P&L recomputing in background');
       }
       await loadVersions();
@@ -299,8 +362,12 @@ export function COGSPage() {
     }
   };
 
-  // Combined totals across both tables
-  const grandTotal = (key: ValueKey) => editFields.reduce((s, f) => s + (f[key] || 0), 0);
+  // Grand total: use override if set, otherwise sum fields for each category
+  const grandTotal = (key: ValueKey) => {
+    const preVal = preOverrides[key] ?? editFields.filter(f => f.category === 'pre').reduce((s, f) => s + (f[key] || 0), 0);
+    const postVal = postOverrides[key] ?? editFields.filter(f => f.category === 'post').reduce((s, f) => s + (f[key] || 0), 0);
+    return preVal + postVal;
+  };
 
   if (isLoading) {
     return (
@@ -381,10 +448,22 @@ export function COGSPage() {
           </div>
 
           {/* Pre Cost table */}
-          <CostTable category="pre" fields={editFields} onChange={setEditFields} />
+          <CostTable
+            category="pre"
+            fields={editFields}
+            overrides={preOverrides}
+            onChange={setEditFields}
+            onOverrideChange={makeOverrideHandler(setPreOverrides)}
+          />
 
           {/* Post Cost table */}
-          <CostTable category="post" fields={editFields} onChange={setEditFields} />
+          <CostTable
+            category="post"
+            fields={editFields}
+            overrides={postOverrides}
+            onChange={setEditFields}
+            onOverrideChange={makeOverrideHandler(setPostOverrides)}
+          />
 
           {/* Grand total summary */}
           <div className={styles['grand-total-row']}>
