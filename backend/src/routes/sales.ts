@@ -1509,6 +1509,159 @@ router.get('/backlog-orders', requireAdmin, async (req: AuthenticatedRequest, re
 });
 
 /**
+ * GET /api/admin/sales/failed-orders-analysis
+ * Returns pre-aggregated stats for the Failed Orders analysis page.
+ * All heavy computation (joining RTOOrder, DiscardedOrder, ShippingCharge,
+ * bucketing into courier/city/delay categories) happens here on the server.
+ * The frontend receives only 4 small stat objects instead of ~10k raw orders.
+ */
+router.get('/failed-orders-analysis', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const DATA_START = '2026-01-28';
+
+    // Load all support data in parallel
+    const [rtoRows, discardedRows, shippingRows, cacheEntries] = await Promise.all([
+      RTOOrder.find({}, { shopifyOrderId: 1 }).lean(),
+      DiscardedOrder.find({}, { orderId: 1 }).lean(),
+      ShippingCharge.find({}, { orderNumber: 1, courierName: 1, pickupDate: 1, firstAttemptDate: 1, customerCity: 1 }).lean(),
+      ShopifyOrderCache.aggregate([
+        { $match: { cacheKey: { $regex: /^all_orders_/ } } },
+        { $project: {
+          orders: {
+            $map: {
+              input: { $filter: {
+                input: '$orders', as: 'o',
+                cond: { $and: [
+                  { $not: [{ $ifNull: ['$$o.cancelled_at', false] }] },
+                  { $gte: ['$$o.created_at', DATA_START] },
+                ]},
+              }},
+              as: 'o',
+              in: {
+                id: '$$o.id',
+                name: '$$o.name',
+                created_at: '$$o.created_at',
+                fulfillment_status: '$$o.fulfillment_status',
+                shipment_status: { $ifNull: [
+                  { $getField: { field: 'shipment_status', input: { $arrayElemAt: [{ $ifNull: ['$$o.fulfillments', []] }, -1] } } },
+                  null,
+                ]},
+              },
+            },
+          },
+        }},
+      ]),
+    ]);
+
+    const rtoSet = new Set((rtoRows as any[]).map(r => r.shopifyOrderId as number));
+    const discardedSet = new Set((discardedRows as any[]).map(d => d.orderId as number));
+
+    // Build shipping map: normalise order number → { courierName, pickupDate, firstAttemptDate, city }
+    const shipMap = new Map<string, { courierName: string | null; pickupDate: string | null; firstAttemptDate: string | null; city: string | null }>();
+    for (const s of shippingRows as any[]) {
+      const base = (s.orderNumber as string).replace(/^#/, '');
+      const val = { courierName: s.courierName ?? null, pickupDate: s.pickupDate ?? null, firstAttemptDate: s.firstAttemptDate ?? null, city: s.customerCity ?? null };
+      shipMap.set(base, val);
+      shipMap.set(`#${base}`, val);
+    }
+
+    // Deduplicate orders across cache entries
+    const seen = new Set<number>();
+    const orders: Array<{ id: number; name: string; created_at: string; fulfillment_status: string | null; shipment_status: string | null }> = [];
+    for (const entry of cacheEntries as any[]) {
+      for (const o of (entry.orders ?? []) as any[]) {
+        if (!o.id || seen.has(o.id)) continue;
+        seen.add(o.id);
+        orders.push(o);
+      }
+    }
+
+    // Courier name normalisation
+    const groupCourier = (name: string | null | undefined): string => {
+      if (!name) return 'Unknown';
+      const n = name.toLowerCase();
+      if (n.includes('xpressbees')) return 'Xpressbees';
+      if (n.includes('shadowfax'))  return 'Shadowfax';
+      if (n.includes('amazon'))     return 'Amazon';
+      if (n.includes('delhivery'))  return 'Delhivery';
+      if (n.includes('blue dart') || n.includes('bluedart')) return 'Blue Dart';
+      if (n.includes('ekart'))      return 'Ekart';
+      if (n.includes('ecom'))       return 'Ecom Express';
+      if (n.includes('dtdc'))       return 'DTDC';
+      return name;
+    };
+
+    const diffDays = (a: string, b: string) => {
+      const da = new Date(a); da.setHours(0, 0, 0, 0);
+      const db = new Date(b); db.setHours(0, 0, 0, 0);
+      return Math.max(0, Math.floor((db.getTime() - da.getTime()) / 86400000));
+    };
+
+    const pickupCat = (createdAt: string, pickupDate: string | null): string => {
+      if (!pickupDate) return 'Not Picked Up';
+      const d = diffDays(createdAt, pickupDate);
+      if (d === 0) return '0 days (Same Day)';
+      if (d === 1) return '1 day';
+      if (d >= 5)  return '5+ days';
+      return `${d} days`;
+    };
+
+    const attemptCat = (createdAt: string, firstAttemptDate: string | null): string => {
+      if (!firstAttemptDate) return 'No Attempt Data';
+      const d = diffDays(createdAt, firstAttemptDate);
+      if (d === 0)  return '0 days (Same Day)';
+      if (d >= 10)  return '10+ days';
+      return `${d} days`;
+    };
+
+    type Stat = Record<string, { failed: number; total: number }>;
+    const courierStats: Stat = {};
+    const cityStats: Stat = {};
+    const delayStats: Stat = {};
+    const attemptStats: Stat = {};
+    let failedCount = 0;
+
+    for (const order of orders) {
+      if (discardedSet.has(order.id)) continue;
+
+      const shipInfo = shipMap.get(order.name) ?? shipMap.get(order.name.replace(/^#/, '')) ?? null;
+      const deliveryStatus = (order.shipment_status || order.fulfillment_status || '').toLowerCase();
+      const isFailed = rtoSet.has(order.id) || deliveryStatus === 'failure' || deliveryStatus.includes('failed') || deliveryStatus.includes('rto');
+
+      const courier = groupCourier(shipInfo?.courierName);
+      const city = (shipInfo?.city || 'Unknown').trim().toLowerCase();
+      const pCat = pickupCat(order.created_at, shipInfo?.pickupDate ?? null);
+      const aCat = attemptCat(order.created_at, shipInfo?.firstAttemptDate ?? null);
+
+      if (!courierStats[courier]) courierStats[courier] = { failed: 0, total: 0 };
+      courierStats[courier].total++;
+
+      if (!cityStats[city]) cityStats[city] = { failed: 0, total: 0 };
+      cityStats[city].total++;
+
+      if (!delayStats[pCat]) delayStats[pCat] = { failed: 0, total: 0 };
+      delayStats[pCat].total++;
+
+      if (!attemptStats[aCat]) attemptStats[aCat] = { failed: 0, total: 0 };
+      attemptStats[aCat].total++;
+
+      if (isFailed) {
+        courierStats[courier].failed++;
+        cityStats[city].failed++;
+        delayStats[pCat].failed++;
+        attemptStats[aCat].failed++;
+        failedCount++;
+      }
+    }
+
+    res.json({ success: true, failedCount, courierStats, cityStats, delayStats, attemptStats });
+  } catch (error) {
+    console.error('Error fetching failed orders analysis:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch failed orders analysis' });
+  }
+});
+
+/**
  * GET /api/admin/sales/variant-performance?days=30
  * Returns P&L broken down by variant (small/large) × payment (prepaid/COD).
  */
@@ -1541,5 +1694,6 @@ router.get('/variant-performance', requireAdmin, async (req: AuthenticatedReques
     res.status(500).json({ success: false, error: 'Failed to fetch variant performance' });
   }
 });
+
 
 export default router;

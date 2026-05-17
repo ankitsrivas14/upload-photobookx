@@ -399,7 +399,7 @@ class AIService {
         }
     }
 
-    async chatWithAdsStrategist(userQuestion: string, adData: any[], historicalData: any[] = [], chatHistory: any[] = []) {
+async chatWithAdsStrategist(userQuestion: string, adData: any[], historicalData: any[] = [], chatHistory: any[] = []) {
         if (!this.openai) {
             throw new Error('OpenAI API key is missing.');
         }

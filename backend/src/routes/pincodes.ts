@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import { requireAdmin } from './adminAuth';
 import BlockedPinCode from '../models/BlockedPinCode';
+import CodAddedCity from '../models/CodAddedCity';
 import type { AuthenticatedRequest } from '../types';
 
 const router = Router();
@@ -56,6 +57,38 @@ router.delete('/blocked/:pinCode', requireAdmin, async (req: AuthenticatedReques
     } catch (error) {
         console.error('Error deleting blocked pin code:', error);
         res.status(500).json({ success: false, error: 'Failed to delete pin code' });
+    }
+});
+
+// GET /api/admin/pincodes/cod-added-cities
+router.get('/cod-added-cities', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
+    try {
+        const cities = await CodAddedCity.find({}, { city: 1 }).lean();
+        res.json({ success: true, cities: cities.map(c => c.city) });
+    } catch {
+        res.status(500).json({ success: false, error: 'Failed to fetch added cities' });
+    }
+});
+
+// POST /api/admin/pincodes/cod-added-cities
+router.post('/cod-added-cities', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+    const { city } = req.body;
+    if (!city) return res.status(400).json({ success: false, error: 'city is required' });
+    try {
+        await CodAddedCity.findOneAndUpdate({ city }, { addedAt: new Date() }, { upsert: true });
+        res.json({ success: true });
+    } catch {
+        res.status(500).json({ success: false, error: 'Failed to mark city' });
+    }
+});
+
+// DELETE /api/admin/pincodes/cod-added-cities/:city
+router.delete('/cod-added-cities/:city', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+        await CodAddedCity.findOneAndDelete({ city: decodeURIComponent(String(req.params.city)) });
+        res.json({ success: true });
+    } catch {
+        res.status(500).json({ success: false, error: 'Failed to unmark city' });
     }
 });
 

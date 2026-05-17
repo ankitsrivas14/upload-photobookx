@@ -1294,7 +1294,30 @@ class ApiService {
     return this.request(`/api/admin/sales/daily-averages?days=${days}`);
   }
 
-  async getVariantPerformance(days = 30): Promise<{
+  async getFailedOrdersAnalysis(): Promise<{
+    success: boolean;
+    failedCount?: number;
+    courierStats?: Record<string, { failed: number; total: number }>;
+    cityStats?: Record<string, { failed: number; total: number }>;
+    delayStats?: Record<string, { failed: number; total: number }>;
+    attemptStats?: Record<string, { failed: number; total: number }>;
+  }> {
+    return this.request('/api/admin/sales/failed-orders-analysis');
+  }
+
+  async getCodAddedCities(): Promise<{ success: boolean; cities?: string[] }> {
+    return this.request('/api/admin/pincodes/cod-added-cities');
+  }
+
+  async addCodAddedCity(city: string): Promise<{ success: boolean }> {
+    return this.request('/api/admin/pincodes/cod-added-cities', { method: 'POST', body: JSON.stringify({ city }) });
+  }
+
+  async removeCodAddedCity(city: string): Promise<{ success: boolean }> {
+    return this.request(`/api/admin/pincodes/cod-added-cities/${encodeURIComponent(city)}`, { method: 'DELETE' });
+  }
+
+async getVariantPerformance(days = 30): Promise<{
     success: boolean;
     days?: number;
     buckets?: Array<{
