@@ -1144,6 +1144,27 @@ class ApiService {
   async getAllHourlyLogs(): Promise<{ success: boolean; employees?: any[]; logs?: any[]; error?: string }> {
     return this.request('/api/admin/attendance/hourly-logs/all');
   }
+
+  async getDailyOrderStats(startDate?: string, endDate?: string): Promise<{
+    success: boolean;
+    stats?: {
+      prepaidCount: number; codCount: number;
+      deliveredCount: number; failedCount: number; inTransitCount: number;
+      outForDeliveryCount: number; attemptedDeliveryCount: number; confirmedCount: number;
+      codDeliveredCount: number; codFailedCount: number;
+    };
+    error?: string;
+  }> {
+    const params = new URLSearchParams();
+    if (startDate) params.set('startDate', startDate);
+    if (endDate) params.set('endDate', endDate);
+    const qs = params.toString();
+    return this.request(`/api/admin/sales/daily-order-stats${qs ? `?${qs}` : ''}`);
+  }
+
+  async backfillDailyOrderStats(): Promise<{ success: boolean; upserted?: number; error?: string }> {
+    return this.request('/api/admin/sales/daily-order-stats/backfill', { method: 'POST' });
+  }
 }
 
 

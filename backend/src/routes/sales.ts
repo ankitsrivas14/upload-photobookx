@@ -1,10 +1,11 @@
 import express, { Response } from 'express';
-import { DiscardedOrder, RTOOrder, ProfitPrediction, ShippingCharge, OrderDeliveryDate, ShopifyOrderCache, MetaAdPerformance, MetaAdAnalysis, AcknowledgedOrder, TicketRaisedOrder, DailyROAS, DailyShipping } from '../models';
+import { DiscardedOrder, RTOOrder, ProfitPrediction, ShippingCharge, OrderDeliveryDate, ShopifyOrderCache, MetaAdPerformance, MetaAdAnalysis, AcknowledgedOrder, TicketRaisedOrder, DailyROAS, DailyShipping, DailyOrderStats } from '../models';
 import { requireAdmin } from './adminAuth';
 import { AuthenticatedRequest } from '../types';
 import aiService from '../services/aiService';
 import { backfillAllDates } from '../services/roasService';
 import { backfillShippingStats } from '../services/shippingStatsService';
+import { backfillOrderStats } from '../services/orderStatsService';
 
 const router = express.Router();
 
@@ -1086,6 +1087,70 @@ router.post('/daily-shipping/backfill', requireAdmin, async (_req: Authenticated
     res.json({ success: true, ...result });
   } catch (error) {
     console.error('Error backfilling daily shipping:', error);
+    res.status(500).json({ success: false, error: 'Backfill failed' });
+  }
+});
+
+/**
+ * GET /api/admin/sales/daily-order-stats
+ * Fetch stored daily order stats for pie charts. Optional query: startDate, endDate (YYYY-MM-DD).
+ */
+router.get('/daily-order-stats', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
+    const filter: Record<string, any> = {};
+    if (startDate || endDate) {
+      filter.dateKey = {};
+      if (startDate) filter.dateKey.$gte = startDate;
+      if (endDate) filter.dateKey.$lte = endDate;
+    }
+
+    const records = await DailyOrderStats.find(filter).sort({ dateKey: 1 }).lean();
+
+    // Aggregate across all returned dates
+    const agg = {
+      prepaidCount: 0,
+      codCount: 0,
+      deliveredCount: 0,
+      failedCount: 0,
+      inTransitCount: 0,
+      outForDeliveryCount: 0,
+      attemptedDeliveryCount: 0,
+      confirmedCount: 0,
+      codDeliveredCount: 0,
+      codFailedCount: 0,
+    };
+
+    for (const r of records as any[]) {
+      agg.prepaidCount += r.prepaidCount ?? 0;
+      agg.codCount += r.codCount ?? 0;
+      agg.deliveredCount += r.deliveredCount ?? 0;
+      agg.failedCount += r.failedCount ?? 0;
+      agg.inTransitCount += r.inTransitCount ?? 0;
+      agg.outForDeliveryCount += r.outForDeliveryCount ?? 0;
+      agg.attemptedDeliveryCount += r.attemptedDeliveryCount ?? 0;
+      agg.confirmedCount += r.confirmedCount ?? 0;
+      agg.codDeliveredCount += r.codDeliveredCount ?? 0;
+      agg.codFailedCount += r.codFailedCount ?? 0;
+    }
+
+    res.json({ success: true, stats: agg });
+  } catch (error) {
+    console.error('Error fetching daily order stats:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch order stats' });
+  }
+});
+
+/**
+ * POST /api/admin/sales/daily-order-stats/backfill
+ * Recompute DailyOrderStats for all dates.
+ */
+router.post('/daily-order-stats/backfill', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const result = await backfillOrderStats();
+    res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('Error backfilling order stats:', error);
     res.status(500).json({ success: false, error: 'Backfill failed' });
   }
 });

@@ -14,6 +14,7 @@ import { fromInstanceMetadata } from '@aws-sdk/credential-provider-imds';
 import { Ticket } from '../models';
 import archiver from 'archiver';
 import { recomputeShippingForDate, getOrderDateKey as getShippingOrderDateKey, backfillShippingStats } from '../services/shippingStatsService';
+import { recomputeOrderStatsForDate, backfillOrderStats } from '../services/orderStatsService';
 
 const router = Router();
 
@@ -310,6 +311,9 @@ router.post('/shopify/orders/clear-cache', requireAdmin, async (_req: Authentica
       message: `Orders synced successfully (${syncedCount} updated).`,
       syncedCount
     });
+
+    // Async full recompute of order stats after sync
+    backfillOrderStats().catch(console.error);
   } catch (error) {
     console.error('Error syncing orders:', error);
     res.status(500).json({ success: false, error: 'Failed to sync orders' });
@@ -669,6 +673,13 @@ router.post('/shopify/update-delivery-status', requireAdmin, async (req: Authent
       success: true,
       message: `Order ${orderNumber} marked as ${status}`,
     });
+
+    // Async recompute order stats for the affected date
+    getShippingOrderDateKey(orderNumber)
+      .then((dateKey) => {
+        if (dateKey) recomputeOrderStatsForDate(dateKey).catch(console.error);
+      })
+      .catch(console.error);
   } catch (error) {
     console.error('Error updating delivery status:', error);
     res.status(500).json({

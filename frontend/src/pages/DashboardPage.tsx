@@ -94,6 +94,14 @@ export function DashboardPage() {
     avgShippingLarge: number | null;
   }>>([]);
 
+  // Order Distribution DB state
+  const [orderStatsDb, setOrderStatsDb] = useState<{
+    prepaidCount: number; codCount: number;
+    deliveredCount: number; failedCount: number; inTransitCount: number;
+    outForDeliveryCount: number; attemptedDeliveryCount: number; confirmedCount: number;
+    codDeliveredCount: number; codFailedCount: number;
+  } | null>(null);
+
 
   useEffect(() => {
     loadUser();
@@ -309,14 +317,33 @@ export function DashboardPage() {
     }
   }, []);
 
+  const loadOrderStats = useCallback(async () => {
+    try {
+      // Last 30 days, not before Jan 28, 2026
+      const now = new Date();
+      const endDate = now.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+      const s = new Date(now);
+      s.setDate(s.getDate() - 29);
+      const thirtyDaysAgo = s.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+      const startDate = thirtyDaysAgo < '2026-01-28' ? '2026-01-28' : thirtyDaysAgo;
+      const res = await api.getDailyOrderStats(startDate, endDate);
+      if (res.success && res.stats) {
+        setOrderStatsDb(res.stats);
+      }
+    } catch (err) {
+      console.error('Failed to load order stats:', err);
+    }
+  }, []);
+
   useEffect(() => {
     if (user) {
       loadDailyPnl();
       loadROAS(roasDays, roasStartDate, roasEndDate);
       loadShipping();
+      loadOrderStats();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount
-  }, [user, loadDailyPnl, loadROAS, loadShipping]);
+  }, [user, loadDailyPnl, loadROAS, loadShipping, loadOrderStats]);
 
   const weekLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S']; // Monday to Sunday
   const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -670,90 +697,37 @@ export function DashboardPage() {
     };
   })();
 
-  // Pie Charts data (Last 30 days, not before Jan 28, 2026)
+  // Pie Charts data — sourced from DB (pre-computed daily stats)
   const pieChartsData = (() => {
-    const now = new Date();
-    const startDate = new Date('2026-01-28');
-    const thirtyDaysAgo = new Date(now);
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    const effectiveStartDate = startDate > thirtyDaysAgo ? startDate : thirtyDaysAgo;
-
-    let prepaidCount = 0;
-    let codCount = 0;
-
-    let deliveredCount = 0;
-    let failedCount = 0;
-    let confirmedCount = 0;
-    let inTransitCount = 0;
-    let outForDeliveryCount = 0;
-    let attemptedDeliveryCount = 0;
-
-    let codDeliveredCount = 0;
-    let codFailedCount = 0;
-
-    orders.forEach((order) => {
-      if (order.cancelledAt) return;
-      const orderDate = new Date(order.createdAt);
-      if (orderDate < effectiveStartDate) return;
-
-      const paymentMethod = order.paymentMethod?.toLowerCase() === 'prepaid' ? 'prepaid' : 'cod';
-      const status = order.deliveryStatus?.toLowerCase() || '';
-      const isFailed = rtoOrderIds.has(order.id) ||
-        status === 'failure' ||
-        status.includes('failed') ||
-        status.includes('rto');
-
-      // Chart 1: Prepaid vs COD
-      if (paymentMethod === 'prepaid') prepaidCount++;
-      else codCount++;
-
-      // Chart 2: Delivered vs Failed vs Granular Statuses
-      // We prioritize EXPLICIT statuses over the "Prepaid = Delivered" assumption.
-      // The assumption should only apply if there is no other specific tracking info.
-      if (isFailed) {
-        failedCount++;
-      } else if (status === 'delivered') {
-        deliveredCount++;
-      } else if (status.includes('out for delivery') || status.includes('out_for_delivery')) {
-        outForDeliveryCount++;
-      } else if (status.includes('attempt')) {
-        attemptedDeliveryCount++;
-      } else if (status.includes('transit') || status.includes('shipped') || status.includes('picked') || status.includes('pickup')) {
-        inTransitCount++;
-      } else {
-        // Fallback for orders with no active/final status (e.g. '', 'confirmed', 'label created')
-        if (paymentMethod === 'prepaid') {
-          // Keep original logic: Prepaid assumed delivered if tracking is silent/confirmed only
-          deliveredCount++;
-        } else {
-          confirmedCount++;
-        }
-      }
-
-      // Chart 3: COD — terminal orders only (Delivered or Failed)
-      if (paymentMethod === 'cod') {
-        if (status === 'delivered') codDeliveredCount++;
-        else if (isFailed) codFailedCount++;
-      }
-    });
+    const s = orderStatsDb;
+    const prepaidCount = s?.prepaidCount ?? 0;
+    const codCount = s?.codCount ?? 0;
+    const deliveredCount = s?.deliveredCount ?? 0;
+    const failedCount = s?.failedCount ?? 0;
+    const inTransitCount = s?.inTransitCount ?? 0;
+    const outForDeliveryCount = s?.outForDeliveryCount ?? 0;
+    const attemptedDeliveryCount = s?.attemptedDeliveryCount ?? 0;
+    const confirmedCount = s?.confirmedCount ?? 0;
+    const codDeliveredCount = s?.codDeliveredCount ?? 0;
+    const codFailedCount = s?.codFailedCount ?? 0;
 
     return {
       paymentMethod: [
-        { name: 'Prepaid', value: prepaidCount, color: '#10b981' }, // Green
-        { name: 'COD', value: codCount, color: '#f59e0b' },       // Amber
+        { name: 'Prepaid', value: prepaidCount, color: '#10b981' },
+        { name: 'COD', value: codCount, color: '#f59e0b' },
       ],
       deliveryStatus: [
-        { name: 'Delivered', value: deliveredCount, color: '#10b981' }, // Green
-        { name: 'Out for Delivery', value: outForDeliveryCount, color: '#eab308' }, // Yellow-500
-        { name: 'Attempted Delivery', value: attemptedDeliveryCount, color: '#f97316' }, // Orange-500
-        { name: 'In Transit', value: inTransitCount, color: '#3b82f6' }, // Blue
-        { name: 'Confirmed', value: confirmedCount, color: '#64748b' }, // Slate
-        { name: 'Failed', value: failedCount, color: '#ef4444' },     // Red
-      ].filter(item => item.value > 0), // Filter out zero values to keep chart clean
+        { name: 'Delivered', value: deliveredCount, color: '#10b981' },
+        { name: 'Out for Delivery', value: outForDeliveryCount, color: '#eab308' },
+        { name: 'Attempted Delivery', value: attemptedDeliveryCount, color: '#f97316' },
+        { name: 'In Transit', value: inTransitCount, color: '#3b82f6' },
+        { name: 'Confirmed', value: confirmedCount, color: '#64748b' },
+        { name: 'Failed', value: failedCount, color: '#ef4444' },
+      ].filter(item => item.value > 0),
       codTotal: codDeliveredCount + codFailedCount,
       codStatus: [
         { name: 'Delivered', value: codDeliveredCount, color: '#10b981' },
-        { name: 'Failed',    value: codFailedCount,    color: '#ef4444' },
+        { name: 'Failed', value: codFailedCount, color: '#ef4444' },
       ].filter(item => item.value > 0),
       totalOrders: prepaidCount + codCount,
     };

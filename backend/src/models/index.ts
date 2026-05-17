@@ -28,3 +28,4 @@ export { AttendanceAuditLog, IAttendanceAuditLog } from './AttendanceAuditLog';
 export { HourlyLog, IHourlyLog } from './HourlyLog';
 export { DailyROAS, IDailyROAS } from './DailyROAS';
 export { DailyShipping, IDailyShipping } from './DailyShipping';
+export { DailyOrderStats, IDailyOrderStats } from './DailyOrderStats';
