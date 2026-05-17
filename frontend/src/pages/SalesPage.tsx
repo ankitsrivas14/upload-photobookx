@@ -396,7 +396,6 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
           .map((o: any) => o.name);
 
         // Count breakdown for display
-        const totalOrders = response.orders.length;
         const fulfilledOrders = response.orders.filter((o: any) => o.fulfillmentStatus && o.fulfillmentStatus !== 'unfulfilled').length;
 
         if (orderNumbersToSync.length === 0) {
@@ -1421,7 +1420,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
 
       if (response.success) {
         // Reload data to reflect the change
-        await loadData();
+        await loadOrders(selectedMonthFilter);
         setShowDeliveryStatusModal(false);
         setSelectedOrderForStatus(null);
         toast.success('Delivery status updated successfully');
@@ -1442,7 +1441,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
         const response = await api.addCustomerTag(customerId, tag);
         if (response.success) {
           await api.clearOrdersCache();
-          await loadData();
+          await loadOrders(selectedMonthFilter);
           toast.success('Tag added successfully');
         } else {
           toast.error(`Error: ${response.error || 'Failed to add tag'}`);
@@ -1507,7 +1506,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       const response = await api.bulkAddCustomerTags(customerIds, 'no-cod');
       if (response.success) {
         await api.clearOrdersCache();
-        await loadData();
+        await loadOrders(selectedMonthFilter);
         setSelectedOrders(new Set());
         setSelectAll(false);
         setShowBulkMenu(false);
