@@ -787,7 +787,7 @@ class ApiService {
   }
 
   // COGS Configuration
-  async getCOGSConfiguration(): Promise<COGSConfiguration> {
+  async getCOGSConfiguration(): Promise<COGSConfiguration & { totalOverrides?: COGSVersion['totalOverrides'] }> {
     const token = localStorage.getItem('adminToken');
     const response = await fetch(`${this.baseUrl}/api/admin/cogs/configuration`, {
       headers: {

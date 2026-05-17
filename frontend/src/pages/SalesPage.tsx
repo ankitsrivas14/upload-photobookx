@@ -30,12 +30,40 @@ interface COGSBreakdown {
   calculatedCost: number;
 }
 
+interface COGSTotalOverrides {
+  smallPrepaidValue?: number;
+  smallCODValue?: number;
+  largePrepaidValue?: number;
+  largeCODValue?: number;
+}
+
+interface COGSOverrides {
+  pre?: COGSTotalOverrides;
+  post?: COGSTotalOverrides;
+}
+
+interface COGSVersionEntry {
+  effectiveFrom: string; // YYYY-MM-DD
+  fields: COGSField[];
+  totalOverrides?: COGSOverrides;
+}
+
 // Store timezone for order date (match Shopify reports: India = Asia/Kolkata)
 const STORE_TIMEZONE = 'Asia/Kolkata';
 
 /** Order date as YYYY-MM-DD in store timezone so daily revenue matches Shopify (e.g. "Yesterday") */
 function getOrderDateKey(createdAt: string): string {
   return new Date(createdAt).toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+}
+
+/** Pick the COGS version whose effectiveFrom <= dateKey (versions must be sorted oldest-first) */
+function getCogsVersionForDate(dateKey: string, versions: COGSVersionEntry[]): COGSVersionEntry | null {
+  let result: COGSVersionEntry | null = null;
+  for (const v of versions) {
+    if (v.effectiveFrom <= dateKey) result = v;
+    else break;
+  }
+  return result;
 }
 
 // Helper function to format numbers with Indian comma notation
@@ -150,7 +178,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
   const [showCogsModal, setShowCogsModal] = useState(false);
   const [selectedOrderForCogs, setSelectedOrderForCogs] = useState<ShopifyOrder | null>(null);
   const [selectedVariant, setSelectedVariant] = useState<'small' | 'large'>('small');
-  const [cogsConfig, setCogsConfig] = useState<COGSField[]>([]);
+  const [cogsVersions, setCogsVersions] = useState<COGSVersionEntry[]>([]);
   const [cogsBreakdown, setCogsBreakdown] = useState<COGSBreakdown[]>([]);
 
   // Delivery Status Update Modal State
@@ -270,10 +298,10 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
 
   const loadStaticData = async () => {
     try {
-      const [discardedResponse, rtoResponse, cogsConfigResponse, adSpendResponse, acknowledgedResponse, ticketRaisedResponse] = await Promise.all([
+      const [discardedResponse, rtoResponse, cogsVersionsResponse, adSpendResponse, acknowledgedResponse, ticketRaisedResponse] = await Promise.all([
         api.getDiscardedOrderIds(),
         api.getRTOOrderIds(),
-        api.getCOGSConfiguration(),
+        api.getCOGSVersions(),
         api.getDailyAdSpend(),
         api.getAcknowledgedOrderIds(),
         api.getTicketRaisedOrderIds(),
@@ -291,8 +319,16 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       if (ticketRaisedResponse?.success) {
         setTicketRaisedOrderIds(new Set(ticketRaisedResponse.ticketRaisedOrderIds));
       }
-      if (cogsConfigResponse?.fields) {
-        setCogsConfig(cogsConfigResponse.fields);
+      if (cogsVersionsResponse?.success && cogsVersionsResponse.versions?.length > 0) {
+        // Sort oldest-first so getCogsVersionForDate can pick correct version per order date
+        const sorted = [...cogsVersionsResponse.versions]
+          .sort((a, b) => a.effectiveFrom.localeCompare(b.effectiveFrom))
+          .map(v => ({
+            effectiveFrom: new Date(v.effectiveFrom).toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE }),
+            fields: v.fields as COGSField[],
+            totalOverrides: v.totalOverrides as COGSOverrides | undefined,
+          }));
+        setCogsVersions(sorted);
       }
       const adSpendEntries = adSpendResponse.success && adSpendResponse.entries ? adSpendResponse.entries : [];
       const adSpend: Record<string, number> = {};
@@ -1307,9 +1343,11 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
 
   // Calculate profit/loss for an order based on delivery status and payment method
   const calculateOrderProfitLoss = useCallback((order: ShopifyOrder): number => {
-    if (cogsConfig.length === 0) {
-      return 0;
-    }
+    if (cogsVersions.length === 0) return 0;
+
+    const orderDateStr = getOrderDateKey(order.createdAt);
+    const version = getCogsVersionForDate(orderDateStr, cogsVersions);
+    if (!version || version.fields.length === 0) return 0;
 
     const variant = detectVariant(order);
     const isDelivered = isOrderDelivered(order);
@@ -1320,68 +1358,59 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       status.includes('rto');
     const paymentMethod = order.paymentMethod?.toLowerCase() === 'prepaid' ? 'prepaid' : 'cod';
 
-    // Determine revenue and which fields to use
     let revenue = 0;
     let fieldsToUse: COGSField[] = [];
 
     if (isDelivered) {
-      // Delivered = Got money
       revenue = order.totalPrice || 0;
-      // Use COGS only + Both fields
-      fieldsToUse = cogsConfig.filter(f => f.type === 'cogs' || f.type === 'both');
+      fieldsToUse = version.fields.filter(f => f.type === 'cogs' || f.type === 'both');
     } else if (isFailed) {
-      // NDR/RTO/Failed = No money, apply NDR cost (attempted_delivery excluded)
       revenue = 0;
-      fieldsToUse = cogsConfig.filter(f => f.type === 'ndr' || f.type === 'both');
+      fieldsToUse = version.fields.filter(f => f.type === 'ndr' || f.type === 'both');
     } else {
-      // Pending (e.g. attempted_delivery, in_transit): no revenue, COGS only
       revenue = 0;
-      fieldsToUse = cogsConfig.filter(f => f.type === 'cogs' || f.type === 'both');
+      fieldsToUse = version.fields.filter(f => f.type === 'cogs' || f.type === 'both');
     }
 
-    // Calculate total costs using variant + payment method
-    let totalCosts = 0;
-    fieldsToUse.forEach(field => {
-      // Get the correct value based on variant and payment method
-      const key = `${variant}${paymentMethod === 'prepaid' ? 'Prepaid' : 'COD'}Value` as keyof COGSField;
-      let value = field[key] as number;
+    const valueKey = `${variant}${paymentMethod === 'prepaid' ? 'Prepaid' : 'COD'}Value` as keyof COGSField;
+    const salePrice = order.totalPrice || 0;
 
-      // Fallback to old structure if new structure not available
-      if (value === undefined || value === null) {
-        value = variant === 'small' ? (field.smallValue || 0) : (field.largeValue || 0);
-      }
-
-      if (field.calculationType === 'fixed') {
-        totalCosts += value;
-      } else {
-        // Percentage calculation based on type
-        const salePrice = order.totalPrice || 0;
-        const percentageType = field.percentageType || 'excluded'; // Default to excluded for backwards compatibility
-
-        if (percentageType === 'included') {
-          // Included: percentage is part of total amount
-          // Formula: amount × (percentage / (100 + percentage))
-          // Example: ₹100 with 12% included = ₹100 × (12/112) = ₹10.71
-          totalCosts += (value / (100 + value)) * salePrice;
-        } else {
-          // Excluded: percentage is added on top
-          // Formula: amount × (percentage / 100)
-          // Example: ₹100 with 12% excluded = ₹100 × 0.12 = ₹12
-          totalCosts += (value / 100) * salePrice;
+    const sumFields = (fields: COGSField[]) => {
+      let sum = 0;
+      fields.forEach(field => {
+        let value = field[valueKey] as number;
+        if (value === undefined || value === null) {
+          value = variant === 'small' ? (field.smallValue || 0) : (field.largeValue || 0);
         }
-      }
-    });
+        if (field.calculationType === 'fixed') {
+          sum += value;
+        } else {
+          const pct = field.percentageType || 'excluded';
+          sum += pct === 'included' ? (value / (100 + value)) * salePrice : (value / 100) * salePrice;
+        }
+      });
+      return sum;
+    };
 
-    const orderDateStr = getOrderDateKey(order.createdAt);
+    let totalCosts = 0;
+    for (const cat of ['pre', 'post'] as const) {
+      const override = version.totalOverrides?.[cat]?.[valueKey as keyof COGSTotalOverrides];
+      if (override !== undefined) {
+        totalCosts += override;
+      } else {
+        totalCosts += sumFields(fieldsToUse.filter(f => (f as any).category === cat || (cat === 'pre' && !(f as any).category)));
+      }
+    }
+
     const adCost = adCostPerOrderByDate[orderDateStr] ?? 0;
     const shippingCharge = calculateActualShippingCharge(order);
 
     return revenue - totalCosts - adCost - shippingCharge;
-  }, [cogsConfig, isOrderDelivered, adCostPerOrderByDate, rtoOrderIds, calculateActualShippingCharge]);
+  }, [cogsVersions, isOrderDelivered, adCostPerOrderByDate, rtoOrderIds, calculateActualShippingCharge]);
 
   // Calculate P/L for all orders when config loads
   useEffect(() => {
-    if (cogsConfig.length > 0 && orders.length > 0) {
+    if (cogsVersions.length > 0 && orders.length > 0) {
       const profitLossMap = new Map<number, number>();
       orders.forEach(order => {
         const profitLoss = calculateOrderProfitLoss(order);
@@ -1389,7 +1418,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       });
       setOrderProfitLoss(profitLossMap);
     }
-  }, [cogsConfig, orders, calculateOrderProfitLoss]);
+  }, [cogsVersions, orders, calculateOrderProfitLoss]);
 
   const handleOpenCogsModal = (order: ShopifyOrder) => {
     setSelectedOrderForCogs(order);
@@ -1397,12 +1426,13 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
     const paymentMethod = order.paymentMethod?.toLowerCase() === 'prepaid' ? 'prepaid' : 'cod';
     const orderDateStr = getOrderDateKey(order.createdAt);
     const adCost = adCostPerOrderByDate[orderDateStr] ?? 0;
+    const version = getCogsVersionForDate(orderDateStr, cogsVersions);
 
     // Determine config type based on delivery status
     const configType = isOrderDelivered(order) ? 'cogs' : 'ndr';
 
     setSelectedVariant(variant);
-    calculateCogsBreakdown(cogsConfig, order.totalPrice || 0, variant, paymentMethod, configType, adCost);
+    calculateCogsBreakdown(version?.fields ?? [], order.totalPrice || 0, variant, paymentMethod, configType, adCost, version?.totalOverrides);
     setShowCogsModal(true);
   };
 
@@ -1564,49 +1594,58 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
     variant: 'small' | 'large',
     paymentMethod: 'prepaid' | 'cod',
     configType: 'cogs' | 'ndr' | 'both',
-    adCost?: number
+    adCost?: number,
+    overrides?: COGSOverrides
   ) => {
     const breakdown: COGSBreakdown[] = [];
 
-    // Filter fields based on config type
     const fieldsToUse: COGSField[] =
       configType === 'cogs' ? fields.filter(f => f.type === 'cogs' || f.type === 'both') :
         configType === 'ndr' ? fields.filter(f => f.type === 'ndr' || f.type === 'both') :
-          fields; // 'both' uses all fields
+          fields;
 
-    fieldsToUse.forEach(field => {
-      // Get the correct value based on variant and payment method
-      const key = `${variant}${paymentMethod === 'prepaid' ? 'Prepaid' : 'COD'}Value` as keyof COGSField;
-      let value = field[key] as number;
+    const valueKey = `${variant}${paymentMethod === 'prepaid' ? 'Prepaid' : 'COD'}Value` as keyof COGSField;
 
-      // Fallback to old structure if new structure not available
+    const calcField = (field: COGSField) => {
+      let value = field[valueKey] as number;
       if (value === undefined || value === null) {
         value = variant === 'small' ? (field.smallValue || 0) : (field.largeValue || 0);
       }
-
       let calculatedCost = 0;
-
       if (field.calculationType === 'fixed') {
         calculatedCost = value;
       } else {
-        // Percentage calculation based on type
-        const percentageType = field.percentageType || 'excluded';
-
-        if (percentageType === 'included') {
-          calculatedCost = (value / (100 + value)) * salePrice;
-        } else {
-          calculatedCost = (value / 100) * salePrice;
-        }
+        const pct = field.percentageType || 'excluded';
+        calculatedCost = pct === 'included' ? (value / (100 + value)) * salePrice : (value / 100) * salePrice;
       }
+      return { value, calculatedCost };
+    };
 
-      breakdown.push({
-        fieldName: field.name,
-        type: field.type,
-        calculationType: field.calculationType,
-        value: value,
-        calculatedCost: calculatedCost,
-      });
-    });
+    for (const cat of ['pre', 'post'] as const) {
+      const catFields = fieldsToUse.filter(f => (f as any).category === cat || (cat === 'pre' && !(f as any).category));
+      const override = overrides?.[cat]?.[valueKey as keyof COGSTotalOverrides];
+      if (override !== undefined) {
+        const catLabel = cat === 'pre' ? 'Pre-cost total' : 'Post-cost total';
+        breakdown.push({
+          fieldName: `${catLabel} (override)`,
+          type: 'cogs',
+          calculationType: 'fixed',
+          value: override,
+          calculatedCost: override,
+        });
+      } else {
+        catFields.forEach(field => {
+          const { value, calculatedCost } = calcField(field);
+          breakdown.push({
+            fieldName: field.name,
+            type: field.type,
+            calculationType: field.calculationType,
+            value,
+            calculatedCost,
+          });
+        });
+      }
+    }
 
     if (adCost !== undefined && adCost > 0) {
       breakdown.push({
@@ -1902,7 +1941,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
               })()}
             </div>
             <div className={styles['stat-subtext']}>
-              {cogsConfig.length > 0 ? 'Delivered, failed & prepaid orders + ad-spend-only days' : 'Configure COGS to calculate'}
+              {cogsVersions.length > 0 ? 'Delivered, failed & prepaid orders + ad-spend-only days' : 'Configure COGS to calculate'}
             </div>
           </div>
 

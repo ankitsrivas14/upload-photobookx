@@ -34,7 +34,7 @@ router.get('/configuration', requireAdmin, async (req, res) => {
       config = doc.toObject();
     }
 
-    res.json({ fields: (config as any).fields });
+    res.json({ fields: (config as any).fields, totalOverrides: (config as any).totalOverrides ?? {} });
   } catch (error) {
     console.error('Error fetching COGS configuration:', error);
     res.status(500).json({ error: 'Failed to fetch COGS configuration' });
