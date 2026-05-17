@@ -84,8 +84,8 @@ export function DashboardPage() {
   const [shippingGranularity, setShippingGranularity] = useState<'day' | 'week' | 'month'>('day');
   const [activeShippingLines, setActiveShippingLines] = useState({
     all: true,
-    small: true,
-    large: true,
+    small: false,
+    large: false,
   });
 
 
@@ -1513,11 +1513,19 @@ export function DashboardPage() {
         let shippingData: ChartPoint[];
 
         if (shippingGranularity === 'day') {
-          shippingData = dailyPoints.map((d) => ({
+          // 7-day centred rolling average to smooth out daily volatility
+          const rollingAvg = (arr: (number | null)[], i: number, half = 3): number | null => {
+            const window = arr.slice(Math.max(0, i - half), i + half + 1).filter((v): v is number => v !== null);
+            return window.length > 0 ? window.reduce((s, v) => s + v, 0) / window.length : null;
+          };
+          const allVal   = dailyPoints.map((d) => d.avgShipping);
+          const smallVal = dailyPoints.map((d) => d.avgShippingSmall);
+          const largeVal = dailyPoints.map((d) => d.avgShippingLarge);
+          shippingData = dailyPoints.map((d, i) => ({
             date: d.date,
-            avgShipping: d.avgShipping,
-            avgShippingSmall: d.avgShippingSmall,
-            avgShippingLarge: d.avgShippingLarge,
+            avgShipping:      rollingAvg(allVal,   i),
+            avgShippingSmall: rollingAvg(smallVal, i),
+            avgShippingLarge: rollingAvg(largeVal, i),
           }));
         } else if (shippingGranularity === 'week') {
           // Group by Mon–Sun week
@@ -1568,6 +1576,22 @@ export function DashboardPage() {
 
         const toggleLine = (key: 'all' | 'small' | 'large') =>
           setActiveShippingLines((prev) => ({ ...prev, [key]: !prev[key] }));
+
+        // Average of the primary visible line (All > Small > Large)
+        const shippingAvgKey = activeShippingLines.all ? 'avgShipping' : activeShippingLines.small ? 'avgShippingSmall' : 'avgShippingLarge';
+        const shippingAvgValues = shippingData.map((d) => (d as any)[shippingAvgKey]).filter((v: unknown): v is number => v !== null && v !== undefined);
+        const shippingAvg = shippingAvgValues.length ? shippingAvgValues.reduce((s: number, v: number) => s + v, 0) / shippingAvgValues.length : null;
+
+        // Build ₹30-interval ticks from the visible data range
+        const shippingValues = shippingData.flatMap((d) => [
+          activeShippingLines.all   ? (d.avgShipping      ?? null) : null,
+          activeShippingLines.small ? (d.avgShippingSmall ?? null) : null,
+          activeShippingLines.large ? (d.avgShippingLarge ?? null) : null,
+        ]).filter((v): v is number => v !== null);
+        const shippingTickMin = shippingValues.length ? Math.floor(Math.min(...shippingValues) / 30) * 30 : 0;
+        const shippingTickMax = shippingValues.length ? Math.ceil(Math.max(...shippingValues)  / 30) * 30 : 120;
+        const shippingTicks: number[] = [];
+        for (let t = shippingTickMin; t <= shippingTickMax; t += 30) shippingTicks.push(t);
 
         const granularityBtns: { label: string; value: 'day' | 'week' | 'month' }[] = [
           { label: 'Day',   value: 'day'   },
@@ -1653,7 +1677,9 @@ export function DashboardPage() {
                     axisLine={false}
                     width={56}
                     tickFormatter={(v) => `₹${v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v}`}
-                    domain={[0, 'auto']}
+                    ticks={shippingTicks}
+                    domain={[shippingTickMin, shippingTickMax]}
+
                   />
                   <Tooltip
                     contentStyle={{ border: 'none', borderRadius: 8, boxShadow: '0 4px 12px rgba(0,0,0,0.08)', padding: '10px 14px' }}
@@ -1680,6 +1706,15 @@ export function DashboardPage() {
                         connectNulls={false}
                       />
                     ) : null
+                  )}
+                  {shippingAvg !== null && (
+                    <ReferenceLine
+                      y={shippingAvg}
+                      stroke="#94a3b8"
+                      strokeDasharray="4 4"
+                      strokeWidth={1.5}
+                      label={{ value: `Avg ₹${shippingAvg.toFixed(0)}`, position: 'insideTopRight', fontSize: 11, fill: '#94a3b8', dy: -6 }}
+                    />
                   )}
                 </LineChart>
               </ResponsiveContainer>
