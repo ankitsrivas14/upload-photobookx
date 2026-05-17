@@ -57,7 +57,7 @@ router.get('/configuration/versions', requireAdmin, async (req, res) => {
 // Create a new version — effectiveFrom is required
 router.post('/configuration', requireAdmin, async (req, res) => {
   try {
-    const { fields, effectiveFrom } = req.body;
+    const { fields, effectiveFrom, totalOverrides } = req.body;
 
     if (!effectiveFrom) {
       return res.status(400).json({ error: 'effectiveFrom date is required' });
@@ -69,6 +69,7 @@ router.post('/configuration', requireAdmin, async (req, res) => {
     const config = new COGSConfiguration({
       fields,
       effectiveFrom: new Date(effectiveFrom),
+      totalOverrides: totalOverrides ?? {},
     });
     await config.save();
 
@@ -85,7 +86,7 @@ router.post('/configuration', requireAdmin, async (req, res) => {
 // Update an existing version (fields and/or effectiveFrom)
 router.put('/configuration/:id', requireAdmin, async (req, res) => {
   try {
-    const { fields, effectiveFrom } = req.body;
+    const { fields, effectiveFrom, totalOverrides } = req.body;
     const update: Record<string, any> = { updatedAt: new Date() };
 
     if (fields !== undefined) {
@@ -96,6 +97,10 @@ router.put('/configuration/:id', requireAdmin, async (req, res) => {
 
     if (effectiveFrom !== undefined) {
       update.effectiveFrom = new Date(effectiveFrom);
+    }
+
+    if (totalOverrides !== undefined) {
+      update.totalOverrides = totalOverrides;
     }
 
     const updated = await COGSConfiguration.findByIdAndUpdate(
