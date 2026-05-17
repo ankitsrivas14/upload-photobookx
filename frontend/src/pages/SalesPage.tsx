@@ -350,69 +350,6 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       ]);
 
       if (ordersResponse.success && ordersResponse.orders) {
-        console.log(`Loaded ${ordersResponse.orders.length} orders from API`);
-
-        // Debug: Check date range of fetched orders
-        if (ordersResponse.orders.length > 0) {
-          const dates = ordersResponse.orders.map(o => new Date(o.createdAt).toISOString().split('T')[0]);
-          const uniqueDates = [...new Set(dates)].sort();
-          console.log(`Frontend: Order dates range: ${uniqueDates[0]} to ${uniqueDates[uniqueDates.length - 1]}`);
-
-          // Count orders per date
-          const dateCounts: Record<string, number> = {};
-          dates.forEach(d => {
-            dateCounts[d] = (dateCounts[d] || 0) + 1;
-          });
-          console.log('Frontend: Orders per date:', dateCounts);
-        }
-
-        // Debug: Log delivery statuses to understand what we're getting
-        const deliveryStatusCounts: Record<string, number> = {};
-        const fulfillmentStatusCounts: Record<string, number> = {};
-        let unfulfilledCount = 0;
-        let deliveredCount = 0;
-        let failedCount = 0;
-
-        let cancelledCount = 0;
-
-        ordersResponse.orders.forEach(order => {
-          // Skip cancelled orders in categorization
-          if (order.cancelledAt) {
-            cancelledCount++;
-            return;
-          }
-
-          const deliveryStatus = order.deliveryStatus || 'no_delivery_status';
-          const fulfillmentStatus = order.fulfillmentStatus || 'no_fulfillment_status';
-
-          deliveryStatusCounts[deliveryStatus] = (deliveryStatusCounts[deliveryStatus] || 0) + 1;
-          fulfillmentStatusCounts[fulfillmentStatus] = (fulfillmentStatusCounts[fulfillmentStatus] || 0) + 1;
-
-          // Categorize
-          const deliveryStatusLower = order.deliveryStatus?.toLowerCase() || '';
-          const fulfillmentStatusLower = order.fulfillmentStatus?.toLowerCase() || '';
-
-          if (deliveryStatusLower === 'delivered') {
-            deliveredCount++;
-          } else if (deliveryStatusLower === 'failure') {
-            failedCount++;
-          } else if (!fulfillmentStatusLower || fulfillmentStatusLower === '' || fulfillmentStatusLower === 'unfulfilled') {
-            unfulfilledCount++;
-          }
-        });
-
-        console.log('Delivery status breakdown:', deliveryStatusCounts);
-        console.log('Fulfillment status breakdown:', fulfillmentStatusCounts);
-        console.log('Filter categories:', {
-          unfulfilled: unfulfilledCount,
-          delivered: deliveredCount,
-          failed: failedCount,
-          cancelled: cancelledCount,
-          other: ordersResponse.orders.length - unfulfilledCount - deliveredCount - failedCount - cancelledCount
-        });
-
-        // Orders already include shipping breakdown from AWB data
-        // (Wallet transactions API not available for this account)
         setOrders(ordersResponse.orders);
         if (ordersResponse.availableMonths) {
           setAvailableMonthsList(ordersResponse.availableMonths);
@@ -458,8 +395,6 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
         const count = orderCountByDate[d] || 0;
         if (count > 0) adCostPerOrder[d] = adSpendByDate[d] / count;
       });
-      console.log('Ad spend by date:', adSpendByDate);
-      console.log('Order count by date:', orderCountByDate);
       setAdCostPerOrderByDate(adCostPerOrder);
       setAdSpendByDate(adSpendByDate);
     } catch (err) {
@@ -532,7 +467,6 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
         // Count breakdown for display
         const totalOrders = response.orders.length;
         const fulfilledOrders = response.orders.filter((o: any) => o.fulfillmentStatus && o.fulfillmentStatus !== 'unfulfilled').length;
-        console.log(`Refresh: Total: ${totalOrders}, Fulfilled: ${fulfilledOrders}, Sync needed: ${orderNumbersToSync.length}`);
 
         if (orderNumbersToSync.length === 0) {
           setRefreshStatus(`All ${fulfilledOrders} deliveries up to date!`);
@@ -792,21 +726,6 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
         orders,
         adSpend: adSpendByDate[dateKey] ?? 0,
       }));
-
-    // Debug logging
-    console.log('Orders grouped by date:', grouped.map(g => ({ date: g.dateKey, orderCount: g.orders.length, adSpend: g.adSpend })));
-    console.log('Total ordersForStats:', ordersForStats.length);
-    console.log('Filtered orders:', filteredOrders.length);
-
-    // Log ordersForStats date breakdown
-    if (ordersForStats.length > 0) {
-      const statsDateCounts: Record<string, number> = {};
-      ordersForStats.forEach(o => {
-        const d = getOrderDateKey(o.createdAt);
-        statsDateCounts[d] = (statsDateCounts[d] || 0) + 1;
-      });
-      console.log('OrdersForStats by date (after month filter):', statsDateCounts);
-    }
 
     return grouped;
   })();
