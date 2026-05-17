@@ -439,15 +439,14 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
         const paymentGateways = order.payment_gateway_names?.map(g => g.toLowerCase()) || [];
         const tags = order.tags?.toLowerCase() || '';
 
-        // Check if it's COD (Only if it's not already paid)
+        // Check if it's COD based on gateway/tags — ignore financial_status because
+        // Shopify marks COD orders as 'paid' once cash is collected on delivery,
+        // which would otherwise cause delivered COD orders to be misclassified as Prepaid.
         if (
-          order.financial_status !== 'paid' &&
-          (
-            gateway.includes('cash on delivery') ||
-            gateway.includes('cod') ||
-            paymentGateways.some(g => g.includes('cash on delivery') || g.includes('cod')) ||
-            tags.includes('cod')
-          )
+          gateway.includes('cash on delivery') ||
+          gateway.includes('cod') ||
+          paymentGateways.some(g => g.includes('cash on delivery') || g.includes('cod')) ||
+          tags.includes('cod')
         ) {
           paymentMethod = 'COD';
         }

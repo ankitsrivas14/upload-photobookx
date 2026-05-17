@@ -730,7 +730,7 @@ export function DashboardPage() {
         }
       }
 
-      // Chart 3: COD Delivered vs Failed (Final status only)
+      // Chart 3: COD — terminal orders only (Delivered or Failed)
       if (paymentMethod === 'cod') {
         if (status === 'delivered') codDeliveredCount++;
         else if (isFailed) codFailedCount++;
@@ -750,10 +750,11 @@ export function DashboardPage() {
         { name: 'Confirmed', value: confirmedCount, color: '#64748b' }, // Slate
         { name: 'Failed', value: failedCount, color: '#ef4444' },     // Red
       ].filter(item => item.value > 0), // Filter out zero values to keep chart clean
+      codTotal: codDeliveredCount + codFailedCount,
       codStatus: [
         { name: 'Delivered', value: codDeliveredCount, color: '#10b981' },
-        { name: 'Failed', value: codFailedCount, color: '#ef4444' },
-      ],
+        { name: 'Failed',    value: codFailedCount,    color: '#ef4444' },
+      ].filter(item => item.value > 0),
       totalOrders: prepaidCount + codCount,
     };
   })();
@@ -1404,15 +1405,16 @@ export function DashboardPage() {
                   wrapperStyle={{ cursor: 'pointer' }}
                   formatter={(value, entry: any) => {
                     const { payload } = entry;
-                    const total = pieChartsData.codStatus.reduce((acc: number, curr: any) => acc + curr.value, 0);
-                    const percentage = total > 0 ? ((payload.value / total) * 100).toFixed(0) : 0;
+                    if (payload.name === 'In Progress') return null;
+                    const total = pieChartsData.codTotal || 1;
+                    const percentage = ((payload.value / total) * 100).toFixed(0);
                     return <span className={styles.chartLegendText}>{value}: {payload.value} ({percentage}%)</span>;
                   }}
                 />
                 <text x="50%" y={110} textAnchor="middle" dominantBaseline="middle" style={{ fontFamily: 'Inter, sans-serif' }}>
                   {(() => {
                     const failed = pieChartsData.codStatus.find(i => i.name === 'Failed')?.value || 0;
-                    const total = pieChartsData.codStatus.reduce((a, b: any) => a + b.value, 0) || 1;
+                    const total = pieChartsData.codTotal || 1;
                     const pct = ((failed / total) * 100).toFixed(0);
                     return (
                       <>
