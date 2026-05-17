@@ -66,9 +66,27 @@ async function loadAdSpendByDate(): Promise<Map<string, number>> {
   return map;
 }
 
-async function loadCogsFields(): Promise<any[]> {
-  const config = await COGSConfiguration.findOne().lean();
-  return (config as any)?.fields ?? [];
+interface CogsVersion {
+  effectiveFrom: string; // YYYY-MM-DD
+  fields: any[];
+}
+
+async function loadCogsVersions(): Promise<CogsVersion[]> {
+  const docs = await COGSConfiguration.find().sort({ effectiveFrom: 1 }).lean();
+  return (docs as any[]).map((d) => ({
+    effectiveFrom: toDateKey(new Date(d.effectiveFrom)),
+    fields: d.fields ?? [],
+  }));
+}
+
+function getCogsFieldsForDate(dateKey: string, versions: CogsVersion[]): any[] {
+  // Versions sorted oldest-first; walk forward and keep updating until effectiveFrom > dateKey
+  let fields: any[] = [];
+  for (const v of versions) {
+    if (v.effectiveFrom <= dateKey) fields = v.fields;
+    else break;
+  }
+  return fields;
 }
 
 // ─── per-order helpers ────────────────────────────────────────────────────────
@@ -189,7 +207,7 @@ export async function recomputePnlForDate(
   rtoSet?: Set<number>,
   shippingMap?: Map<string, number>,
   adSpendByDate?: Map<string, number>,
-  cogsFields?: any[]
+  cogsVersions?: CogsVersion[]
 ): Promise<void> {
   const orders = ordersByDate
     ? (ordersByDate.get(dateKey) ?? [])
@@ -198,7 +216,8 @@ export async function recomputePnlForDate(
   const rto = rtoSet ?? (await loadRtoSet());
   const shipMap = shippingMap ?? (await loadShippingMap());
   const adSpendMap = adSpendByDate ?? (await loadAdSpendByDate());
-  const cogs = cogsFields ?? (await loadCogsFields());
+  const versions = cogsVersions ?? (await loadCogsVersions());
+  const cogs = getCogsFieldsForDate(dateKey, versions);
 
   const adSpend = adSpendMap.get(dateKey) ?? 0;
   const orderCount = orders.length;
@@ -250,12 +269,12 @@ export async function recomputePnlForDate(
 }
 
 export async function backfillDailyPnl(): Promise<{ upserted: number }> {
-  const [ordersByDate, rtoSet, shippingMap, adSpendByDate, cogsFields] = await Promise.all([
+  const [ordersByDate, rtoSet, shippingMap, adSpendByDate, cogsVersions] = await Promise.all([
     loadOrdersByDate(),
     loadRtoSet(),
     loadShippingMap(),
     loadAdSpendByDate(),
-    loadCogsFields(),
+    loadCogsVersions(),
   ]);
 
   // Include both order dates and ad-spend dates
@@ -263,7 +282,7 @@ export async function backfillDailyPnl(): Promise<{ upserted: number }> {
 
   let upserted = 0;
   for (const dateKey of allDates) {
-    await recomputePnlForDate(dateKey, ordersByDate, rtoSet, shippingMap, adSpendByDate, cogsFields);
+    await recomputePnlForDate(dateKey, ordersByDate, rtoSet, shippingMap, adSpendByDate, cogsVersions);
     upserted++;
   }
 

@@ -18,11 +18,12 @@ const COGSFieldSchema = new mongoose.Schema({
 
 const COGSConfigurationSchema = new mongoose.Schema({
   fields: [COGSFieldSchema],
+  // Applies to all orders on/after this date. Migration default: start of time.
+  effectiveFrom: { type: Date, required: true, default: new Date('2000-01-01') },
   updatedAt: { type: Date, default: Date.now },
   createdAt: { type: Date, default: Date.now },
 });
 
-// We'll only keep one configuration document
 COGSConfigurationSchema.pre('save', function() {
   this.updatedAt = new Date();
 });

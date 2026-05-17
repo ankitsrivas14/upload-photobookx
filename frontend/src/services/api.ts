@@ -28,6 +28,14 @@ interface COGSConfiguration {
   fields: COGSField[];
 }
 
+export interface COGSVersion {
+  _id: string;
+  fields: COGSField[];
+  effectiveFrom: string; // ISO date string
+  createdAt: string;
+  updatedAt: string;
+}
+
 interface LoginResponse {
   success: boolean;
   token?: string;
@@ -785,7 +793,7 @@ class ApiService {
     return response.json();
   }
 
-  async saveCOGSConfiguration(config: COGSConfiguration): Promise<{ success: boolean; message?: string }> {
+  async saveCOGSConfiguration(config: COGSConfiguration & { effectiveFrom: string }): Promise<{ success: boolean; message?: string; version?: COGSVersion }> {
     const token = localStorage.getItem('adminToken');
     const response = await fetch(`${this.baseUrl}/api/admin/cogs/configuration`, {
       method: 'POST',
@@ -797,7 +805,46 @@ class ApiService {
     });
 
     if (!response.ok) {
-      throw new Error('Failed to save COGS configuration');
+      const err = await response.json().catch(() => ({}));
+      throw new Error((err as any).error || 'Failed to save COGS configuration');
+    }
+
+    return response.json();
+  }
+
+  async getCOGSVersions(): Promise<{ success: boolean; versions: COGSVersion[] }> {
+    return this.request('/api/admin/cogs/configuration/versions');
+  }
+
+  async updateCOGSVersion(id: string, update: { fields?: COGSField[]; effectiveFrom?: string }): Promise<{ success: boolean; version?: COGSVersion }> {
+    const token = localStorage.getItem('adminToken');
+    const response = await fetch(`${this.baseUrl}/api/admin/cogs/configuration/${id}`, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(update),
+    });
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error((err as any).error || 'Failed to update COGS version');
+    }
+
+    return response.json();
+  }
+
+  async deleteCOGSVersion(id: string): Promise<{ success: boolean }> {
+    const token = localStorage.getItem('adminToken');
+    const response = await fetch(`${this.baseUrl}/api/admin/cogs/configuration/${id}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error((err as any).error || 'Failed to delete COGS version');
     }
 
     return response.json();
