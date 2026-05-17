@@ -56,6 +56,9 @@ export function DashboardPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
+  const [roasDays, setRoasDays] = useState(30);
+  const [roasStartDate, setRoasStartDate] = useState('');
+  const [roasEndDate, setRoasEndDate] = useState('');
   const [dailyPnlMap, setDailyPnlMap] = useState<Record<string, number>>({});
   const [orders, setOrders] = useState<ShopifyOrder[]>([]);
 
@@ -285,7 +288,7 @@ export function DashboardPage() {
     return 0;
   };
 
-  // ROAS (Return on Ad Spend) for last 30 days
+  // ROAS chart data — reactive to roasDays / roasStartDate / roasEndDate
   const roasChartData = (() => {
     const now = new Date();
     const data: Array<{ date: string; dateKey: string; roas: number | null; revenue: number; adSpend: number; profit: number }> = [];
@@ -298,25 +301,29 @@ export function DashboardPage() {
       revenueByDate[dateKey] = (revenueByDate[dateKey] || 0) + (o.totalPrice || 0);
     });
 
-    // Build daily profit from dailyPnlMap (which already includes all costs)
     const profitByDate: Record<string, number> = dailyPnlMap;
 
-    // Generate last 30 days
-    for (let i = 29; i >= 0; i--) {
-      const date = new Date(now);
-      date.setDate(date.getDate() - i);
+    let start: Date;
+    let end: Date;
 
-      // Skip data before Jan 28, 2026
-      if (date < new Date('2026-01-28')) continue;
+    if (roasStartDate && roasEndDate) {
+      start = new Date(roasStartDate);
+      end = new Date(roasEndDate);
+    } else {
+      end = new Date(now);
+      start = new Date(now);
+      start.setDate(start.getDate() - (roasDays - 1));
+    }
 
-      const dateKey = date.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      if (d < new Date('2026-01-28')) continue;
+      const dateKey = d.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
       const revenue = revenueByDate[dateKey] || 0;
       const adSpend = adSpendByDate[dateKey] || 0;
       const profit = profitByDate[dateKey] || 0;
       const roas = adSpend > 0 ? revenue / adSpend : null;
-
       data.push({
-        date: date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: STORE_TIMEZONE }),
+        date: new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: STORE_TIMEZONE }),
         dateKey,
         roas,
         revenue,
@@ -917,10 +924,63 @@ export function DashboardPage() {
 
 
       <section className={styles.section}>
-        <h2 className={styles['section-title']}>ROAS — Last 30 Days</h2>
-        <p className={styles['section-desc']}>
-          Return on Ad Spend (ROAS) = Total Revenue ÷ Ad Spend for each day. Higher is better.
-        </p>
+        <div className={styles['roas-header']}>
+          <div>
+            <h2 className={styles['section-title']}>
+              ROAS —{' '}
+              {roasStartDate && roasEndDate
+                ? `${new Date(roasStartDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} – ${new Date(roasEndDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`
+                : `Last ${roasDays} Days`}
+            </h2>
+            <p className={styles['section-desc']}>
+              Return on Ad Spend (ROAS) = Total Revenue ÷ Ad Spend for each day. Higher is better.
+            </p>
+          </div>
+          <div className={styles['roas-controls']}>
+            <div className={styles['roas-control-group']}>
+              <label className={styles['roas-control-label']}>Last N days</label>
+              <input
+                type="number"
+                min={1}
+                max={365}
+                className={styles['roas-days-input']}
+                value={roasDays}
+                onChange={(e) => {
+                  setRoasDays(Math.max(1, Number(e.target.value)));
+                  setRoasStartDate('');
+                  setRoasEndDate('');
+                }}
+              />
+            </div>
+            <span className={styles['roas-divider']}>or</span>
+            <div className={styles['roas-control-group']}>
+              <label className={styles['roas-control-label']}>From</label>
+              <input
+                type="date"
+                className={styles['roas-date-input']}
+                value={roasStartDate}
+                onChange={(e) => setRoasStartDate(e.target.value)}
+              />
+            </div>
+            <div className={styles['roas-control-group']}>
+              <label className={styles['roas-control-label']}>To</label>
+              <input
+                type="date"
+                className={styles['roas-date-input']}
+                value={roasEndDate}
+                onChange={(e) => setRoasEndDate(e.target.value)}
+              />
+            </div>
+            {(roasStartDate || roasEndDate) && (
+              <button
+                className={styles['roas-clear-btn']}
+                onClick={() => { setRoasStartDate(''); setRoasEndDate(''); }}
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        </div>
         <div className={styles.chartWrap}>
           <ResponsiveContainer width="100%" height={280}>
             <LineChart
@@ -1100,7 +1160,7 @@ export function DashboardPage() {
           color: 'var(--chart-muted)'
         }}>
           <div style={{ fontWeight: 600, marginBottom: '0.5rem', color: '#1f2937' }}>
-            Breakeven Analysis (based on {breakevenMetrics.completedDaysCount} completed days in last 30 days):
+            Breakeven Analysis (based on {breakevenMetrics.completedDaysCount} completed days in view):
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem' }}>
             <div>

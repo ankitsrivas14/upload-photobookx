@@ -362,6 +362,80 @@
   padding: 1rem;
 }
 
+.roas-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 0.25rem;
+}
+
+.roas-controls {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.roas-control-group {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.roas-control-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: #64748b;
+  letter-spacing: 0.025em;
+}
+
+.roas-days-input {
+  width: 72px;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  background: #f8fafc;
+  font-weight: 500;
+  color: #0f172a;
+}
+
+.roas-date-input {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: 0.8125rem;
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+.roas-divider {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  font-weight: 500;
+  padding-bottom: 0.4rem;
+}
+
+.roas-clear-btn {
+  padding: 0.4rem 0.75rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: 0.8125rem;
+  background: white;
+  color: #64748b;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.15s;
+}
+
+.roas-clear-btn:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
 .chartLegendText {
   font-size: 11px;
   font-weight: 500;
