@@ -4,6 +4,7 @@ import { api } from '../services/api';
 import type { AdminUser } from '../services/api';
 import { MetaAdsPage } from './MetaAdsPage';
 import { COGSPage } from './COGSPage';
+import { FixedMonthlyPage } from './FixedMonthlyPage';
 import { BankAccountPage } from './BankAccountPage';
 import styles from './ExpensesPage.module.css';
 
@@ -18,6 +19,7 @@ export function ExpensesPage() {
   const isMetaAds = currentPath === '/admin/expenses/meta-ads';
 
   const isCOGS = currentPath === '/admin/expenses/cogs';
+  const isFixedMonthly = currentPath === '/admin/expenses/fixed-monthly';
   const isBankAccount = currentPath === '/admin/expenses/bank-account';
 
   useEffect(() => {
@@ -112,6 +114,14 @@ export function ExpensesPage() {
           >
             COGS
           </Link>
+
+          <Link
+            to="/admin/expenses/fixed-monthly"
+            className={`${styles['expenses-nav-item']} ${isFixedMonthly ? styles.active : ''}`}
+          >
+            Fixed Monthly
+          </Link>
+
           <Link
             to="/admin/expenses/bank-account"
             className={`${styles['expenses-nav-item']} ${isBankAccount ? styles.active : ''}`}
@@ -125,6 +135,7 @@ export function ExpensesPage() {
           <Route path="meta-ads" element={<MetaAdsPage />} />
 
           <Route path="cogs" element={<COGSPage />} />
+          <Route path="fixed-monthly" element={<FixedMonthlyPage />} />
           <Route path="bank-account" element={<BankAccountPage />} />
         </Routes>
       </main>

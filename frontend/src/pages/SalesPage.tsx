@@ -189,6 +189,9 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
   // Per-order P/L cache (orderId -> profit/loss)
   const [orderProfitLoss, setOrderProfitLoss] = useState<Map<number, number>>(new Map());
 
+  // Fixed monthly expenses total for the selected month (deducted from Total P/L)
+  const [fixedMonthlyTotal, setFixedMonthlyTotal] = useState(0);
+
   // Ad spend by date (YYYY-MM-DD -> total amount). Used to show "Ad spend" in day header row.
   const [adSpendByDate, setAdSpendByDate] = useState<Record<string, number>>({});
 
@@ -369,6 +372,26 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
     if (selectedMonthFilter !== 'all') {
       fetchCurrentPrediction();
     }
+  }, [selectedMonthFilter]);
+
+  // Fetch fixed monthly expenses total whenever the selected month changes
+  useEffect(() => {
+    const getMonthKey = () => {
+      if (selectedMonthFilter === 'all' || selectedMonthFilter === 'last30') return null;
+      if (selectedMonthFilter === 'current') {
+        return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }).slice(0, 7);
+      }
+      return selectedMonthFilter; // already YYYY-MM
+    };
+    const monthKey = getMonthKey();
+    if (!monthKey) { setFixedMonthlyTotal(0); return; }
+    api.getFixedMonthlyExpenses(monthKey)
+      .then(res => {
+        if (res.success) {
+          setFixedMonthlyTotal(res.entries.reduce((sum, e) => sum + e.amount, 0));
+        }
+      })
+      .catch(() => setFixedMonthlyTotal(0));
   }, [selectedMonthFilter]);
 
   const handleRefresh = async () => {
@@ -984,6 +1007,9 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       if (!datesWithOrders.has(dateKey)) currentPL -= amount;
     });
 
+    // Deduct fixed monthly expenses
+    currentPL -= fixedMonthlyTotal;
+
     // Count pending orders (not yet delivered/failed, EXCLUDING prepaid which are already counted)
     const pendingOrders = ordersForStats.filter(o => {
       const deliveryStatus = o.deliveryStatus?.toLowerCase() || '';
@@ -1097,7 +1123,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
     };
     return calculateExpectedProfit();
   }, [ordersForStats, orders, selectedMonthFilter, rtoOrderIds, discardedOrderIds,
-      orderProfitLoss, adSpendByDate, globalNdrRate]);
+      orderProfitLoss, adSpendByDate, globalNdrRate, fixedMonthlyTotal]);
 
   const handleDiscardOrders = async () => {
     if (selectedOrders.size === 0) return;
@@ -1899,7 +1925,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
 
           <div className={styles['stat-card']}>
             <div className={styles['stat-label']}>Total P/L</div>
-            <div className={`${styles['stat-value']} ${(() => {
+            {(() => {
               const ordersCountedInPnl = ordersForStats.filter(o => {
                 const deliveryStatus = o.deliveryStatus?.toLowerCase() || '';
                 const isDelivered = deliveryStatus === 'delivered';
@@ -1917,32 +1943,22 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
                 if (!isDateInSelectedMonth(dateKey)) return;
                 if (!datesWithOrders.has(dateKey)) totalPL -= amount;
               });
-              return totalPL > 0 ? styles.profit : totalPL < 0 ? styles.loss : '';
-            })()}`}>
-              {(() => {
-                const ordersCountedInPnl = ordersForStats.filter(o => {
-                  const deliveryStatus = o.deliveryStatus?.toLowerCase() || '';
-                  const isDelivered = deliveryStatus === 'delivered';
-                  const isFailed = rtoOrderIds.has(o.id) ||
-                    deliveryStatus === 'failure' ||
-                    deliveryStatus.includes('failed') ||
-                    deliveryStatus.includes('rto');
-                  return isDelivered || isFailed || (o.paymentMethod?.toLowerCase() === 'prepaid');
-                });
-                let totalPL = Array.from(orderProfitLoss.entries())
-                  .filter(([orderId]) => ordersCountedInPnl.some(o => o.id === orderId))
-                  .reduce((sum, [, pl]) => sum + pl, 0);
-                const datesWithOrders = new Set(ordersForStats.map(o => getOrderDateKey(o.createdAt)));
-                Object.entries(adSpendByDate).forEach(([dateKey, amount]) => {
-                  if (!isDateInSelectedMonth(dateKey)) return;
-                  if (!datesWithOrders.has(dateKey)) totalPL -= amount;
-                });
-                return `${totalPL > 0 ? '+' : ''}₹${formatIndianNumber(totalPL, 0)}`;
-              })()}
-            </div>
-            <div className={styles['stat-subtext']}>
-              {cogsVersions.length > 0 ? 'Delivered, failed & prepaid orders + ad-spend-only days' : 'Configure COGS to calculate'}
-            </div>
+              totalPL -= fixedMonthlyTotal;
+              return (
+                <>
+                  <div className={`${styles['stat-value']} ${totalPL > 0 ? styles.profit : totalPL < 0 ? styles.loss : ''}`}>
+                    {`${totalPL > 0 ? '+' : ''}₹${formatIndianNumber(totalPL, 0)}`}
+                  </div>
+                  <div className={styles['stat-subtext']}>
+                    {cogsVersions.length > 0
+                      ? fixedMonthlyTotal > 0
+                        ? `Incl. ₹${formatIndianNumber(fixedMonthlyTotal, 0)} fixed expenses`
+                        : 'Delivered, failed & prepaid orders + ad-spend-only days'
+                      : 'Configure COGS to calculate'}
+                  </div>
+                </>
+              );
+            })()}
           </div>
 
           {expectedProfit && (

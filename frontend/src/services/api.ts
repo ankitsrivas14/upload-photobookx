@@ -859,6 +859,30 @@ class ApiService {
     return response.json();
   }
 
+  // Fixed Monthly Expenses
+  async getFixedMonthlyExpenses(month?: string): Promise<{ success: boolean; entries: { _id: string; month: string; label: string; amount: number }[] }> {
+    const qs = month ? `?month=${month}` : '';
+    return this.request(`/api/admin/fixed-monthly-expenses${qs}`);
+  }
+
+  async createFixedMonthlyExpense(data: { month: string; label: string; amount: number }): Promise<{ success: boolean; entry: { _id: string; month: string; label: string; amount: number } }> {
+    return this.request('/api/admin/fixed-monthly-expenses', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateFixedMonthlyExpense(id: string, data: Partial<{ month: string; label: string; amount: number }>): Promise<{ success: boolean; entry: { _id: string; month: string; label: string; amount: number } }> {
+    return this.request(`/api/admin/fixed-monthly-expenses/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteFixedMonthlyExpense(id: string): Promise<{ success: boolean }> {
+    return this.request(`/api/admin/fixed-monthly-expenses/${id}`, { method: 'DELETE' });
+  }
+
   // Bank Account
   async getBankCategories(): Promise<{ success: boolean; categories: { name: string; tags: string[] }[]; error?: string }> {
     return this.request('/api/admin/bank-account/categories');

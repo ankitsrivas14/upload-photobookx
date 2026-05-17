@@ -30,3 +30,4 @@ export { DailyROAS, IDailyROAS } from './DailyROAS';
 export { DailyShipping, IDailyShipping } from './DailyShipping';
 export { DailyOrderStats, IDailyOrderStats } from './DailyOrderStats';
 export { DailyPnl, IDailyPnl } from './DailyPnl';
+export { FixedMonthlyExpense, IFixedMonthlyExpense } from './FixedMonthlyExpense';
