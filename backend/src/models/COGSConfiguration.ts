@@ -3,6 +3,8 @@ import mongoose from 'mongoose';
 const COGSFieldSchema = new mongoose.Schema({
   id: { type: String, required: true },
   name: { type: String, required: true },
+  // 'pre' = pre-production costs, 'post' = post-production costs. Default 'pre' for migration.
+  category: { type: String, enum: ['pre', 'post'], default: 'pre' },
   // Support both old and new structure for backwards compatibility
   smallValue: { type: Number, default: 0 }, // Deprecated, kept for migration
   largeValue: { type: Number, default: 0 }, // Deprecated, kept for migration

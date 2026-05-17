@@ -11,6 +11,7 @@ interface AdminUser {
 interface COGSField {
   id: string;
   name: string;
+  category: 'pre' | 'post';
   // Old structure (deprecated, kept for backwards compatibility)
   smallValue?: number;
   largeValue?: number;
@@ -21,7 +22,7 @@ interface COGSField {
   largeCODValue: number;
   type: 'cogs' | 'ndr' | 'both';
   calculationType: 'fixed' | 'percentage';
-  percentageType: 'included' | 'excluded'; // For percentage: included (part of total) or excluded (added on top)
+  percentageType: 'included' | 'excluded';
 }
 
 interface COGSConfiguration {

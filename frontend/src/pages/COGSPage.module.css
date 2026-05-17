@@ -283,6 +283,79 @@
   to { transform: rotate(360deg); }
 }
 
+/* Cost Table Section */
+.cost-table-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.cost-table-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.cost-table-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #0f172a;
+  margin: 0 0 0.25rem;
+}
+
+.cost-table-subtitle {
+  font-size: 0.8125rem;
+  color: #64748b;
+  margin: 0;
+}
+
+/* Grand Total */
+.grand-total-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem;
+  background: #f0fdff;
+  border: 1px solid #b2e4ee;
+  border-radius: 8px;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.grand-total-label {
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: #0e7490;
+  white-space: nowrap;
+}
+
+.grand-total-values {
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.grand-total-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.125rem;
+}
+
+.grand-total-variant {
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.grand-total-amount {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: #0e7490;
+}
+
 /* Version Layout */
 .layout {
   display: grid;
