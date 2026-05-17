@@ -673,6 +673,30 @@ class ApiService {
     return this.request('/api/admin/sales/daily-roas/backfill', { method: 'POST' });
   }
 
+  async getDailyShipping(startDate?: string, endDate?: string): Promise<{
+    success: boolean;
+    records?: Array<{
+      dateKey: string;
+      avgShipping: number | null;
+      avgShippingSmall: number | null;
+      avgShippingLarge: number | null;
+      orderCount: number;
+      smallCount: number;
+      largeCount: number;
+    }>;
+    error?: string;
+  }> {
+    const params = new URLSearchParams();
+    if (startDate) params.set('startDate', startDate);
+    if (endDate) params.set('endDate', endDate);
+    const qs = params.toString();
+    return this.request(`/api/admin/sales/daily-shipping${qs ? `?${qs}` : ''}`);
+  }
+
+  async backfillDailyShipping(): Promise<{ success: boolean; upserted?: number; error?: string }> {
+    return this.request('/api/admin/sales/daily-shipping/backfill', { method: 'POST' });
+  }
+
   // Upload (public - no auth needed)
   async validateUploadToken(token: string): Promise<UploadInfo> {
     return this.request<UploadInfo>(`/api/upload/${token}`);

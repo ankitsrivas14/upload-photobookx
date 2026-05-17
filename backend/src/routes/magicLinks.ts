@@ -13,6 +13,7 @@ import { S3Client, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client
 import { fromInstanceMetadata } from '@aws-sdk/credential-provider-imds';
 import { Ticket } from '../models';
 import archiver from 'archiver';
+import { recomputeShippingForDate, getOrderDateKey as getShippingOrderDateKey, backfillShippingStats } from '../services/shippingStatsService';
 
 const router = Router();
 
@@ -1075,6 +1076,11 @@ router.post('/shiprocket/fetch-shipping-charge', requireAdmin, async (req: Authe
     const ShippingCharge = (await import('../models/ShippingCharge')).default;
     const saved = await ShippingCharge.findOne({ orderNumber });
 
+    // Recompute DailyShipping for the affected date asynchronously
+    getShippingOrderDateKey(orderNumber)
+      .then((dateKey) => { if (dateKey) recomputeShippingForDate(dateKey); })
+      .catch((err) => console.error('DailyShipping recompute error:', err));
+
     res.json({
       success: true,
       shippingCharge,
@@ -1152,6 +1158,9 @@ router.post('/shiprocket/sync-shipping-charges', requireAdmin, async (req: Authe
 
     // Use bulk fetch method (much faster)
     const result = await shiprocketService.bulkFetchShippingCharges(orderNumbers);
+
+    // Recompute DailyShipping for all affected dates asynchronously
+    backfillShippingStats().catch((err) => console.error('DailyShipping bulk recompute error:', err));
 
     res.json({
       success: true,

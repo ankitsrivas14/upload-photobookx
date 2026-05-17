@@ -1,9 +1,10 @@
 import express, { Response } from 'express';
-import { DiscardedOrder, RTOOrder, ProfitPrediction, ShippingCharge, OrderDeliveryDate, ShopifyOrderCache, MetaAdPerformance, MetaAdAnalysis, AcknowledgedOrder, TicketRaisedOrder, DailyROAS } from '../models';
+import { DiscardedOrder, RTOOrder, ProfitPrediction, ShippingCharge, OrderDeliveryDate, ShopifyOrderCache, MetaAdPerformance, MetaAdAnalysis, AcknowledgedOrder, TicketRaisedOrder, DailyROAS, DailyShipping } from '../models';
 import { requireAdmin } from './adminAuth';
 import { AuthenticatedRequest } from '../types';
 import aiService from '../services/aiService';
 import { backfillAllDates } from '../services/roasService';
+import { backfillShippingStats } from '../services/shippingStatsService';
 
 const router = express.Router();
 
@@ -1036,6 +1037,55 @@ router.post('/daily-roas/backfill', requireAdmin, async (_req: AuthenticatedRequ
     res.json({ success: true, ...result });
   } catch (error) {
     console.error('Error backfilling daily ROAS:', error);
+    res.status(500).json({ success: false, error: 'Backfill failed' });
+  }
+});
+
+/**
+ * GET /api/admin/sales/daily-shipping
+ * Fetch stored daily shipping stats. Optional query params: startDate, endDate (YYYY-MM-DD).
+ */
+router.get('/daily-shipping', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
+    const filter: Record<string, any> = {};
+    if (startDate || endDate) {
+      filter.dateKey = {};
+      if (startDate) filter.dateKey.$gte = startDate;
+      if (endDate) filter.dateKey.$lte = endDate;
+    }
+
+    const records = await DailyShipping.find(filter).sort({ dateKey: 1 }).lean();
+
+    res.json({
+      success: true,
+      records: records.map((r: any) => ({
+        dateKey: r.dateKey,
+        avgShipping: r.avgShipping,
+        avgShippingSmall: r.avgShippingSmall,
+        avgShippingLarge: r.avgShippingLarge,
+        orderCount: r.orderCount,
+        smallCount: r.smallCount,
+        largeCount: r.largeCount,
+        updatedAt: r.updatedAt,
+      })),
+    });
+  } catch (error) {
+    console.error('Error fetching daily shipping:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch daily shipping stats' });
+  }
+});
+
+/**
+ * POST /api/admin/sales/daily-shipping/backfill
+ * Recompute and store DailyShipping for all dates with fulfilled order + shipping charge data.
+ */
+router.post('/daily-shipping/backfill', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const result = await backfillShippingStats();
+    res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('Error backfilling daily shipping:', error);
     res.status(500).json({ success: false, error: 'Backfill failed' });
   }
 });

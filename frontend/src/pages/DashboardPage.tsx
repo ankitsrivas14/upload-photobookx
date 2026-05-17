@@ -87,6 +87,12 @@ export function DashboardPage() {
     small: false,
     large: false,
   });
+  const [shippingDbRecords, setShippingDbRecords] = useState<Array<{
+    dateKey: string;
+    avgShipping: number | null;
+    avgShippingSmall: number | null;
+    avgShippingLarge: number | null;
+  }>>([]);
 
 
   useEffect(() => {
@@ -291,13 +297,26 @@ export function DashboardPage() {
     }
   }, []);
 
+  const loadShipping = useCallback(async () => {
+    try {
+      // Fetch all history — widget aggregates client-side by granularity
+      const res = await api.getDailyShipping();
+      if (res.success && res.records) {
+        setShippingDbRecords(res.records);
+      }
+    } catch (err) {
+      console.error('Failed to load shipping data:', err);
+    }
+  }, []);
+
   useEffect(() => {
     if (user) {
       loadDailyPnl();
       loadROAS(roasDays, roasStartDate, roasEndDate);
+      loadShipping();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount
-  }, [user, loadDailyPnl, loadROAS]);
+  }, [user, loadDailyPnl, loadROAS, loadShipping]);
 
   const weekLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S']; // Monday to Sunday
   const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -1412,162 +1431,90 @@ export function DashboardPage() {
 
       {/* ─── Avg Shipping Charge on Fulfilled Orders ─── */}
       {(() => {
+        type DbRecord = { dateKey: string; avgShipping: number | null; avgShippingSmall: number | null; avgShippingLarge: number | null };
+        type ChartPoint = { date: string; dateKey?: string; avgShipping: number | null; avgShippingSmall: number | null; avgShippingLarge: number | null };
+
+        const avgOfNums = (arr: (number | null)[]): number | null => {
+          const valid = arr.filter((v): v is number => v !== null && v > 0);
+          return valid.length ? valid.reduce((s, v) => s + v, 0) / valid.length : null;
+        };
+
+        // Filter to 30-point lookback window
         const now = new Date();
-        // ── Compute lookback window based on granularity (always 30 data points) ──
-        const cutoff = new Date('2026-01-01');
-        const windowStart = new Date(now);
-        if (shippingGranularity === 'day') {
-          windowStart.setDate(windowStart.getDate() - 29);          // 30 days
-        } else if (shippingGranularity === 'week') {
-          windowStart.setDate(windowStart.getDate() - 29 * 7);      // 30 weeks
-        } else {
-          windowStart.setMonth(windowStart.getMonth() - 29);        // 30 months
-          windowStart.setDate(1);                                    // start of that month
-        }
-        const effectiveStart = cutoff > windowStart ? cutoff : windowStart;
-
-        // Classify variant mix
-        const classifyVariant = (o: ShopifyOrder): 'small' | 'large' | 'mixed' => {
-          const items = o.lineItems ?? [];
-          const hasLarge = items.some(
-            (i) => i.title?.toLowerCase().includes('large') || i.variantTitle?.toLowerCase().includes('large')
-          );
-          const hasSmall = items.some(
-            (i) => !i.title?.toLowerCase().includes('large') && !i.variantTitle?.toLowerCase().includes('large')
-          );
-          if (hasLarge && hasSmall) return 'mixed';
-          if (hasLarge) return 'large';
-          return 'small';
-        };
-
-        // Helper: avg shipping of a set of orders
-        const avgOf = (arr: typeof orders): number | null => {
-          const valid = arr.filter((o) => (o.shippingCharge ?? 0) > 0);
-          if (valid.length === 0) return null;
-          return valid.reduce((s, o) => s + (o.shippingCharge ?? 0), 0) / valid.length;
-        };
-
-        // Build ordersByDate once
-        const ordersByDate: Record<string, typeof orders[number][]> = {};
-        orders.forEach((o) => {
-          if (o.cancelledAt) return;
-          const d = getOrderDateKey(o.createdAt);
-          if (!ordersByDate[d]) ordersByDate[d] = [];
-          ordersByDate[d].push(o);
-        });
-
-        // ── Build daily data ──
-        type DayPoint = {
-          date: string;
-          dateKey: string;
-          avgShipping: number | null;
-          avgShippingSmall: number | null;
-          avgShippingLarge: number | null;
-          // raw orders for re-aggregation
-          _fulfilled: typeof orders;
-          _small: typeof orders;
-          _large: typeof orders;
-        };
-
-        const dailyPoints: DayPoint[] = [];
-        const cursor = new Date(effectiveStart);
-        cursor.setHours(0, 0, 0, 0);
         const todayKey = now.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+        const windowStart = new Date(now);
+        if (shippingGranularity === 'day') windowStart.setDate(windowStart.getDate() - 29);
+        else if (shippingGranularity === 'week') windowStart.setDate(windowStart.getDate() - 29 * 7);
+        else { windowStart.setMonth(windowStart.getMonth() - 29); windowStart.setDate(1); }
+        const cutoffKey = '2026-01-01';
+        const windowKey = windowStart.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+        const effectiveStartKey = cutoffKey > windowKey ? cutoffKey : windowKey;
 
-        while (cursor.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE }) <= todayKey) {
-          const dateKey = cursor.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
-          const dayOrders = ordersByDate[dateKey] || [];
-          const fulfilled = dayOrders.filter((o) => o.fulfillmentStatus?.toLowerCase() === 'fulfilled');
-          const pureSmall = fulfilled.filter((o) => classifyVariant(o) === 'small');
-          const pureLarge = fulfilled.filter((o) => classifyVariant(o) === 'large');
+        const windowedRecords = shippingDbRecords.filter(
+          (r) => r.dateKey >= effectiveStartKey && r.dateKey <= todayKey
+        );
 
-          dailyPoints.push({
-            date: cursor.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: STORE_TIMEZONE }),
-            dateKey,
-            avgShipping: avgOf(fulfilled),
-            avgShippingSmall: avgOf(pureSmall),
-            avgShippingLarge: avgOf(pureLarge),
-            _fulfilled: fulfilled,
-            _small: pureSmall,
-            _large: pureLarge,
-          });
-
-          cursor.setDate(cursor.getDate() + 1);
-        }
-
-        // ── Aggregate to chosen granularity ──
-        type ChartPoint = { date: string; avgShipping: number | null; avgShippingSmall: number | null; avgShippingLarge: number | null };
-
-        const aggregateGroup = (group: DayPoint[]): ChartPoint => {
-          const allFulfilled = group.flatMap((d) => d._fulfilled);
-          const allSmall     = group.flatMap((d) => d._small);
-          const allLarge     = group.flatMap((d) => d._large);
-          return {
-            date: group[0].date,
-            avgShipping:      avgOf(allFulfilled),
-            avgShippingSmall: avgOf(allSmall),
-            avgShippingLarge: avgOf(allLarge),
-          };
-        };
+        const toLabel = (dateKey: string) =>
+          new Date(dateKey).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: STORE_TIMEZONE });
 
         let shippingData: ChartPoint[];
 
         if (shippingGranularity === 'day') {
-          // 7-day centred rolling average to smooth out daily volatility
+          // 7-day centred rolling average
           const rollingAvg = (arr: (number | null)[], i: number, half = 3): number | null => {
-            const window = arr.slice(Math.max(0, i - half), i + half + 1).filter((v): v is number => v !== null);
-            return window.length > 0 ? window.reduce((s, v) => s + v, 0) / window.length : null;
+            const win = arr.slice(Math.max(0, i - half), i + half + 1).filter((v): v is number => v !== null);
+            return win.length ? win.reduce((s, v) => s + v, 0) / win.length : null;
           };
-          const allVal   = dailyPoints.map((d) => d.avgShipping);
-          const smallVal = dailyPoints.map((d) => d.avgShippingSmall);
-          const largeVal = dailyPoints.map((d) => d.avgShippingLarge);
-          shippingData = dailyPoints.map((d, i) => ({
-            date: d.date,
+          const allVal   = windowedRecords.map((r) => r.avgShipping);
+          const smallVal = windowedRecords.map((r) => r.avgShippingSmall);
+          const largeVal = windowedRecords.map((r) => r.avgShippingLarge);
+          shippingData = windowedRecords.map((r, i) => ({
+            date: toLabel(r.dateKey),
+            dateKey: r.dateKey,
             avgShipping:      rollingAvg(allVal,   i),
             avgShippingSmall: rollingAvg(smallVal, i),
             avgShippingLarge: rollingAvg(largeVal, i),
           }));
         } else if (shippingGranularity === 'week') {
-          // Group by Mon–Sun week
-          const weeks: DayPoint[][] = [];
-          let current: DayPoint[] = [];
-          dailyPoints.forEach((d) => {
-            const dow = new Date(d.dateKey).getDay(); // 0=Sun
-            if (dow === 1 && current.length > 0) { weeks.push(current); current = []; }
-            current.push(d);
+          const weeks: DbRecord[][] = [];
+          let cur: DbRecord[] = [];
+          windowedRecords.forEach((r) => {
+            const dow = new Date(r.dateKey).getDay();
+            if (dow === 1 && cur.length > 0) { weeks.push(cur); cur = []; }
+            cur.push(r);
           });
-          if (current.length) weeks.push(current);
-          shippingData = weeks.map((group) => ({
-            ...aggregateGroup(group),
-            // Label: "3 Mar – 9 Mar" (or "3 Mar – today" for the last partial week)
-            date: `${group[0].date} – ${group[group.length - 1].date}`,
+          if (cur.length) weeks.push(cur);
+          shippingData = weeks.map((g) => ({
+            date: `${toLabel(g[0].dateKey)} – ${toLabel(g[g.length - 1].dateKey)}`,
+            avgShipping:      avgOfNums(g.map((r) => r.avgShipping)),
+            avgShippingSmall: avgOfNums(g.map((r) => r.avgShippingSmall)),
+            avgShippingLarge: avgOfNums(g.map((r) => r.avgShippingLarge)),
           }));
         } else {
-          // month
-          const months: Record<string, DayPoint[]> = {};
-          dailyPoints.forEach((d) => {
-            const key = d.dateKey.slice(0, 7); // YYYY-MM
+          const months: Record<string, DbRecord[]> = {};
+          windowedRecords.forEach((r) => {
+            const key = r.dateKey.slice(0, 7);
             if (!months[key]) months[key] = [];
-            months[key].push(d);
+            months[key].push(r);
           });
-          shippingData = Object.values(months).map((group) => ({
-            ...aggregateGroup(group),
-            date: new Date(group[0].dateKey).toLocaleDateString('en-IN', { month: 'short', year: '2-digit', timeZone: STORE_TIMEZONE }),
+          shippingData = Object.entries(months).map(([, g]) => ({
+            date: new Date(g[0].dateKey).toLocaleDateString('en-IN', { month: 'short', year: '2-digit', timeZone: STORE_TIMEZONE }),
+            avgShipping:      avgOfNums(g.map((r) => r.avgShipping)),
+            avgShippingSmall: avgOfNums(g.map((r) => r.avgShippingSmall)),
+            avgShippingLarge: avgOfNums(g.map((r) => r.avgShippingLarge)),
           }));
         }
 
-        // ── Summary stats (always over full daily dataset) ──
-        const avg30 = (key: 'avgShipping' | 'avgShippingSmall' | 'avgShippingLarge') => {
-          const days = dailyPoints.filter((d) => d[key] !== null);
-          if (days.length === 0) return null;
-          return days.reduce((s, d) => s + (d[key] as number), 0) / days.length;
-        };
-        const avg30All   = avg30('avgShipping');
-        const avg30Small = avg30('avgShippingSmall');
-        const avg30Large = avg30('avgShippingLarge');
+        // Summary stats over last-30-day daily records
+        const last30 = shippingDbRecords.filter((r) => {
+          const s = new Date(now); s.setDate(s.getDate() - 29);
+          return r.dateKey >= s.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+        });
         const fmt = (v: number | null) => v !== null ? `₹${v.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : 'N/A';
+        const avg30All   = avgOfNums(last30.map((r) => r.avgShipping));
+        const avg30Small = avgOfNums(last30.map((r) => r.avgShippingSmall));
+        const avg30Large = avgOfNums(last30.map((r) => r.avgShippingLarge));
 
-        // ── Line definitions ──
         const lines = [
           { key: 'all'   as const, dataKey: 'avgShipping',      name: 'All Fulfilled', color: '#0ea5e9', width: 2.5, dash: undefined },
           { key: 'small' as const, dataKey: 'avgShippingSmall', name: 'Small Variant', color: '#10b981', width: 2,   dash: '6 3' },
@@ -1577,12 +1524,10 @@ export function DashboardPage() {
         const toggleLine = (key: 'all' | 'small' | 'large') =>
           setActiveShippingLines((prev) => ({ ...prev, [key]: !prev[key] }));
 
-        // Average of the primary visible line (All > Small > Large)
         const shippingAvgKey = activeShippingLines.all ? 'avgShipping' : activeShippingLines.small ? 'avgShippingSmall' : 'avgShippingLarge';
         const shippingAvgValues = shippingData.map((d) => (d as any)[shippingAvgKey]).filter((v: unknown): v is number => v !== null && v !== undefined);
         const shippingAvg = shippingAvgValues.length ? shippingAvgValues.reduce((s: number, v: number) => s + v, 0) / shippingAvgValues.length : null;
 
-        // Build ₹30-interval ticks from the visible data range
         const shippingValues = shippingData.flatMap((d) => [
           activeShippingLines.all   ? (d.avgShipping      ?? null) : null,
           activeShippingLines.small ? (d.avgShippingSmall ?? null) : null,

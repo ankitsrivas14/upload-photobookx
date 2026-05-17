@@ -27,3 +27,4 @@ export { SalaryPayment, ISalaryPayment } from './SalaryPayment';
 export { AttendanceAuditLog, IAttendanceAuditLog } from './AttendanceAuditLog';
 export { HourlyLog, IHourlyLog } from './HourlyLog';
 export { DailyROAS, IDailyROAS } from './DailyROAS';
+export { DailyShipping, IDailyShipping } from './DailyShipping';
