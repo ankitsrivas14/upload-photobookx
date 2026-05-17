@@ -190,18 +190,17 @@ function CostTable({ category, fields, overrides, onChange, onOverrideChange }: 
                   const isOverridden = overrides[key] !== undefined;
                   return (
                     <td key={key}>
-                      {isOverridden ? (
-                        <span className={styles['cell-dash']}>—</span>
-                      ) : (
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={field[key]}
-                          onChange={(e) => updateValue(field.id, key, parseFloat(e.target.value) || 0)}
-                          className={styles['table-input']}
-                        />
-                      )}
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={isOverridden ? '' : field[key]}
+                        placeholder={isOverridden ? '—' : undefined}
+                        className={`${styles['table-input']} ${isOverridden ? styles['cell-overridden'] : ''}`}
+                        onFocus={() => { if (isOverridden) onOverrideChange(key, undefined); }}
+                        onChange={(e) => updateValue(field.id, key, parseFloat(e.target.value) || 0)}
+                        title={isOverridden ? 'Click to edit and clear the total override' : undefined}
+                      />
                     </td>
                   );
                 })}

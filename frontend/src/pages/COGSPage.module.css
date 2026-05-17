@@ -293,14 +293,22 @@
   box-shadow: 0 0 0 2px rgba(234, 179, 8, 0.15);
 }
 
-.cell-dash {
-  display: block;
-  text-align: center;
+.cell-overridden {
   color: #cbd5e1;
+  background: #f8fafc;
+  border-color: #e2e8f0;
+  cursor: pointer;
+}
+
+.cell-overridden::placeholder {
+  color: #94a3b8;
   font-size: 1rem;
-  font-weight: 600;
-  padding: 0.5rem 0;
-  user-select: none;
+}
+
+.cell-overridden:hover {
+  border-color: #00B8D4 !important;
+  background: #f0fdff !important;
+  cursor: pointer;
 }
 
 /* Loading */
