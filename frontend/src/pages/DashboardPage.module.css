@@ -419,6 +419,23 @@
   padding-bottom: 0.4rem;
 }
 
+.roas-go-btn {
+  padding: 0.4rem 1rem;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.8125rem;
+  background: #0f172a;
+  color: white;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.15s;
+  align-self: flex-end;
+}
+
+.roas-go-btn:hover {
+  background: #1e293b;
+}
+
 .roas-clear-btn {
   padding: 0.4rem 0.75rem;
   border: 1px solid #e2e8f0;
@@ -429,6 +446,7 @@
   cursor: pointer;
   font-weight: 500;
   transition: all 0.15s;
+  align-self: flex-end;
 }
 
 .roas-clear-btn:hover {

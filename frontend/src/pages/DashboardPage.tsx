@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   LineChart,
   Line,
@@ -56,9 +56,16 @@ export function DashboardPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
+  // ROAS filter — uncontrolled refs for inputs (no re-render on typing)
+  const roasDaysRef = useRef<HTMLInputElement>(null);
+  const roasStartRef = useRef<HTMLInputElement>(null);
+  const roasEndRef = useRef<HTMLInputElement>(null);
+  // ROAS filter — applied state (what the chart uses, updated on Go)
   const [roasDays, setRoasDays] = useState(30);
   const [roasStartDate, setRoasStartDate] = useState('');
   const [roasEndDate, setRoasEndDate] = useState('');
+  // ROAS data fetched from DB
+  const [roasDbRecords, setRoasDbRecords] = useState<Array<{ dateKey: string; revenue: number; adSpend: number; roas: number | null }>>([]);
   const [dailyPnlMap, setDailyPnlMap] = useState<Record<string, number>>({});
   const [orders, setOrders] = useState<ShopifyOrder[]>([]);
 
@@ -257,11 +264,36 @@ export function DashboardPage() {
     }
   }, []);
 
+  const loadROAS = useCallback(async (days: number, startDate: string, endDate: string) => {
+    try {
+      let start: string;
+      let end: string;
+      if (startDate && endDate) {
+        start = startDate;
+        end = endDate;
+      } else {
+        const now = new Date();
+        end = now.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+        const s = new Date(now);
+        s.setDate(s.getDate() - (days - 1));
+        start = s.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+      }
+      const res = await api.getDailyROAS(start, end);
+      if (res.success && res.records) {
+        setRoasDbRecords(res.records);
+      }
+    } catch (err) {
+      console.error('Failed to load ROAS data:', err);
+    }
+  }, []);
+
   useEffect(() => {
     if (user) {
       loadDailyPnl();
+      loadROAS(roasDays, roasStartDate, roasEndDate);
     }
-  }, [user, loadDailyPnl]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount
+  }, [user, loadDailyPnl, loadROAS]);
 
   const weekLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S']; // Monday to Sunday
   const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -288,52 +320,15 @@ export function DashboardPage() {
     return 0;
   };
 
-  // ROAS chart data — reactive to roasDays / roasStartDate / roasEndDate
-  const roasChartData = (() => {
-    const now = new Date();
-    const data: Array<{ date: string; dateKey: string; roas: number | null; revenue: number; adSpend: number; profit: number }> = [];
-
-    // Build daily revenue from orders
-    const revenueByDate: Record<string, number> = {};
-    orders.forEach((o) => {
-      if (o.cancelledAt) return;
-      const dateKey = getOrderDateKey(o.createdAt);
-      revenueByDate[dateKey] = (revenueByDate[dateKey] || 0) + (o.totalPrice || 0);
-    });
-
-    const profitByDate: Record<string, number> = dailyPnlMap;
-
-    let start: Date;
-    let end: Date;
-
-    if (roasStartDate && roasEndDate) {
-      start = new Date(roasStartDate);
-      end = new Date(roasEndDate);
-    } else {
-      end = new Date(now);
-      start = new Date(now);
-      start.setDate(start.getDate() - (roasDays - 1));
-    }
-
-    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-      if (d < new Date('2026-01-28')) continue;
-      const dateKey = d.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
-      const revenue = revenueByDate[dateKey] || 0;
-      const adSpend = adSpendByDate[dateKey] || 0;
-      const profit = profitByDate[dateKey] || 0;
-      const roas = adSpend > 0 ? revenue / adSpend : null;
-      data.push({
-        date: new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: STORE_TIMEZONE }),
-        dateKey,
-        roas,
-        revenue,
-        adSpend,
-        profit,
-      });
-    }
-
-    return data;
-  })();
+  // ROAS chart data — built from DB records fetched on Go / mount
+  const roasChartData = roasDbRecords.map((r) => ({
+    date: new Date(r.dateKey).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: STORE_TIMEZONE }),
+    dateKey: r.dateKey,
+    roas: r.roas,
+    revenue: r.revenue,
+    adSpend: r.adSpend,
+    profit: dailyPnlMap[r.dateKey] || 0,
+  }));
 
   // Profit Chart Data - Show Selected Month Only
   const profitChartData = (() => {
@@ -940,15 +935,22 @@ export function DashboardPage() {
             <div className={styles['roas-control-group']}>
               <label className={styles['roas-control-label']}>Last N days</label>
               <input
+                ref={roasDaysRef}
                 type="number"
                 min={1}
                 max={365}
                 className={styles['roas-days-input']}
-                value={roasDays}
-                onChange={(e) => {
-                  setRoasDays(Math.max(1, Number(e.target.value)));
-                  setRoasStartDate('');
-                  setRoasEndDate('');
+                defaultValue={30}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    const days = Math.max(1, Number(roasDaysRef.current?.value) || 30);
+                    setRoasDays(days);
+                    setRoasStartDate('');
+                    setRoasEndDate('');
+                    if (roasStartRef.current) roasStartRef.current.value = '';
+                    if (roasEndRef.current) roasEndRef.current.value = '';
+                    loadROAS(days, '', '');
+                  }
                 }}
               />
             </div>
@@ -956,25 +958,51 @@ export function DashboardPage() {
             <div className={styles['roas-control-group']}>
               <label className={styles['roas-control-label']}>From</label>
               <input
+                ref={roasStartRef}
                 type="date"
                 className={styles['roas-date-input']}
-                value={roasStartDate}
-                onChange={(e) => setRoasStartDate(e.target.value)}
+                defaultValue=""
               />
             </div>
             <div className={styles['roas-control-group']}>
               <label className={styles['roas-control-label']}>To</label>
               <input
+                ref={roasEndRef}
                 type="date"
                 className={styles['roas-date-input']}
-                value={roasEndDate}
-                onChange={(e) => setRoasEndDate(e.target.value)}
+                defaultValue=""
               />
             </div>
+            <button
+              className={styles['roas-go-btn']}
+              onClick={() => {
+                const start = roasStartRef.current?.value || '';
+                const end = roasEndRef.current?.value || '';
+                const days = Math.max(1, Number(roasDaysRef.current?.value) || 30);
+                if (start && end) {
+                  setRoasStartDate(start);
+                  setRoasEndDate(end);
+                  loadROAS(days, start, end);
+                } else {
+                  setRoasDays(days);
+                  setRoasStartDate('');
+                  setRoasEndDate('');
+                  loadROAS(days, '', '');
+                }
+              }}
+            >
+              Go
+            </button>
             {(roasStartDate || roasEndDate) && (
               <button
                 className={styles['roas-clear-btn']}
-                onClick={() => { setRoasStartDate(''); setRoasEndDate(''); }}
+                onClick={() => {
+                  setRoasStartDate('');
+                  setRoasEndDate('');
+                  if (roasStartRef.current) roasStartRef.current.value = '';
+                  if (roasEndRef.current) roasEndRef.current.value = '';
+                  loadROAS(roasDays, '', '');
+                }}
               >
                 Clear
               </button>

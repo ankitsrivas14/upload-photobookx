@@ -657,6 +657,22 @@ class ApiService {
     });
   }
 
+  async getDailyROAS(startDate?: string, endDate?: string): Promise<{
+    success: boolean;
+    records?: Array<{ dateKey: string; revenue: number; adSpend: number; roas: number | null; updatedAt: string }>;
+    error?: string;
+  }> {
+    const params = new URLSearchParams();
+    if (startDate) params.set('startDate', startDate);
+    if (endDate) params.set('endDate', endDate);
+    const qs = params.toString();
+    return this.request(`/api/admin/sales/daily-roas${qs ? `?${qs}` : ''}`);
+  }
+
+  async backfillDailyROAS(): Promise<{ success: boolean; upserted?: number; error?: string }> {
+    return this.request('/api/admin/sales/daily-roas/backfill', { method: 'POST' });
+  }
+
   // Upload (public - no auth needed)
   async validateUploadToken(token: string): Promise<UploadInfo> {
     return this.request<UploadInfo>(`/api/upload/${token}`);

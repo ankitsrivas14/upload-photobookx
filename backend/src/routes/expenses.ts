@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { requireAdmin } from './adminAuth';
 import { ExpenseSource, MetaAdsExpense, DailyAdSpend } from '../models';
 import type { AuthenticatedRequest } from '../types';
+import { recomputeForDate } from '../services/roasService';
 
 const router = Router();
 
@@ -248,6 +249,10 @@ router.post('/daily-ad-spend', requireAdmin, async (req: AuthenticatedRequest, r
 
     await entry.save();
 
+    // Recompute ROAS for this date asynchronously (don't block the response)
+    const dateKey = entry.date.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+    recomputeForDate(dateKey).catch((err) => console.error('ROAS recompute error:', err));
+
     res.status(201).json({
       success: true,
       entry: {
@@ -278,6 +283,10 @@ router.delete('/daily-ad-spend/:entryId', requireAdmin, async (req: Authenticate
       res.status(404).json({ success: false, error: 'Entry not found' });
       return;
     }
+
+    // Recompute ROAS for the affected date asynchronously
+    const dateKey = (entry as any).date.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+    recomputeForDate(dateKey).catch((err) => console.error('ROAS recompute error:', err));
 
     res.json({ success: true });
   } catch (error) {

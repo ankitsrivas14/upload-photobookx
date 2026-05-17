@@ -1,8 +1,9 @@
 import express, { Response } from 'express';
-import { DiscardedOrder, RTOOrder, ProfitPrediction, ShippingCharge, OrderDeliveryDate, ShopifyOrderCache, MetaAdPerformance, MetaAdAnalysis, AcknowledgedOrder, TicketRaisedOrder } from '../models';
+import { DiscardedOrder, RTOOrder, ProfitPrediction, ShippingCharge, OrderDeliveryDate, ShopifyOrderCache, MetaAdPerformance, MetaAdAnalysis, AcknowledgedOrder, TicketRaisedOrder, DailyROAS } from '../models';
 import { requireAdmin } from './adminAuth';
 import { AuthenticatedRequest } from '../types';
 import aiService from '../services/aiService';
+import { backfillAllDates } from '../services/roasService';
 
 const router = express.Router();
 
@@ -992,5 +993,51 @@ router.post('/predict', requireAdmin, async (req: AuthenticatedRequest, res: Res
       res.status(500).json({ success: false, error: error.message });
     }
   });
+
+/**
+ * GET /api/admin/sales/daily-roas
+ * Fetch stored daily ROAS records. Optional query params: startDate, endDate (YYYY-MM-DD).
+ */
+router.get('/daily-roas', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
+    const filter: Record<string, any> = {};
+    if (startDate || endDate) {
+      filter.dateKey = {};
+      if (startDate) filter.dateKey.$gte = startDate;
+      if (endDate) filter.dateKey.$lte = endDate;
+    }
+
+    const records = await DailyROAS.find(filter).sort({ dateKey: 1 }).lean();
+
+    res.json({
+      success: true,
+      records: records.map((r: any) => ({
+        dateKey: r.dateKey,
+        revenue: r.revenue,
+        adSpend: r.adSpend,
+        roas: r.roas,
+        updatedAt: r.updatedAt,
+      })),
+    });
+  } catch (error) {
+    console.error('Error fetching daily ROAS:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch daily ROAS' });
+  }
+});
+
+/**
+ * POST /api/admin/sales/daily-roas/backfill
+ * Recompute and store DailyROAS for all dates with order or ad-spend data.
+ */
+router.post('/daily-roas/backfill', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const result = await backfillAllDates();
+    res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('Error backfilling daily ROAS:', error);
+    res.status(500).json({ success: false, error: 'Backfill failed' });
+  }
+});
 
 export default router;
