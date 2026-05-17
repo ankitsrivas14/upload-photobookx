@@ -174,6 +174,12 @@ function sumCategoryFields(
   return total;
 }
 
+interface OrderPnlBreakdown {
+  revenue: number;
+  cogs: number; // COGS fields + shipping, excludes ad spend
+  pnl: number;  // revenue - cogs - adCostPerOrder
+}
+
 function calcOrderPnl(
   order: any,
   adCostPerOrder: number,
@@ -181,8 +187,8 @@ function calcOrderPnl(
   shippingMap: Map<string, number>,
   cogsFields: any[],
   overrides?: { pre?: TotalOverrides; post?: TotalOverrides }
-): number {
-  if (cogsFields.length === 0 && !overrides) return 0;
+): OrderPnlBreakdown {
+  if (cogsFields.length === 0 && !overrides) return { revenue: 0, cogs: 0, pnl: 0 };
 
   const variant = detectVariant(order);
   const delivered = orderIsDelivered(order, rtoSet);
@@ -210,22 +216,22 @@ function calcOrderPnl(
 
   const key = `${variant}${pm}Value` as ValueKey;
 
-  let totalCosts = 0;
+  let totalCogs = 0;
   for (const cat of ['pre', 'post'] as const) {
     const override = overrides?.[cat]?.[key];
     if (override !== undefined) {
-      totalCosts += override;
+      totalCogs += override;
     } else {
-      totalCosts += sumCategoryFields(fieldsToUse, cat, key, revenue);
+      totalCogs += sumCategoryFields(fieldsToUse, cat, key, revenue);
     }
   }
 
   // Shipping charge from Shiprocket data
   const orderName: string = (order.name ?? '').replace(/^#/, '');
   const shipCost = shippingMap.get(orderName) ?? shippingMap.get(`#${orderName}`) ?? 0;
-  totalCosts += shipCost;
+  totalCogs += shipCost;
 
-  return revenue - totalCosts - adCostPerOrder;
+  return { revenue, cogs: totalCogs, pnl: revenue - totalCogs - adCostPerOrder };
 }
 
 // ─── recompute ────────────────────────────────────────────────────────────────
@@ -260,14 +266,16 @@ export async function recomputePnlForDate(
   let barChartProfit = 0;
   let heatmapProfit = 0;
   let hasHeatmapOrders = false;
+  let totalRevenue = 0;
+  let totalCogs = 0;
 
   for (const order of orders) {
-    const pnl = calcOrderPnl(order, adCostPerOrder, rto, shipMap, cogs, overrides);
+    const { revenue, cogs: orderCogs, pnl } = calcOrderPnl(order, adCostPerOrder, rto, shipMap, cogs, overrides);
 
-    // Bar chart: all orders contribute when completed
+    totalRevenue += revenue;
+    totalCogs += orderCogs;
     barChartProfit += pnl;
 
-    // Heatmap: only final (explicit) or prepaid orders
     const isFinal = orderIsFinalStatus(order, rto) || isPaymentPrepaid(order);
     if (isFinal) {
       heatmapProfit += pnl;
@@ -275,12 +283,10 @@ export async function recomputePnlForDate(
     }
   }
 
-  // Ad-spend-only day: no orders but has ad spend
   if (orderCount === 0 && adSpend > 0) {
     barChartProfit = -adSpend;
     heatmapProfit = -adSpend;
   } else if (!hasHeatmapOrders && adSpend > 0) {
-    // Has orders but none final — heatmap shows -adSpend for the unattributed cost
     heatmapProfit = -adSpend;
   }
 
@@ -293,6 +299,8 @@ export async function recomputePnlForDate(
         heatmapProfit,
         orderCount,
         adSpend,
+        totalRevenue,
+        totalCogs,
       },
     },
     { upsert: true, new: true }

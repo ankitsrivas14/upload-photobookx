@@ -1,23 +1,11 @@
-import { useNavigate } from 'react-router-dom';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import {
+  ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine,
+} from 'recharts';
 import { api } from '../services/api';
 import styles from './ProfitPredictionCalculator.module.css';
 
-const DEFAULT_WORKING_DAYS = 30;
-
-interface COGSField {
-  id: string;
-  name: string;
-  smallPrepaidValue: number;
-  smallCODValue: number;
-  largePrepaidValue: number;
-  largeCODValue: number;
-  type: 'cogs' | 'ndr' | 'both';
-  calculationType: 'fixed' | 'percentage';
-  percentageType?: 'included' | 'excluded';
-}
-
-function formatIndianNumber(num: number, decimals = 0): string {
+function fmt(num: number, decimals = 0): string {
   const [intPart, decPart] = num.toFixed(decimals).split('.');
   const lastThree = intPart.slice(-3);
   const rest = intPart.slice(0, -3);
@@ -25,304 +13,411 @@ function formatIndianNumber(num: number, decimals = 0): string {
   return decPart ? `${formatted}.${decPart}` : formatted;
 }
 
-export function ProfitPredictionCalculator() {
-  const navigate = useNavigate();
-  const [isLoading, setIsLoading] = useState(true);
+type DayOption = 7 | 14 | 30 | 90;
 
-  // Input: target monthly profit (₹)
-  const [targetMonthlyProfit, setTargetMonthlyProfit] = useState<string>('');
-  
-  // Auto-calculated from historical data
-  const [avgProfitPerOrder, setAvgProfitPerOrder] = useState<number>(0);
-  const [avgRevenuePerOrder, setAvgRevenuePerOrder] = useState<number>(0);
-  const [roas, setRoas] = useState<number>(0);
-  const [workingDays] = useState<number>(DEFAULT_WORKING_DAYS);
-  const [dataSource, setDataSource] = useState<string>('');
+interface Summary {
+  days: number;
+  completedDays: number;
+  orders: number;
+  revenue: number;
+  cogs: number;
+  adSpend: number;
+  profit: number;
+  avgRevenuePerOrder: number;
+  avgCogsPerOrder: number;
+  avgProfitPerOrder: number;
+  profitMargin: number;
+  roas: number;
+}
+
+interface DailyRow {
+  date: string;
+  orders: number;
+  revenue: number;
+  cogs: number;
+  adSpend: number;
+  profit: number;
+  isCompleted: boolean;
+  avgRevenuePerOrder: number;
+  avgCogsPerOrder: number;
+  avgProfitPerOrder: number;
+  roas: number;
+}
+
+interface ChartPoint {
+  label: string;
+  isCompleted: boolean;
+  [key: string]: number | string | boolean | null;
+}
+
+interface MetricChartProps {
+  title: string;
+  data: ChartPoint[];
+  dataKey: string;
+  color: string;
+  formatValue: (v: number) => string;
+  zeroLine?: boolean;
+}
+
+function MetricChart({ title, data, dataKey, color, formatValue, zeroLine }: MetricChartProps) {
+  const completedData = data.filter(d => d.isCompleted);
+  if (completedData.length === 0) return null;
+
+  return (
+    <div className={styles['chart-item']}>
+      <div className={styles['chart-title']}>{title}</div>
+      <ResponsiveContainer width="100%" height={200}>
+        <LineChart data={completedData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+          <XAxis
+            dataKey="label"
+            tick={{ fontSize: 11, fill: '#94a3b8' }}
+            tickLine={false}
+            axisLine={false}
+            interval="preserveStartEnd"
+          />
+          <YAxis
+            tick={{ fontSize: 11, fill: '#94a3b8' }}
+            tickLine={false}
+            axisLine={false}
+            tickFormatter={formatValue}
+            width={60}
+          />
+          {zeroLine && <ReferenceLine y={0} stroke="#e2e8f0" />}
+          <Tooltip
+            contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e2e8f0', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}
+            formatter={(v: number) => [formatValue(v), title]}
+            labelStyle={{ color: '#64748b', marginBottom: 4 }}
+          />
+          <Line
+            type="monotone"
+            dataKey={dataKey}
+            stroke={color}
+            strokeWidth={2}
+            dot={false}
+            activeDot={{ r: 4, strokeWidth: 0 }}
+            connectNulls={false}
+          />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+export function ProfitPredictionCalculator() {
+  const [days, setDays] = useState<DayOption>(30);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [summary, setSummary] = useState<Summary | null>(null);
+  const [daily, setDaily] = useState<DailyRow[]>([]);
+  const [targetMonthlyProfit, setTargetMonthlyProfit] = useState('');
 
   useEffect(() => {
-    loadDataAndCalculate();
-  }, []);
+    load(days);
+  }, [days]);
 
-  const loadDataAndCalculate = async () => {
+  const load = async (d: DayOption) => {
+    setIsLoading(true);
     try {
-      const meRes = await api.getMe();
-      if (!meRes.success) {
-        api.logout();
-        navigate('/admin');
-        return;
+      const res = await api.getDailyAverages(d);
+      if (res.success && res.summary) {
+        setSummary(res.summary);
+        setDaily(res.daily ?? []);
       }
-
-      // Load historical data including RTO orders
-      const [ordersRes, adSpendRes, cogsRes, rtoRes] = await Promise.all([
-        api.getOrders(10000, true),
-        api.getDailyAdSpend(),
-        api.getCOGSConfiguration(),
-        api.getRTOOrderIds(),
-      ]);
-
-      const orders = ordersRes.success && ordersRes.orders ? ordersRes.orders : [];
-      const adSpendEntries = adSpendRes.success && adSpendRes.entries ? adSpendRes.entries : [];
-      const cogsFields = cogsRes && cogsRes.fields ? cogsRes.fields : [];
-      const rtoOrderIds = new Set(rtoRes.success && rtoRes.rtoOrderIds ? rtoRes.rtoOrderIds : []);
-
-      // Hard cutoff date - do not consider data before this date
-      const hardCutoffDate = new Date('2026-01-28T00:00:00');
-      
-      const now = new Date();
-      const last30DaysCutoff = new Date(now);
-      last30DaysCutoff.setDate(last30DaysCutoff.getDate() - 30);
-
-      // Use the more recent cutoff date (either Jan 28, 2026 or 30 days ago)
-      const effectiveCutoff = hardCutoffDate > last30DaysCutoff ? hardCutoffDate : last30DaysCutoff;
-
-      // Filter orders from last 30 days (exclude cancelled, exclude before hard cutoff)
-      const ordersLast30 = orders.filter((o) => {
-        if (o.cancelledAt) return false;
-        const orderDate = new Date(o.createdAt);
-        return orderDate >= effectiveCutoff;
-      });
-      
-      const orderCount = ordersLast30.length;
-
-      // Calculate total ad spend (also respect hard cutoff)
-      const adSpendLast30 = adSpendEntries
-        .filter((e) => new Date(e.date) >= effectiveCutoff)
-        .reduce((s, e) => s + e.amount, 0);
-
-      // Helper function to determine if order failed
-      const isOrderFailed = (order: any): boolean => {
-        if (rtoOrderIds.has(order.id)) return true;
-        const status = order.deliveryStatus?.toLowerCase() || '';
-        return status === 'failure' || status.includes('failed') || status.includes('rto');
-      };
-
-      // Calculate profit for each order considering delivery status and NDR
-      let totalRevenue = 0;
-      let totalCosts = 0;
-      
-      if (cogsFields.length > 0) {
-        ordersLast30.forEach((order) => {
-          const paymentMethod = order.paymentMethod?.toLowerCase() === 'prepaid' ? 'prepaid' : 'cod';
-          const isPrepaid = paymentMethod === 'prepaid';
-          const variant = 'small'; // Default for averaging
-          
-          const isFailed = isOrderFailed(order);
-          
-          let orderRevenue = 0;
-          let orderCosts = 0;
-          let fieldsToUse: COGSField[] = [];
-          
-          // Determine revenue and which cost fields to apply
-          if (isFailed) {
-            // Failed/RTO = no money, apply NDR costs (loss)
-            orderRevenue = 0;
-            // Apply NDR and Both fields
-            fieldsToUse = cogsFields.filter(f => f.type === 'ndr' || f.type === 'both');
-          } else {
-            // Delivered, Prepaid, or Pending = count revenue
-            // (Pending orders will likely be delivered, so include their revenue for planning)
-            orderRevenue = order.totalPrice || 0;
-            // Apply COGS and Both fields
-            fieldsToUse = cogsFields.filter(f => f.type === 'cogs' || f.type === 'both');
-          }
-          
-          // Calculate costs based on selected fields
-          fieldsToUse.forEach(field => {
-            const key = `${variant}${isPrepaid ? 'Prepaid' : 'COD'}Value` as keyof COGSField;
-            const value = field[key] as number;
-            
-            if (field.calculationType === 'fixed') {
-              orderCosts += value;
-            } else {
-              // Percentage calculation
-              const salePrice = order.totalPrice || 0;
-              const percentageType = field.percentageType || 'excluded';
-              
-              if (percentageType === 'included') {
-                // Included: percentage is part of total amount
-                // Formula: amount × (percentage / (100 + percentage))
-                // Example: ₹100 with 12% included = ₹100 × (12/112) = ₹10.71
-                orderCosts += (value / (100 + value)) * salePrice;
-              } else {
-                // Excluded: percentage is added on top
-                // Formula: amount × (percentage / 100)
-                // Example: ₹100 with 12% excluded = ₹100 × 0.12 = ₹12
-                orderCosts += (value / 100) * salePrice;
-              }
-            }
-          });
-          
-          totalRevenue += orderRevenue;
-          totalCosts += orderCosts;
-        });
-      }
-
-      // Calculate total profit (revenue - costs - ad spend)
-      const totalProfit = totalRevenue - totalCosts - adSpendLast30;
-
-      // Calculate averages
-      if (orderCount > 0) {
-        setAvgRevenuePerOrder(totalRevenue / orderCount);
-        setAvgProfitPerOrder(totalProfit / orderCount);
-      }
-      
-      if (adSpendLast30 > 0 && totalRevenue > 0) {
-        setRoas(totalRevenue / adSpendLast30);
-      }
-
-      // Determine date range for display
-      const isUsingHardCutoff = effectiveCutoff.getTime() === hardCutoffDate.getTime();
-      const dateRangeText = isUsingHardCutoff 
-        ? `from ${hardCutoffDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })} onwards`
-        : 'from last 30 days';
-      
-      setDataSource(`Based on ${orderCount} orders ${dateRangeText}`);
     } catch (err) {
-      console.error('Failed to load data:', err);
-      api.logout();
-      navigate('/admin');
+      console.error('Failed to load daily averages:', err);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const targetProfitNum = parseFloat(targetMonthlyProfit) || 0;
-
-  const results = (() => {
-    if (targetProfitNum <= 0 || avgProfitPerOrder <= 0) {
-      return null;
+  const handleSync = async () => {
+    setIsSyncing(true);
+    try {
+      await api.backfillDailyPnl();
+      await load(days);
+    } catch (err) {
+      console.error('Failed to sync PnL data:', err);
+    } finally {
+      setIsSyncing(false);
     }
-    const monthlyOrdersRequired = targetProfitNum / avgProfitPerOrder;
-    const monthlyRevenueRequired = monthlyOrdersRequired * avgRevenuePerOrder;
-    const monthlyAdSpendRequired = roas > 0 ? monthlyRevenueRequired / roas : 0;
-    const dailyProfitRequired = targetProfitNum / workingDays;
-    const dailyRevenueRequired = monthlyRevenueRequired / workingDays;
-    const dailyAdSpendRequired = monthlyAdSpendRequired / workingDays;
-    const dailyOrdersRequired = monthlyOrdersRequired / workingDays;
+  };
+
+  const needsSync = summary !== null && summary.orders > 0 && summary.revenue === 0;
+
+  const chartData = useMemo(() => {
+    const completed = daily.filter(d => d.isCompleted);
+    const WINDOW = 7;
+
+    const roll = (arr: (number | null)[], i: number): number | null => {
+      const slice = arr.slice(Math.max(0, i - WINDOW + 1), i + 1).filter((v): v is number => v !== null);
+      return slice.length > 0 ? slice.reduce((a, b) => a + b, 0) / slice.length : null;
+    };
+
+    const raw = {
+      avgRevenue:   completed.map(d => d.orders > 0 ? d.avgRevenuePerOrder : null),
+      avgCosts:     completed.map(d => d.orders > 0 ? d.avgCogsPerOrder : null),
+      avgProfit:    completed.map(d => d.orders > 0 ? d.avgProfitPerOrder : null),
+      profitMargin: completed.map(d => d.revenue > 0 ? (d.profit / d.revenue) * 100 : null),
+      roas:         completed.map(d => d.adSpend > 0 ? d.roas : null),
+    };
+
+    return completed.map((d, i) => ({
+      label: new Date(d.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }),
+      avgRevenue:   roll(raw.avgRevenue, i),
+      avgCosts:     roll(raw.avgCosts, i),
+      avgProfit:    roll(raw.avgProfit, i),
+      profitMargin: roll(raw.profitMargin, i),
+      roas:         roll(raw.roas, i),
+      isCompleted:  true,
+    }));
+  }, [daily]);
+
+  const targetNum = parseFloat(targetMonthlyProfit) || 0;
+
+  const prediction = (() => {
+    if (!summary || targetNum <= 0 || summary.avgProfitPerOrder <= 0) return null;
+
+    const monthlyOrders = targetNum / summary.avgProfitPerOrder;
+    const monthlyRevenue = monthlyOrders * summary.avgRevenuePerOrder;
+    const monthlyAdSpend = summary.roas > 0 ? monthlyRevenue / summary.roas : 0;
 
     return {
-      monthlyRevenueRequired,
-      monthlyProfitRequired: targetProfitNum,
-      monthlyAdSpendRequired,
-      dailyRevenueRequired,
-      dailyProfitRequired,
-      dailyAdSpendRequired,
-      dailyOrdersRequired,
-      monthlyOrdersRequired,
-      roasRequired: roas,
+      monthlyOrders,
+      monthlyRevenue,
+      monthlyAdSpend,
+      dailyOrders: monthlyOrders / 30,
+      dailyRevenue: monthlyRevenue / 30,
+      dailyProfit: targetNum / 30,
+      dailyAdSpend: monthlyAdSpend / 30,
     };
   })();
 
-  if (isLoading) {
-    return (
-      <div className={styles['calculator-loading']}>
-        <div className={styles.spinner} />
-      </div>
-    );
-  }
-
   return (
     <div className={styles['calculator-content']}>
-        <header className={styles['page-header']}>
+      <header className={styles['page-header']}>
+        <div>
           <h1 className={styles['page-title']}>Profit Prediction Calculator</h1>
           <p className={styles['page-subtitle']}>
-            Enter your target monthly profit to see what's required to achieve it.
+            Real averages from your DailyPnl data — same numbers used in the Sales page bar chart.
           </p>
-          {dataSource && (
-            <p className={styles['data-source']}>{dataSource}</p>
-          )}
-        </header>
-
-        <section className={styles.card}>
-          <h2 className={styles['card-title']}>Target Monthly Profit</h2>
-          <div className={styles['input-group']}>
-            <label className={styles.label} htmlFor="target-profit">
-              How much profit do you want to make per month? (₹)
-            </label>
-            <input
-              id="target-profit"
-              type="number"
-              min="0"
-              step="1000"
-              className={styles.input}
-              placeholder="e.g. 100000"
-              value={targetMonthlyProfit}
-              onChange={(e) => setTargetMonthlyProfit(e.target.value)}
-            />
+        </div>
+        <div className={styles['header-controls']}>
+          <button
+            className={`${styles['sync-btn']} ${needsSync ? styles['sync-btn-warn'] : ''}`}
+            onClick={handleSync}
+            disabled={isSyncing || isLoading}
+          >
+            {isSyncing ? 'Syncing…' : 'Sync PnL'}
+          </button>
+          <div className={styles['day-selector']}>
+            {([7, 14, 30, 90] as DayOption[]).map(d => (
+              <button
+                key={d}
+                className={`${styles['day-btn']} ${days === d ? styles['day-btn-active'] : ''}`}
+                onClick={() => setDays(d)}
+              >
+                {d}d
+              </button>
+            ))}
           </div>
-        </section>
+        </div>
+      </header>
 
-        {avgProfitPerOrder > 0 && (
-            <section className={styles.card}>
-              <h2 className={styles['card-title']}>Current Averages (Per Order)</h2>
-              <div className={styles['averages-grid']}>
-                <div className={styles['average-item']}>
-                  <div className={styles['average-label']}>Avg. Revenue per Order</div>
-                  <div className={styles['average-value']}>₹{formatIndianNumber(avgRevenuePerOrder, 2)}</div>
-                </div>
-                <div className={styles['average-item']}>
-                  <div className={styles['average-label']}>Avg. Costs per Order</div>
-                  <div className={styles['average-value']}>₹{formatIndianNumber(avgRevenuePerOrder - avgProfitPerOrder, 2)}</div>
-                </div>
-                <div className={styles['average-item']}>
-                  <div className={styles['average-label']}>Avg. Profit per Order</div>
-                  <div className={styles['average-value']}>₹{formatIndianNumber(avgProfitPerOrder, 2)}</div>
-                </div>
-                <div className={styles['average-item']}>
-                  <div className={styles['average-label']}>Profit Margin</div>
-                  <div className={styles['average-value']}>{avgRevenuePerOrder > 0 ? ((avgProfitPerOrder / avgRevenuePerOrder) * 100).toFixed(1) : '0'}%</div>
-                </div>
-                <div className={styles['average-item']}>
-                  <div className={styles['average-label']}>Current ROAS</div>
-                  <div className={styles['average-value']}>{roas.toFixed(2)}x</div>
-                </div>
-              </div>
-            </section>
-        )}
+      {needsSync && (
+        <div className={styles['sync-notice']}>
+          Revenue data is missing — click <strong>Sync PnL</strong> to recompute from order history.
+        </div>
+      )}
 
-        {results && (
+      {isLoading ? (
+        <div className={styles['calculator-loading']}>
+          <div className={styles.spinner} />
+        </div>
+      ) : !summary ? (
+        <div className={styles['empty-state']}>
+          No data available. Run a backfill from the Sales page first.
+        </div>
+      ) : (
+        <>
+          {/* ── Current Averages ── */}
           <section className={styles.card}>
-            <h2 className={styles['card-title']}>Results</h2>
-            <div className={styles['results-grid']}>
-              <div className={styles['result-item']}>
-                <div className={styles['result-label']}>Monthly revenue required</div>
-                <div className={styles['result-value']}>₹{formatIndianNumber(results.monthlyRevenueRequired, 0)}</div>
+            <h2 className={styles['card-title']}>
+              Current Averages
+              <span className={styles['card-subtitle']}>
+                {summary.completedDays} completed days · {fmt(summary.orders)} orders
+                {summary.completedDays < summary.days && (
+                  <span className={styles['subtitle-note']}> (pending days excluded)</span>
+                )}
+              </span>
+            </h2>
+            <div className={styles['averages-grid']}>
+              <div className={styles['average-item']}>
+                <div className={styles['average-label']}>Avg. Revenue per Order</div>
+                <div className={styles['average-value']}>₹{fmt(summary.avgRevenuePerOrder, 2)}</div>
               </div>
-              <div className={styles['result-item']}>
-                <div className={styles['result-label']}>Daily revenue required</div>
-                <div className={styles['result-value']}>₹{formatIndianNumber(results.dailyRevenueRequired, 0)}</div>
+              <div className={styles['average-item']}>
+                <div className={styles['average-label']}>Avg. Costs per Order</div>
+                <div className={styles['average-value']}>₹{fmt(summary.avgCogsPerOrder, 2)}</div>
+                <div className={styles['average-note']}>COGS + shipping + ad spend</div>
               </div>
-              <div className={styles['result-item']}>
-                <div className={styles['result-label']}>Monthly profit required</div>
-                <div className={`${styles['result-value']} ${styles.positive}`}>₹{formatIndianNumber(results.monthlyProfitRequired, 0)}</div>
+              <div className={styles['average-item']}>
+                <div className={styles['average-label']}>Avg. Profit per Order</div>
+                <div className={`${styles['average-value']} ${summary.avgProfitPerOrder >= 0 ? styles.positive : styles.negative}`}>
+                  ₹{fmt(summary.avgProfitPerOrder, 2)}
+                </div>
               </div>
-              <div className={styles['result-item']}>
-                <div className={styles['result-label']}>Daily profit required</div>
-                <div className={`${styles['result-value']} ${styles.positive}`}>₹{formatIndianNumber(results.dailyProfitRequired, 0)}</div>
+              <div className={styles['average-item']}>
+                <div className={styles['average-label']}>Profit Margin</div>
+                <div className={`${styles['average-value']} ${summary.profitMargin >= 0 ? styles.positive : styles.negative}`}>
+                  {summary.profitMargin.toFixed(1)}%
+                </div>
               </div>
-              <div className={styles['result-item']}>
-                <div className={styles['result-label']}>Daily ad spend required</div>
-                <div className={styles['result-value']}>₹{formatIndianNumber(results.dailyAdSpendRequired, 0)}</div>
-              </div>
-              <div className={styles['result-item']}>
-                <div className={styles['result-label']}>Monthly ad spend required</div>
-                <div className={styles['result-value']}>₹{formatIndianNumber(results.monthlyAdSpendRequired, 0)}</div>
-              </div>
-              <div className={styles['result-item']}>
-                <div className={styles['result-label']}>ROAS required</div>
-                <div className={`${styles['result-value']} ${styles.highlight}`}>{results.roasRequired.toFixed(2)}x</div>
-              </div>
-              <div className={styles['result-item']}>
-                <div className={styles['result-label']}>Daily orders required</div>
-                <div className={styles['result-value']}>{formatIndianNumber(Math.round(results.dailyOrdersRequired), 0)}</div>
-              </div>
-              <div className={styles['result-item']}>
-                <div className={styles['result-label']}>Monthly orders required</div>
-                <div className={styles['result-value']}>{formatIndianNumber(Math.round(results.monthlyOrdersRequired), 0)}</div>
+              <div className={styles['average-item']}>
+                <div className={styles['average-label']}>Current ROAS</div>
+                <div className={styles['average-value']}>{summary.roas.toFixed(2)}x</div>
               </div>
             </div>
           </section>
-        )}
+
+          {/* ── Period Totals ── */}
+          <section className={styles.card}>
+            <h2 className={styles['card-title']}>
+              Period Totals
+              <span className={styles['card-subtitle']}>last {summary.days} days</span>
+            </h2>
+            <div className={styles['averages-grid']}>
+              <div className={styles['average-item']}>
+                <div className={styles['average-label']}>Total Revenue</div>
+                <div className={styles['average-value']}>₹{fmt(summary.revenue, 0)}</div>
+              </div>
+              <div className={styles['average-item']}>
+                <div className={styles['average-label']}>Total COGS + Shipping</div>
+                <div className={styles['average-value']}>₹{fmt(summary.cogs, 0)}</div>
+              </div>
+              <div className={styles['average-item']}>
+                <div className={styles['average-label']}>Total Ad Spend</div>
+                <div className={styles['average-value']}>₹{fmt(summary.adSpend, 0)}</div>
+              </div>
+              <div className={styles['average-item']}>
+                <div className={styles['average-label']}>Total Profit</div>
+                <div className={`${styles['average-value']} ${summary.profit >= 0 ? styles.positive : styles.negative}`}>
+                  {summary.profit >= 0 ? '+' : ''}₹{fmt(summary.profit, 0)}
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* ── Prediction Calculator ── */}
+          <section className={styles.card}>
+            <h2 className={styles['card-title']}>Profit Prediction Calculator</h2>
+            <p className={styles['card-description']}>
+              Enter your target monthly profit to see what's required to achieve it.
+            </p>
+            <div className={styles['input-group']}>
+              <label className={styles.label} htmlFor="target-profit">
+                Target Monthly Profit (₹)
+              </label>
+              <input
+                id="target-profit"
+                type="number"
+                min="0"
+                step="1000"
+                className={styles.input}
+                placeholder="e.g. 500000"
+                value={targetMonthlyProfit}
+                onChange={(e) => setTargetMonthlyProfit(e.target.value)}
+              />
+            </div>
+
+            {prediction && (
+              <div className={styles['results-grid']}>
+                <div className={styles['result-item']}>
+                  <div className={styles['result-label']}>Monthly orders required</div>
+                  <div className={styles['result-value']}>{fmt(Math.ceil(prediction.monthlyOrders))}</div>
+                </div>
+                <div className={styles['result-item']}>
+                  <div className={styles['result-label']}>Daily orders required</div>
+                  <div className={styles['result-value']}>{prediction.dailyOrders.toFixed(1)}</div>
+                </div>
+                <div className={styles['result-item']}>
+                  <div className={styles['result-label']}>Monthly revenue required</div>
+                  <div className={styles['result-value']}>₹{fmt(prediction.monthlyRevenue, 0)}</div>
+                </div>
+                <div className={styles['result-item']}>
+                  <div className={styles['result-label']}>Daily revenue required</div>
+                  <div className={styles['result-value']}>₹{fmt(prediction.dailyRevenue, 0)}</div>
+                </div>
+                <div className={styles['result-item']}>
+                  <div className={styles['result-label']}>Daily profit required</div>
+                  <div className={`${styles['result-value']} ${styles.positive}`}>₹{fmt(prediction.dailyProfit, 0)}</div>
+                </div>
+                <div className={styles['result-item']}>
+                  <div className={styles['result-label']}>Monthly ad spend required</div>
+                  <div className={styles['result-value']}>₹{fmt(prediction.monthlyAdSpend, 0)}</div>
+                </div>
+                <div className={styles['result-item']}>
+                  <div className={styles['result-label']}>Daily ad spend required</div>
+                  <div className={styles['result-value']}>₹{fmt(prediction.dailyAdSpend, 0)}</div>
+                </div>
+                <div className={styles['result-item']}>
+                  <div className={styles['result-label']}>ROAS required</div>
+                  <div className={`${styles['result-value']} ${styles.highlight}`}>{summary.roas.toFixed(2)}x</div>
+                </div>
+              </div>
+            )}
+          </section>
+
+          {/* ── Trend Charts ── */}
+          {chartData.length > 0 && (
+            <section className={styles.card}>
+              <h2 className={styles['card-title']}>
+                Daily Trends
+                <span className={styles['card-subtitle']}>last {summary.days} days · 7-day rolling average</span>
+              </h2>
+              <div className={styles['charts-grid']}>
+                <MetricChart
+                  title="Avg. Revenue per Order"
+                  data={chartData}
+                  dataKey="avgRevenue"
+                  color="#2563eb"
+                  formatValue={v => `₹${fmt(v)}`}
+                />
+                <MetricChart
+                  title="Avg. Costs per Order"
+                  data={chartData}
+                  dataKey="avgCosts"
+                  color="#7c3aed"
+                  formatValue={v => `₹${fmt(v)}`}
+                />
+                <MetricChart
+                  title="Avg. Profit per Order"
+                  data={chartData}
+                  dataKey="avgProfit"
+                  color="#059669"
+                  formatValue={v => `₹${fmt(v)}`}
+                  zeroLine
+                />
+                <MetricChart
+                  title="Profit Margin"
+                  data={chartData}
+                  dataKey="profitMargin"
+                  color="#0891b2"
+                  formatValue={v => `${v.toFixed(1)}%`}
+                  zeroLine
+                />
+                <MetricChart
+                  title="ROAS"
+                  data={chartData}
+                  dataKey="roas"
+                  color="#d97706"
+                  formatValue={v => `${v.toFixed(2)}x`}
+                />
+              </div>
+            </section>
+          )}
+        </>
+      )}
     </div>
   );
 }

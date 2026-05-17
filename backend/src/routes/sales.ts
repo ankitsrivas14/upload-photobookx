@@ -1317,6 +1317,82 @@ router.get('/ai-prediction-data', requireAdmin, async (req: AuthenticatedRequest
 });
 
 /**
+ * GET /api/admin/sales/daily-averages?days=30
+ * Returns per-day averages (revenue, COGS, ad spend, profit) and a rolled-up
+ * summary for the requested window. Used by the Profit Prediction Calculator.
+ * Source: DailyPnl — same numbers shown in the Sales page bar chart.
+ */
+router.get('/daily-averages', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const days = Math.min(Math.max(parseInt(req.query.days as string) || 30, 1), 365);
+
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - (days - 1));
+    startDate.setHours(0, 0, 0, 0);
+    const startKey = startDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+
+    const docs = await DailyPnl.find({ dateKey: { $gte: startKey } })
+      .sort({ dateKey: 1 })
+      .lean();
+
+    const daily = (docs as any[]).map((d) => {
+      const orders = d.orderCount ?? 0;
+      const revenue = d.totalRevenue ?? 0;
+      const cogs = d.totalCogs ?? 0;
+      const adSpend = d.adSpend ?? 0;
+      const profit = d.barChartProfit ?? 0;
+      const isCompleted = d.isCompleted ?? false;
+      return {
+        date: d.dateKey as string,
+        orders,
+        revenue,
+        cogs,
+        adSpend,
+        profit,
+        isCompleted,
+        avgRevenuePerOrder: orders > 0 ? revenue / orders : 0,
+        avgCogsPerOrder: orders > 0 ? (cogs + adSpend) / orders : 0,
+        avgProfitPerOrder: orders > 0 ? profit / orders : 0,
+        roas: adSpend > 0 ? revenue / adSpend : 0,
+      };
+    });
+
+    // Summary averages use only completed days (isCompleted=true) — days where every
+    // order has an explicit delivered/failed outcome, so the P&L is final and accurate.
+    // Pending/in-transit orders have unknown final status and would skew the averages.
+    const completedDays = daily.filter((d) => d.isCompleted);
+    let totOrders = 0, totRevenue = 0, totCogs = 0, totAdSpend = 0, totProfit = 0;
+    for (const d of completedDays) {
+      totOrders += d.orders;
+      totRevenue += d.revenue;
+      totCogs += d.cogs;
+      totAdSpend += d.adSpend;
+      totProfit += d.profit;
+    }
+
+    const summary = {
+      days,
+      completedDays: completedDays.length,
+      orders: totOrders,
+      revenue: totRevenue,
+      cogs: totCogs,
+      adSpend: totAdSpend,
+      profit: totProfit,
+      avgRevenuePerOrder: totOrders > 0 ? totRevenue / totOrders : 0,
+      avgCogsPerOrder: totOrders > 0 ? (totCogs + totAdSpend) / totOrders : 0,
+      avgProfitPerOrder: totOrders > 0 ? totProfit / totOrders : 0,
+      profitMargin: totRevenue > 0 ? (totProfit / totRevenue) * 100 : 0,
+      roas: totAdSpend > 0 ? totRevenue / totAdSpend : 0,
+    };
+
+    res.json({ success: true, summary, daily });
+  } catch (error) {
+    console.error('Error fetching daily averages:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch daily averages' });
+  }
+});
+
+/**
  * GET /api/admin/sales/backlog-orders
  * Lightweight endpoint for the Backlog Mosaic page.
  * Reads directly from ShopifyOrderCache, applies server-side filters (Jan 2026+,

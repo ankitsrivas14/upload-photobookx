@@ -480,7 +480,11 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
         }
       }
 
-      // Step 4: Reload to get updated data with shipping breakdown
+      // Step 4: Recompute DailyPnl (updates totalRevenue/totalCogs for averages page)
+      setRefreshStatus('Recomputing daily P&L...');
+      await api.backfillDailyPnl();
+
+      // Step 5: Reload to get updated data with shipping breakdown
       setRefreshStatus('Refreshing display...');
       await loadOrders(selectedMonthFilter);
     } catch (err) {

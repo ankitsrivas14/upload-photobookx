@@ -2,15 +2,15 @@ import mongoose, { Document, Schema } from 'mongoose';
 
 export interface IDailyPnl extends Document {
   dateKey: string;
-  // Whether all non-cancelled orders on this day have an explicit final status
-  // (delivered or failed). True for no-order days too. Drives bar chart visibility.
   isCompleted: boolean;
-  // Full-day P&L (all orders, prepaid assumed delivered). Valid when isCompleted=true.
   barChartProfit: number;
-  // P&L for final + prepaid orders only. For ad-spend-only days: -adSpend.
   heatmapProfit: number;
   orderCount: number;
   adSpend: number;
+  // Revenue from delivered orders (excl. failed/pending). Populated by recomputePnlForDate.
+  totalRevenue: number;
+  // COGS + shipping per day (excl. ad spend). Populated by recomputePnlForDate.
+  totalCogs: number;
   updatedAt: Date;
 }
 
@@ -22,6 +22,8 @@ const schema = new Schema<IDailyPnl>(
     heatmapProfit: { type: Number, default: 0 },
     orderCount: { type: Number, default: 0 },
     adSpend: { type: Number, default: 0 },
+    totalRevenue: { type: Number, default: 0 },
+    totalCogs: { type: Number, default: 0 },
   },
   { timestamps: true }
 );

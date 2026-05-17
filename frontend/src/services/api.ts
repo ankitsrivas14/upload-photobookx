@@ -1262,6 +1262,38 @@ class ApiService {
     return this.request('/api/admin/sales/daily-order-stats/backfill', { method: 'POST' });
   }
 
+  async getDailyAverages(days = 30): Promise<{
+    success: boolean;
+    summary?: {
+      days: number;
+      orders: number;
+      revenue: number;
+      cogs: number;
+      adSpend: number;
+      profit: number;
+      avgRevenuePerOrder: number;
+      avgCogsPerOrder: number;
+      avgProfitPerOrder: number;
+      profitMargin: number;
+      roas: number;
+    };
+    daily?: Array<{
+      date: string;
+      orders: number;
+      revenue: number;
+      cogs: number;
+      adSpend: number;
+      profit: number;
+      avgRevenuePerOrder: number;
+      avgCogsPerOrder: number;
+      avgProfitPerOrder: number;
+      roas: number;
+    }>;
+    error?: string;
+  }> {
+    return this.request(`/api/admin/sales/daily-averages?days=${days}`);
+  }
+
   async getDailyPnl(params: { month?: string; year?: string; startDate?: string; endDate?: string } = {}): Promise<{
     success: boolean;
     records?: Array<{
