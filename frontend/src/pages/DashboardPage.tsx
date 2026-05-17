@@ -66,6 +66,7 @@ export function DashboardPage() {
   const [roasEndDate, setRoasEndDate] = useState('');
   // ROAS data fetched from DB
   const [roasDbRecords, setRoasDbRecords] = useState<Array<{ dateKey: string; revenue: number; adSpend: number; roas: number | null }>>([]);
+  const [roasLoading, setRoasLoading] = useState(false);
   const [dailyPnlMap, setDailyPnlMap] = useState<Record<string, number>>({});
   const [orders, setOrders] = useState<ShopifyOrder[]>([]);
 
@@ -265,6 +266,7 @@ export function DashboardPage() {
   }, []);
 
   const loadROAS = useCallback(async (days: number, startDate: string, endDate: string) => {
+    setRoasLoading(true);
     try {
       let start: string;
       let end: string;
@@ -284,6 +286,8 @@ export function DashboardPage() {
       }
     } catch (err) {
       console.error('Failed to load ROAS data:', err);
+    } finally {
+      setRoasLoading(false);
     }
   }, []);
 
@@ -1010,6 +1014,9 @@ export function DashboardPage() {
           </div>
         </div>
         <div className={styles.chartWrap}>
+          {roasLoading ? (
+            <div className={styles['roas-skeleton']} />
+          ) : (
           <ResponsiveContainer width="100%" height={280}>
             <LineChart
               data={roasChartData}
@@ -1118,6 +1125,7 @@ export function DashboardPage() {
               )}
             </LineChart>
           </ResponsiveContainer>
+          )}
         </div>
         <div className={styles.chartStats}>
           <div className={styles.chartStatBlock}>
