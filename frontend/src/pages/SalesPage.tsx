@@ -161,8 +161,6 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
   // Per-order P/L cache (orderId -> profit/loss)
   const [orderProfitLoss, setOrderProfitLoss] = useState<Map<number, number>>(new Map());
 
-  // Ad cost per order by date (YYYY-MM-DD -> cost). Used to deduct Meta ad cost from P/L.
-  const [adCostPerOrderByDate, setAdCostPerOrderByDate] = useState<Record<string, number>>({});
   // Ad spend by date (YYYY-MM-DD -> total amount). Used to show "Ad spend" in day header row.
   const [adSpendByDate, setAdSpendByDate] = useState<Record<string, number>>({});
 
@@ -170,12 +168,21 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
   const [aiPrediction, setAiPrediction] = useState<any>(null);
   const [isPredicting, setIsPredicting] = useState(false);
 
-  useEffect(() => {
-    loadData(selectedMonthFilter);
-    if (selectedMonthFilter !== 'all') {
-      fetchCurrentPrediction();
-    }
-  }, [selectedMonthFilter]);
+  // Derived: ad cost per order per day — depends on orders + adSpendByDate, no fetch needed
+  const adCostPerOrderByDate = useMemo(() => {
+    const orderCountByDate: Record<string, number> = {};
+    orders.forEach((o) => {
+      if (o.cancelledAt) return;
+      const d = getOrderDateKey(o.createdAt);
+      orderCountByDate[d] = (orderCountByDate[d] || 0) + 1;
+    });
+    const result: Record<string, number> = {};
+    Object.keys(adSpendByDate).forEach((d) => {
+      const count = orderCountByDate[d] || 0;
+      if (count > 0) result[d] = adSpendByDate[d] / count;
+    });
+    return result;
+  }, [orders, adSpendByDate]);
 
   const fetchCurrentPrediction = async () => {
     const monthYear = selectedMonthFilter === 'current' 
@@ -261,12 +268,9 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showDelayDropdown]);
 
-  const loadData = async (monthArg?: string) => {
-    setIsLoading(true);
-    const targetMonth = monthArg || selectedMonthFilter;
+  const loadStaticData = async () => {
     try {
-      const [ordersResponse, discardedResponse, rtoResponse, cogsConfigResponse, adSpendResponse, acknowledgedResponse, ticketRaisedResponse] = await Promise.all([
-        api.getOrders(10000, true, undefined, targetMonth), // Fetch ONLY segmented orders natively from backend!
+      const [discardedResponse, rtoResponse, cogsConfigResponse, adSpendResponse, acknowledgedResponse, ticketRaisedResponse] = await Promise.all([
         api.getDiscardedOrderIds(),
         api.getRTOOrderIds(),
         api.getCOGSConfiguration(),
@@ -275,60 +279,61 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
         api.getTicketRaisedOrderIds(),
       ]);
 
+      if (discardedResponse.success) {
+        setDiscardedOrderIds(new Set(discardedResponse.discardedOrderIds));
+      }
+      if (rtoResponse.success) {
+        setRTOOrderIds(new Set(rtoResponse.rtoOrderIds));
+      }
+      if (acknowledgedResponse.success) {
+        setAcknowledgedOrderIds(new Set(acknowledgedResponse.acknowledgedOrderIds));
+      }
+      if (ticketRaisedResponse?.success) {
+        setTicketRaisedOrderIds(new Set(ticketRaisedResponse.ticketRaisedOrderIds));
+      }
+      if (cogsConfigResponse?.fields) {
+        setCogsConfig(cogsConfigResponse.fields);
+      }
+      const adSpendEntries = adSpendResponse.success && adSpendResponse.entries ? adSpendResponse.entries : [];
+      const adSpend: Record<string, number> = {};
+      adSpendEntries.forEach((e) => {
+        const d = new Date(e.date).toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+        adSpend[d] = (adSpend[d] || 0) + e.amount;
+      });
+      setAdSpendByDate(adSpend);
+    } catch (err) {
+      console.error('Failed to load static data:', err);
+    }
+  };
+
+  const loadOrders = async (monthArg?: string) => {
+    setIsLoading(true);
+    const targetMonth = monthArg || selectedMonthFilter;
+    try {
+      const ordersResponse = await api.getOrders(10000, true, undefined, targetMonth);
       if (ordersResponse.success && ordersResponse.orders) {
         setOrders(ordersResponse.orders);
         if (ordersResponse.availableMonths) {
           setAvailableMonthsList(ordersResponse.availableMonths);
         }
       }
-
-      if (discardedResponse.success) {
-        setDiscardedOrderIds(new Set(discardedResponse.discardedOrderIds));
-      }
-
-      if (rtoResponse.success) {
-        setRTOOrderIds(new Set(rtoResponse.rtoOrderIds));
-      }
-
-      if (acknowledgedResponse.success) {
-        setAcknowledgedOrderIds(new Set(acknowledgedResponse.acknowledgedOrderIds));
-      }
-
-      if (ticketRaisedResponse && ticketRaisedResponse.success) {
-        setTicketRaisedOrderIds(new Set(ticketRaisedResponse.ticketRaisedOrderIds));
-      }
-
-      if (cogsConfigResponse && cogsConfigResponse.fields) {
-        setCogsConfig(cogsConfigResponse.fields);
-      }
-
-      // Build ad cost per order by date (for P/L deduction)
-      const ordersList = ordersResponse.success && ordersResponse.orders ? ordersResponse.orders : [];
-      const adSpendEntries = adSpendResponse.success && adSpendResponse.entries ? adSpendResponse.entries : [];
-      const orderCountByDate: Record<string, number> = {};
-      ordersList.forEach((o) => {
-        if (o.cancelledAt) return;
-        const d = getOrderDateKey(o.createdAt);
-        orderCountByDate[d] = (orderCountByDate[d] || 0) + 1;
-      });
-      const adSpendByDate: Record<string, number> = {};
-      adSpendEntries.forEach((e) => {
-        const d = new Date(e.date).toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
-        adSpendByDate[d] = (adSpendByDate[d] || 0) + e.amount;
-      });
-      const adCostPerOrder: Record<string, number> = {};
-      Object.keys(adSpendByDate).forEach((d) => {
-        const count = orderCountByDate[d] || 0;
-        if (count > 0) adCostPerOrder[d] = adSpendByDate[d] / count;
-      });
-      setAdCostPerOrderByDate(adCostPerOrder);
-      setAdSpendByDate(adSpendByDate);
     } catch (err) {
-      console.error('Failed to load data:', err);
+      console.error('Failed to load orders:', err);
     } finally {
       setIsLoading(false);
     }
   };
+
+  useEffect(() => {
+    loadStaticData();
+  }, []);
+
+  useEffect(() => {
+    loadOrders(selectedMonthFilter);
+    if (selectedMonthFilter !== 'all') {
+      fetchCurrentPrediction();
+    }
+  }, [selectedMonthFilter]);
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -419,7 +424,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
 
       // Step 4: Reload to get updated data with shipping breakdown
       setRefreshStatus('Refreshing display...');
-      await loadData(selectedMonthFilter);
+      await loadOrders(selectedMonthFilter);
     } catch (err) {
       console.error('Failed to refresh data:', err);
       toast.error('Failed to refresh data. Please try again.');
