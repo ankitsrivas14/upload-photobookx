@@ -692,7 +692,7 @@ router.post('/predict', requireAdmin, async (req: AuthenticatedRequest, res: Res
       res.status(500).json({ success: false, error: 'Failed' });
     }
   });
-  router.post('/ads-performance', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/ads-performance', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { adData, level, date } = req.body;
       if (!adData || !Array.isArray(adData) || adData.length === 0) {

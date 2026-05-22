@@ -7,6 +7,9 @@ export interface IEmployee extends Document {
   hourlyRate: number;
   joiningDate: Date;
   isActive: boolean;
+  terminationDate?: Date;
+  isFnfMarked?: boolean;
+  fnfAmount?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -18,6 +21,9 @@ const employeeSchema = new Schema<IEmployee>({
   hourlyRate: { type: Number, default: 0 },
   joiningDate: { type: Date, required: true },
   isActive: { type: Boolean, default: true },
+  terminationDate: { type: Date },
+  isFnfMarked: { type: Boolean, default: false },
+  fnfAmount: { type: Number },
 }, {
   timestamps: true
 });

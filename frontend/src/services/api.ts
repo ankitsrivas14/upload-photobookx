@@ -1084,7 +1084,7 @@ class ApiService {
     });
   }
 
-  async saveAdsPerformance(adData: any[], level?: string, date?: string): Promise<{ success: boolean; count: number; error?: string }> {
+async saveAdsPerformance(adData: any[], level?: string, date?: string): Promise<{ success: boolean; count: number; error?: string }> {
     return this.request('/api/admin/sales/ads-performance', {
       method: 'POST',
       body: JSON.stringify({ adData, level, date }),
@@ -1174,6 +1174,10 @@ class ApiService {
   }
   async getEmployeesStats(month: string): Promise<{ success: boolean; employees?: any[]; error?: string }> {
     return this.request(`/api/admin/attendance/employees/stats?month=${month}`);
+  }
+
+  async getAllEmployees(): Promise<{ success: boolean; employees?: any[]; error?: string }> {
+    return this.request('/api/admin/attendance/employees');
   }
 
   async addEmployee(name: string, joiningDate: string, employeeType: 'monthly' | 'hourly', monthlySalary?: number, hourlyRate?: number): Promise<{ success: boolean; employee?: any; error?: string }> {
