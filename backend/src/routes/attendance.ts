@@ -92,13 +92,13 @@ router.get('/employees/stats', requireAdmin, async (req: AuthenticatedRequest, r
 
     const employeesData = await Employee.find({ employeeType: { $ne: 'hourly' } }).lean();
     
-    // Only include active employees, or those terminated on/after the start of this month, or those who haven't been FNF marked
+    // Only include active employees, or those terminated on/after the start of this month
     const employees = employeesData.filter(emp => {
+      if (new Date(emp.joiningDate) > endDate) return false; // Joined after this month ends
       if (emp.isActive) return true;
       if (emp.terminationDate) {
         if (new Date(emp.terminationDate) >= startDate) return true;
       }
-      if (!emp.isFnfMarked) return true;
       return false;
     });
     
@@ -126,12 +126,16 @@ router.get('/employees/stats', requireAdmin, async (req: AuthenticatedRequest, r
 
       const dailyWage = emp.monthlySalary / daysInMonth;
       
-      // Calculate eligible days (days in month on or after joining date)
+      // Calculate eligible days (days in month on or after joining date and on or before termination date)
       let eligibleDaysInMonth = 0;
       for (let d = 1; d <= daysInMonth; d++) {
         const date = new Date(year, monthNum - 1, d);
-        if (date >= new Date(emp.joiningDate)) {
-          eligibleDaysInMonth++;
+        // Start counting from joining date
+        if (date >= new Date(new Date(emp.joiningDate).setHours(0,0,0,0))) {
+          // Stop counting after termination date
+          if (!emp.terminationDate || date <= new Date(new Date(emp.terminationDate).setHours(0,0,0,0))) {
+            eligibleDaysInMonth++;
+          }
         }
       }
 

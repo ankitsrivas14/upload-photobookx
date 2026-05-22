@@ -9,6 +9,7 @@ interface EmployeeStat {
   monthlySalary: number;
   joiningDate: string;
   isActive: boolean;
+  terminationDate?: string;
   stats: {
     presentDays: number;
     absentDays: number;
@@ -336,19 +337,25 @@ export function AttendancePage() {
                           const joiningDate = new Date(emp.joiningDate).setHours(0,0,0,0);
                           const selectedDate = new Date(dateStr).setHours(0,0,0,0);
                           const isBeforeJoining = selectedDate < joiningDate;
+                          
+                          const terminationDate = emp.terminationDate ? new Date(emp.terminationDate).setHours(0,0,0,0) : null;
+                          const isAfterTermination = terminationDate ? selectedDate > terminationDate : false;
+                          
                           const status = monthlyRecords[dateStr]?.[emp._id] || (isSunday ? 'holiday' : 'none');
                           
                           return (
                             <td key={emp._id} className={styles.statusCell}>
-                              {!isBeforeJoining ? (
+                              {isBeforeJoining ? (
+                                <span className={styles.notJoined}>-</span>
+                              ) : isAfterTermination ? (
+                                <span className={styles.notJoined} style={{ color: '#ef4444', fontWeight: 'bold' }} title="Terminated">T</span>
+                              ) : (
                                 <button 
                                   className={`${styles.gridStatusBtn} ${styles[status]}`}
                                   onClick={() => markMonthlyAttendance(emp._id, dateStr, status)}
                                 >
                                   {getStatusLabel(status)}
                                 </button>
-                              ) : (
-                                <span className={styles.notJoined}>-</span>
                               )}
                             </td>
                           );
@@ -372,6 +379,7 @@ export function AttendancePage() {
             <span><strong>H</strong>: Half Day</span>
             <span><strong>A</strong>: Absent</span>
             <span><strong>Sun</strong>: Sunday/Holiday</span>
+            <span><strong style={{ color: '#ef4444' }}>T</strong>: Terminated</span>
           </div>
         </div>
       )}
