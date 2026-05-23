@@ -1253,6 +1253,21 @@ async saveAdsPerformance(adData: any[], level?: string, date?: string): Promise<
       codDeliveredCount: number; codFailedCount: number;
     };
     completedDates?: string[];
+    records?: Array<{
+      dateKey: string;
+      prepaidCount: number;
+      codCount: number;
+      deliveredCount: number;
+      failedCount: number;
+      inTransitCount: number;
+      outForDeliveryCount: number;
+      attemptedDeliveryCount: number;
+      confirmedCount: number;
+      codDeliveredCount: number;
+      codFailedCount: number;
+      isCompleted: boolean;
+      sessions?: number;
+    }>;
     error?: string;
   }> {
     const params = new URLSearchParams();
@@ -1270,6 +1285,7 @@ async saveAdsPerformance(adData: any[], level?: string, date?: string): Promise<
     success: boolean;
     summary?: {
       days: number;
+      completedDays: number;
       orders: number;
       revenue: number;
       cogs: number;
@@ -1288,6 +1304,7 @@ async saveAdsPerformance(adData: any[], level?: string, date?: string): Promise<
       cogs: number;
       adSpend: number;
       profit: number;
+      isCompleted: boolean;
       avgRevenuePerOrder: number;
       avgCogsPerOrder: number;
       avgProfitPerOrder: number;

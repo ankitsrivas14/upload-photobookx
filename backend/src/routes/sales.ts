@@ -8,6 +8,7 @@ import { backfillShippingStats } from '../services/shippingStatsService';
 import { backfillOrderStats } from '../services/orderStatsService';
 import { backfillDailyPnl, getVariantPerformance } from '../services/dailyPnlService';
 import { computeBreakevenMetrics } from '../services/breakevenService';
+import shopifyService from '../services/shopifyService';
 
 const router = express.Router();
 
@@ -1145,9 +1146,41 @@ router.get('/daily-order-stats', requireAdmin, async (req: AuthenticatedRequest,
       agg.codFailedCount += r.codFailedCount ?? 0;
     }
 
+    let finalStartDate = startDate;
+    let finalEndDate = endDate;
+
+    if (records.length > 0) {
+      if (!finalStartDate) finalStartDate = records[0].dateKey;
+      if (!finalEndDate) finalEndDate = records[records.length - 1].dateKey;
+    }
+
+    let sessionsMap: Record<string, number> = {};
+    if (finalStartDate && finalEndDate) {
+      sessionsMap = await shopifyService.getDailySessions(finalStartDate, finalEndDate);
+    }
+
     const completedDates = (records as any[]).filter((r) => r.isCompleted).map((r) => r.dateKey as string);
 
-    res.json({ success: true, stats: agg, completedDates });
+    res.json({
+      success: true,
+      stats: agg,
+      completedDates,
+      records: records.map((r: any) => ({
+        dateKey: r.dateKey,
+        prepaidCount: r.prepaidCount,
+        codCount: r.codCount,
+        deliveredCount: r.deliveredCount,
+        failedCount: r.failedCount,
+        inTransitCount: r.inTransitCount,
+        outForDeliveryCount: r.outForDeliveryCount,
+        attemptedDeliveryCount: r.attemptedDeliveryCount,
+        confirmedCount: r.confirmedCount,
+        codDeliveredCount: r.codDeliveredCount,
+        codFailedCount: r.codFailedCount,
+        isCompleted: r.isCompleted,
+        sessions: sessionsMap[r.dateKey] ?? 0,
+      })),
+    });
   } catch (error) {
     console.error('Error fetching daily order stats:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch order stats' });

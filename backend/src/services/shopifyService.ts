@@ -1038,6 +1038,73 @@ class ShopifyService {
       };
     }
   }
+
+  /**
+   * Get daily sessions for a given date range using ShopifyQL
+   */
+  async getDailySessions(startDate: string, endDate: string): Promise<Record<string, number>> {
+    try {
+      const url = `https://${this.storeDomain}/admin/api/unstable/graphql.json`;
+      const query = `
+        query {
+          shopifyqlQuery(query: "FROM sessions SHOW sessions TIMESERIES day SINCE ${startDate} UNTIL ${endDate}") {
+            tableData {
+              columns {
+                name
+                dataType
+                displayName
+              }
+              rows
+            }
+            parseErrors
+          }
+        }
+      `;
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'X-Shopify-Access-Token': this.accessToken,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ query }),
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        console.error('[ShopifyQL] HTTP Error:', response.status, error);
+        return {};
+      }
+
+      const json = await response.json() as any;
+      if (json.errors) {
+        console.error('[ShopifyQL] GraphQL Errors:', json.errors);
+        return {};
+      }
+
+      const shopifyqlQuery = json.data?.shopifyqlQuery;
+      if (shopifyqlQuery?.parseErrors && shopifyqlQuery.parseErrors.length > 0) {
+        console.error('[ShopifyQL] Parse Errors:', shopifyqlQuery.parseErrors);
+        return {};
+      }
+
+      const rows = shopifyqlQuery?.tableData?.rows || [];
+      const sessionsByDate: Record<string, number> = {};
+
+      for (const row of rows) {
+        const dateKey = row.day;
+        const sessionsCount = parseInt(row.sessions || '0', 10);
+        if (dateKey) {
+          sessionsByDate[dateKey] = sessionsCount;
+        }
+      }
+
+      return sessionsByDate;
+    } catch (error) {
+      console.error('[ShopifyQL] Error fetching daily sessions:', error);
+      return {};
+    }
+  }
 }
 
 export default new ShopifyService();

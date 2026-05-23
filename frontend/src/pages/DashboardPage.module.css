@@ -472,3 +472,120 @@
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
 }
+
+.conversions-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 0.25rem;
+}
+
+.conversions-controls {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.conversions-control-group {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.conversions-control-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: #64748b;
+  letter-spacing: 0.025em;
+}
+
+.conversions-days-input {
+  width: 72px;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  background: #f8fafc;
+  font-weight: 500;
+  color: #0f172a;
+}
+
+.conversions-sessions-input {
+  width: 90px;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  background: #f8fafc;
+  font-weight: 500;
+  color: #0f172a;
+}
+
+
+.conversions-date-input {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: 0.8125rem;
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+.conversions-divider {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  font-weight: 500;
+  padding-bottom: 0.4rem;
+}
+
+.conversions-go-btn {
+  padding: 0.4rem 1rem;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.8125rem;
+  background: #0f172a;
+  color: white;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.15s;
+  align-self: flex-end;
+}
+
+.conversions-go-btn:hover {
+  background: #1e293b;
+}
+
+.conversions-clear-btn {
+  padding: 0.4rem 0.75rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: 0.8125rem;
+  background: white;
+  color: #64748b;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.15s;
+  align-self: flex-end;
+}
+
+.conversions-clear-btn:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.conversions-skeleton {
+  height: 280px;
+  border-radius: 8px;
+  background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
+  background-size: 200% 100%;
+  animation: conversions-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes conversions-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}

@@ -86,7 +86,7 @@ function MetricChart({ title, data, dataKey, color, formatValue, zeroLine }: Met
           {zeroLine && <ReferenceLine y={0} stroke="#e2e8f0" />}
           <Tooltip
             contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e2e8f0', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}
-            formatter={(v: number) => [formatValue(v), title]}
+            formatter={(v: any) => [formatValue(Number(v)), title] as any}
             labelStyle={{ color: '#64748b', marginBottom: 4 }}
           />
           <Line

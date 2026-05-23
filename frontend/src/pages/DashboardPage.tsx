@@ -41,6 +41,24 @@ export function DashboardPage() {
   // ROAS data fetched from DB
   const [roasDbRecords, setRoasDbRecords] = useState<Array<{ dateKey: string; revenue: number; adSpend: number; roas: number | null }>>([]);
   const [roasLoading, setRoasLoading] = useState(false);
+
+  // Conversions filter — uncontrolled refs
+  const conversionsDaysRef = useRef<HTMLInputElement>(null);
+  const conversionsStartRef = useRef<HTMLInputElement>(null);
+  const conversionsEndRef = useRef<HTMLInputElement>(null);
+  // Conversions filter — applied state
+  const [conversionsDays, setConversionsDays] = useState(30);
+  const [conversionsStartDate, setConversionsStartDate] = useState('');
+  const [conversionsEndDate, setConversionsEndDate] = useState('');
+  // Conversions data fetched from DB
+  const [conversionsDbRecords, setConversionsDbRecords] = useState<Array<{
+    dateKey: string;
+    prepaidCount: number;
+    codCount: number;
+    sessions?: number;
+  }>>([]);
+  const [conversionsLoading, setConversionsLoading] = useState(false);
+  const [conversionsSessions, setConversionsSessions] = useState(10000);
   // Heatmap P&L from DB — keyed by dateKey
   const [heatmapByDate, setHeatmapByDate] = useState<Record<string, number>>({});
   // Monthly bar chart records from DB
@@ -156,6 +174,34 @@ export function DashboardPage() {
     }
   }, []);
 
+  const loadConversions = useCallback(async (days: number, startDate: string, endDate: string) => {
+    setConversionsLoading(true);
+    try {
+      let start: string;
+      let end: string;
+      if (startDate && endDate) {
+        start = startDate;
+        end = endDate;
+      } else {
+        const now = new Date();
+        end = now.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+        const s = new Date(now);
+        s.setDate(s.getDate() - (days - 1));
+        start = s.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+      }
+      const res = await api.getDailyOrderStats(start, end);
+      if (res.success && res.records) {
+        setConversionsDbRecords(res.records);
+        const sumSessions = res.records.reduce((sum: number, r: any) => sum + (r.sessions || 0), 0);
+        setConversionsSessions(sumSessions || Math.round(days * 333.3));
+      }
+    } catch (err) {
+      console.error('Failed to load conversions data:', err);
+    } finally {
+      setConversionsLoading(false);
+    }
+  }, []);
+
   const loadShipping = useCallback(async () => {
     try {
       // Fetch all history — widget aggregates client-side by granularity
@@ -222,13 +268,14 @@ export function DashboardPage() {
     if (user) {
       loadBreakevenMetrics();
       loadROAS(roasDays, roasStartDate, roasEndDate);
+      loadConversions(conversionsDays, conversionsStartDate, conversionsEndDate);
       loadShipping();
       loadOrderStats();
       loadPnlChart(selectedYear, selectedMonth);
       loadHeatmap(selectedYear);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount
-  }, [user, loadBreakevenMetrics, loadROAS, loadShipping, loadOrderStats, loadPnlChart, loadHeatmap]);
+  }, [user, loadBreakevenMetrics, loadROAS, loadConversions, loadShipping, loadOrderStats, loadPnlChart, loadHeatmap]);
 
   // Re-fetch bar chart when selected month/year changes
   useEffect(() => {
@@ -276,6 +323,21 @@ export function DashboardPage() {
     adSpend: r.adSpend,
     profit: heatmapByDate[r.dateKey] || 0,
   }));
+
+  // Conversions chart data — built from DB records fetched on Go / mount
+  const conversionsChartData = conversionsDbRecords.map((r) => {
+    const totalOrders = (r.prepaidCount ?? 0) + (r.codCount ?? 0);
+    const sessions = r.sessions ?? 0;
+    return {
+      date: new Date(r.dateKey).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: STORE_TIMEZONE }),
+      dateKey: r.dateKey,
+      total: totalOrders,
+      prepaid: r.prepaidCount ?? 0,
+      cod: r.codCount ?? 0,
+      sessions,
+      conversionRate: sessions > 0 ? parseFloat(((totalOrders / sessions) * 100).toFixed(2)) : 0,
+    };
+  });
 
   // Profit Chart Data — built from DB records (no orders array needed)
   const profitChartData = (() => {
@@ -724,6 +786,258 @@ export function DashboardPage() {
           </div>
           <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', fontStyle: 'italic' }}>
             Formula: Breakeven ROAS = Avg Revenue ÷ Contribution Margin. Based on fully completed days to avoid bias from pending orders.
+          </div>
+        </div>
+      </section>
+
+      <section className={styles.section}>
+        <div className={styles['conversions-header']}>
+          <div>
+            <h2 className={styles['section-title']}>
+              Conversions —{' '}
+              {conversionsStartDate && conversionsEndDate
+                ? `${new Date(conversionsStartDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} – ${new Date(conversionsEndDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`
+                : `Last ${conversionsDays} Days`}
+            </h2>
+            <p className={styles['section-desc']}>
+              Shopify conversions trend. Shows daily total orders (prepaid + COD) and volume breakdowns. Higher is better.
+            </p>
+          </div>
+          <div className={styles['conversions-controls']}>
+            <div className={styles['conversions-control-group']}>
+              <label className={styles['conversions-control-label']}>Last N days</label>
+              <input
+                ref={conversionsDaysRef}
+                type="number"
+                min={1}
+                max={365}
+                className={styles['conversions-days-input']}
+                defaultValue={30}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    const days = Math.max(1, Number(conversionsDaysRef.current?.value) || 30);
+                    setConversionsDays(days);
+                    setConversionsStartDate('');
+                    setConversionsEndDate('');
+                    if (conversionsStartRef.current) conversionsStartRef.current.value = '';
+                    if (conversionsEndRef.current) conversionsEndRef.current.value = '';
+                    loadConversions(days, '', '');
+                    setConversionsSessions(Math.round(days * 333.3));
+                  }
+                }}
+              />
+            </div>
+            <span className={styles['conversions-divider']}>or</span>
+            <div className={styles['conversions-control-group']}>
+              <label className={styles['conversions-control-label']}>From</label>
+              <input
+                ref={conversionsStartRef}
+                type="date"
+                className={styles['conversions-date-input']}
+                defaultValue=""
+              />
+            </div>
+            <div className={styles['conversions-control-group']}>
+              <label className={styles['conversions-control-label']}>To</label>
+              <input
+                ref={conversionsEndRef}
+                type="date"
+                className={styles['conversions-date-input']}
+                defaultValue=""
+              />
+            </div>
+            <button
+              className={styles['conversions-go-btn']}
+              onClick={() => {
+                const start = conversionsStartRef.current?.value || '';
+                const end = conversionsEndRef.current?.value || '';
+                const days = Math.max(1, Number(conversionsDaysRef.current?.value) || 30);
+                if (start && end) {
+                  setConversionsStartDate(start);
+                  setConversionsEndDate(end);
+                  loadConversions(days, start, end);
+                  const diffTime = Math.abs(new Date(end).getTime() - new Date(start).getTime());
+                  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+                  setConversionsSessions(Math.round(diffDays * 333.3));
+                } else {
+                  setConversionsDays(days);
+                  setConversionsStartDate('');
+                  setConversionsEndDate('');
+                  loadConversions(days, '', '');
+                  setConversionsSessions(Math.round(days * 333.3));
+                }
+              }}
+            >
+              Go
+            </button>
+            {(conversionsStartDate || conversionsEndDate) && (
+              <button
+                className={styles['conversions-clear-btn']}
+                onClick={() => {
+                  setConversionsStartDate('');
+                  setConversionsEndDate('');
+                  if (conversionsStartRef.current) conversionsStartRef.current.value = '';
+                  if (conversionsEndRef.current) conversionsEndRef.current.value = '';
+                  loadConversions(conversionsDays, '', '');
+                  setConversionsSessions(Math.round(conversionsDays * 333.3));
+                }}
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        </div>
+        <div className={styles.chartWrap}>
+          {conversionsLoading ? (
+            <div className={styles['conversions-skeleton']} />
+          ) : (
+            <ResponsiveContainer width="100%" height={280}>
+              <LineChart
+                data={conversionsChartData}
+                margin={{ top: 12, right: 12, left: 0, bottom: 8 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
+                <XAxis
+                  dataKey="date"
+                  tick={{ fontSize: 11, fill: 'var(--chart-muted)' }}
+                  tickLine={false}
+                  axisLine={{ stroke: 'var(--chart-axis)' }}
+                  interval="preserveStartEnd"
+                  minTickGap={30}
+                />
+                <YAxis
+                  tick={{ fontSize: 11, fill: 'var(--chart-muted)' }}
+                  tickLine={false}
+                  axisLine={false}
+                  width={40}
+                  tickFormatter={(v) => `${v.toFixed(1)}%`}
+                  domain={[0, 'auto']}
+                />
+                <Tooltip
+                  contentStyle={{
+                    border: 'none',
+                    borderRadius: 8,
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+                    padding: '10px 14px',
+                  }}
+                  labelStyle={{ color: 'var(--chart-muted)', fontWeight: 500, marginBottom: 4 }}
+                  formatter={(value, name, props) => {
+                    if (name === 'Conversion Rate') {
+                      const payload = props.payload;
+                      return [
+                        <>
+                          <div style={{ marginBottom: 4 }}>
+                            <strong>Conversion Rate: {value !== null ? `${Number(value).toFixed(2)}%` : 'N/A'}</strong>
+                          </div>
+                          <div style={{ fontSize: 11, color: 'var(--chart-muted)' }}>
+                            Total Conversions: {payload.total} orders
+                          </div>
+                          <div style={{ fontSize: 11, color: 'var(--chart-muted)' }}>
+                            Prepaid: {payload.prepaid} | COD: {payload.cod}
+                          </div>
+                          <div style={{ fontSize: 11, color: 'var(--chart-muted)' }}>
+                            Shopify Sessions: {payload.sessions}
+                          </div>
+                        </>,
+                        ''
+                      ];
+                    }
+                    return [value, name];
+                  }}
+                />
+                <Legend
+                  wrapperStyle={{ paddingTop: 12 }}
+                  iconType="line"
+                  iconSize={10}
+                  formatter={(value) => <span className={styles.chartLegendText}>{value}</span>}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="conversionRate"
+                  name="Conversion Rate"
+                  stroke="#4f46e5"
+                  strokeWidth={2.5}
+                  dot={(props: any) => {
+                    const { cx, cy, payload } = props;
+                    const date = new Date(payload.dateKey);
+                    const todayIdx = new Date().getDay();
+                    const isMatchingDay = date.getDay() === todayIdx;
+                    
+                    if (isMatchingDay) {
+                      return (
+                        <g key={payload.dateKey}>
+                          <circle cx={cx} cy={cy} r={5} fill="#4f46e5" stroke="#fff" strokeWidth={2} />
+                          <text 
+                            x={cx} 
+                            y={cy - 12} 
+                            textAnchor="middle" 
+                            fontSize={10} 
+                            fontWeight="700" 
+                            fill="#4f46e5"
+                          >
+                            {payload.conversionRate !== null ? `${payload.conversionRate.toFixed(1)}%` : ''}
+                          </text>
+                        </g>
+                      );
+                    }
+                    return null as any;
+                  }}
+                  activeDot={{ r: 6, strokeWidth: 0, fill: '#4f46e5' }}
+                  connectNulls
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+        <div className={styles.chartStats}>
+          <div className={styles.chartStatBlock}>
+            <span className={styles.chartStatLabel}>Average Daily Conversions</span>
+            <span className={styles.chartStatValue} style={{ fontSize: '1.5rem', fontWeight: 600 }}>
+              {(() => {
+                if (conversionsChartData.length === 0) return 'N/A';
+                const totalConvs = conversionsChartData.reduce((sum, d) => sum + d.total, 0);
+                return (totalConvs / conversionsChartData.length).toFixed(1);
+              })()}
+            </span>
+          </div>
+          <div className={styles.chartStatBlock}>
+            <span className={styles.chartStatLabel}>Total Conversions</span>
+            <span className={styles.chartStatValue} style={{ fontSize: '1.5rem', fontWeight: 600, color: '#6366f1' }}>
+              {conversionsChartData.reduce((sum, d) => sum + d.total, 0)}
+            </span>
+          </div>
+          <div className={styles.chartStatBlock}>
+            <span className={styles.chartStatLabel}>Prepaid Conversions</span>
+            <span className={styles.chartStatValue} style={{ fontSize: '1.5rem', fontWeight: 600, color: '#10b981' }}>
+              {conversionsChartData.reduce((sum, d) => sum + d.prepaid, 0)}
+            </span>
+          </div>
+          <div className={styles.chartStatBlock}>
+            <span className={styles.chartStatLabel}>COD Conversions</span>
+            <span className={styles.chartStatValue} style={{ fontSize: '1.5rem', fontWeight: 600, color: '#f59e0b' }}>
+              {conversionsChartData.reduce((sum, d) => sum + d.cod, 0)}
+            </span>
+          </div>
+          <div className={styles.chartStatBlock}>
+            <span className={styles.chartStatLabel}>Prepaid Ratio</span>
+            <span className={styles.chartStatValue} style={{ fontSize: '1.5rem', fontWeight: 600 }}>
+              {(() => {
+                const total = conversionsChartData.reduce((sum, d) => sum + d.total, 0);
+                const prepaid = conversionsChartData.reduce((sum, d) => sum + d.prepaid, 0);
+                if (total === 0) return '0%';
+                return `${((prepaid / total) * 100).toFixed(1)}%`;
+              })()}
+            </span>
+          </div>
+          <div className={styles.chartStatBlock}>
+            <span className={styles.chartStatLabel}>Conversion Rate</span>
+            <span className={styles.chartStatValue} style={{ fontSize: '1.5rem', fontWeight: 600, color: '#4f46e5' }}>
+              {(() => {
+                const total = conversionsChartData.reduce((sum, d) => sum + d.total, 0);
+                if (!conversionsSessions || conversionsSessions <= 0) return '0.00%';
+                return `${((total / conversionsSessions) * 100).toFixed(2)}%`;
+              })()}
+            </span>
           </div>
         </div>
       </section>
