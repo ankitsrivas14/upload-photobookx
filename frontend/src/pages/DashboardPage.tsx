@@ -61,6 +61,10 @@ export function DashboardPage() {
   const [conversionsSessions, setConversionsSessions] = useState(10000);
   // Heatmap P&L from DB — keyed by dateKey
   const [heatmapByDate, setHeatmapByDate] = useState<Record<string, number>>({});
+  // Full yearly daily records — used for monthly profit aggregation
+  const [yearlyPnlRecords, setYearlyPnlRecords] = useState<Array<{
+    dateKey: string; isCompleted: boolean; barChartProfit: number;
+  }>>([]);
   // Monthly bar chart records from DB
   const [pnlChartRecords, setPnlChartRecords] = useState<Array<{
     dateKey: string; isCompleted: boolean; barChartProfit: number;
@@ -258,6 +262,11 @@ export function DashboardPage() {
         const map: Record<string, number> = {};
         res.records.forEach((r) => { map[r.dateKey] = r.heatmapProfit; });
         setHeatmapByDate(map);
+        setYearlyPnlRecords(res.records.map((r) => ({
+          dateKey: r.dateKey,
+          isCompleted: r.isCompleted,
+          barChartProfit: r.barChartProfit,
+        })));
       }
     } catch (err) {
       console.error('Failed to load heatmap data:', err);
@@ -349,7 +358,7 @@ export function DashboardPage() {
     // Build a quick lookup from DB records
     const dbMap = new Map(pnlChartRecords.map((r) => [r.dateKey, r]));
 
-    const data: Array<{ date: string; dateKey: string; bookedProfit: number; yetToBookProfit: number }> = [];
+    const data: Array<{ date: string; dateKey: string; bookedProfit: number | null; unrealizedProfit: number | null; displayProfit: number | null; yetToBookProfit: number }> = [];
     const currentDate = new Date(startDate);
 
     while (currentDate <= endDate) {
@@ -358,14 +367,20 @@ export function DashboardPage() {
       const isFuture = dateKey > todayKey;
 
       let bookedProfit: number | null = null;
+      let unrealizedProfit: number | null = null;
+
       if (!isFuture && rec?.isCompleted) {
         bookedProfit = rec.barChartProfit;
+      } else if (!isFuture && rec && !rec.isCompleted) {
+        unrealizedProfit = rec.barChartProfit;
       }
 
       data.push({
         date: currentDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: STORE_TIMEZONE }),
         dateKey,
-        bookedProfit: bookedProfit as any,
+        bookedProfit,
+        unrealizedProfit,
+        displayProfit: bookedProfit ?? unrealizedProfit,
         yetToBookProfit: 0,
       });
 
@@ -373,6 +388,23 @@ export function DashboardPage() {
     }
 
     return data;
+  })();
+
+  // Monthly profit line chart — sum of barChartProfit for completed days, grouped by month
+  const monthlyProfitData = (() => {
+    const now = new Date();
+    const shortMonths = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const monthMap: Record<number, number> = {};
+    for (const rec of yearlyPnlRecords) {
+      if (!rec.isCompleted) continue;
+      const month = new Date(rec.dateKey + 'T00:00:00').getMonth();
+      monthMap[month] = (monthMap[month] ?? 0) + rec.barChartProfit;
+    }
+    const lastMonth = now.getFullYear() === selectedYear ? now.getMonth() : 11;
+    return shortMonths.slice(0, lastMonth + 1).map((name, i) => ({
+      month: name,
+      profit: monthMap[i] !== undefined ? Math.round(monthMap[i]) : null,
+    }));
   })();
 
   // Breakeven metrics from DB (null while loading)
@@ -1115,15 +1147,19 @@ export function DashboardPage() {
                 strokeDasharray="3 3"
               />
               <Bar
-                dataKey="bookedProfit"
-                name="Booked Profit"
+                dataKey="displayProfit"
+                name="Profit"
                 maxBarSize={24}
                 radius={[2, 2, 2, 2]}
               >
                 {profitChartData.map((entry, index) => (
                   <Cell
-                    key={`cell-booked-${index}`}
-                    fill={entry.bookedProfit >= 0 ? '#10b981' : '#ef4444'}
+                    key={`cell-${index}`}
+                    fill={
+                      entry.unrealizedProfit !== null && entry.bookedProfit === null
+                        ? '#e2e8f0'
+                        : (entry.bookedProfit ?? 0) >= 0 ? '#10b981' : '#ef4444'
+                    }
                   />
                 ))}
               </Bar>
@@ -1177,6 +1213,100 @@ export function DashboardPage() {
             </span>
             <span style={{ fontSize: '0.7rem', color: 'var(--chart-muted)', marginTop: '4px', display: 'block' }}>
               With in-transit orders
+            </span>
+          </div>
+        </div>
+      </section>
+
+      <section className={styles.section}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+          <div>
+            <h2 className={styles['section-title']} style={{ marginBottom: '0.25rem', marginTop: 0 }}>
+              Monthly Profit — {selectedYear}
+            </h2>
+            <p className={styles['section-desc']} style={{ marginBottom: 0 }}>
+              Total booked profit per month (completed days only).
+            </p>
+          </div>
+          <select
+            value={selectedYear}
+            onChange={(e) => setSelectedYear(Number(e.target.value))}
+            className={styles.select}
+            style={{ width: 'auto' }}
+          >
+            {[2024, 2025, 2026].map((y) => (
+              <option key={y} value={y}>{y}</option>
+            ))}
+          </select>
+        </div>
+        <div className={styles.chartWrap}>
+          <ResponsiveContainer width="100%" height={280}>
+            <LineChart data={monthlyProfitData} margin={{ top: 12, right: 12, left: 0, bottom: 8 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
+              <XAxis
+                dataKey="month"
+                tick={{ fontSize: 11, fill: 'var(--chart-muted)' }}
+                tickLine={false}
+                axisLine={{ stroke: 'var(--chart-axis)' }}
+              />
+              <YAxis
+                tick={{ fontSize: 11, fill: 'var(--chart-muted)' }}
+                tickLine={false}
+                axisLine={false}
+                width={55}
+                tickFormatter={(v) => `₹${Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(0)}k` : v}`}
+              />
+              <Tooltip
+                contentStyle={{ border: 'none', borderRadius: 8, boxShadow: '0 4px 12px rgba(0,0,0,0.08)', padding: '10px 14px' }}
+                labelStyle={{ color: 'var(--chart-muted)', fontWeight: 500, marginBottom: 4 }}
+                formatter={(value) => [
+                  `${Number(value) >= 0 ? '+' : ''}₹${Number(value).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,
+                  'Profit'
+                ]}
+              />
+              <ReferenceLine y={0} stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="3 3" />
+              <Line
+                type="monotone"
+                dataKey="profit"
+                stroke="#6366f1"
+                strokeWidth={2.5}
+                connectNulls={false}
+                dot={(props: any) => {
+                  const { cx, cy, value } = props;
+                  if (value === null || value === undefined) return <g key={props.key} />;
+                  return <circle key={props.key} cx={cx} cy={cy} r={5} fill={value >= 0 ? '#10b981' : '#ef4444'} stroke="white" strokeWidth={2} />;
+                }}
+                activeDot={{ r: 6, stroke: 'white', strokeWidth: 2 }}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+        <div className={styles.chartStats}>
+          <div className={styles.chartStatBlock}>
+            <span className={styles.chartStatLabel}>Best Month</span>
+            <span className={styles.chartStatValue} style={{ fontSize: '1.25rem', fontWeight: 700, color: '#10b981' }}>
+              {(() => {
+                const best = monthlyProfitData.filter(d => d.profit !== null).reduce((a, b) => (b.profit! > (a?.profit ?? -Infinity) ? b : a), null as typeof monthlyProfitData[0] | null);
+                return best ? `${best.month} · +₹${best.profit!.toLocaleString('en-IN')}` : '—';
+              })()}
+            </span>
+          </div>
+          <div className={styles.chartStatBlock}>
+            <span className={styles.chartStatLabel}>Worst Month</span>
+            <span className={styles.chartStatValue} style={{ fontSize: '1.25rem', fontWeight: 700, color: '#ef4444' }}>
+              {(() => {
+                const worst = monthlyProfitData.filter(d => d.profit !== null).reduce((a, b) => (b.profit! < (a?.profit ?? Infinity) ? b : a), null as typeof monthlyProfitData[0] | null);
+                return worst ? `${worst.month} · ${worst.profit! >= 0 ? '+' : ''}₹${worst.profit!.toLocaleString('en-IN')}` : '—';
+              })()}
+            </span>
+          </div>
+          <div className={styles.chartStatBlock}>
+            <span className={styles.chartStatLabel}>Year Total</span>
+            <span className={styles.chartStatValue} style={{ fontSize: '1.25rem', fontWeight: 700, color: '#6366f1' }}>
+              {(() => {
+                const total = monthlyProfitData.filter(d => d.profit !== null).reduce((sum, d) => sum + d.profit!, 0);
+                return `${total >= 0 ? '+' : ''}₹${total.toLocaleString('en-IN')}`;
+              })()}
             </span>
           </div>
         </div>

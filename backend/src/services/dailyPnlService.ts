@@ -180,13 +180,39 @@ interface OrderPnlBreakdown {
   pnl: number;  // revenue - cogs - adCostPerOrder
 }
 
+/**
+ * Compute the historical RTO rate for COD orders.
+ * Uses only finalized COD orders (delivered or failed/RTO) to avoid bias from pending orders.
+ * Falls back to 20% if fewer than 20 finalized COD orders are available.
+ */
+function computeHistoricalRtoRate(
+  ordersByDate: Map<string, any[]>,
+  rtoSet: Set<number>
+): number {
+  let finalCodCount = 0;
+  let rtoCount = 0;
+
+  for (const [, dayOrders] of ordersByDate) {
+    for (const order of dayOrders) {
+      if (isPaymentPrepaid(order)) continue;
+      if (!orderIsFinalStatus(order, rtoSet)) continue;
+      finalCodCount++;
+      if (!orderIsDelivered(order, rtoSet)) rtoCount++;
+    }
+  }
+
+  if (finalCodCount < 20) return 0.20; // not enough data — default 20%
+  return rtoCount / finalCodCount;
+}
+
 function calcOrderPnl(
   order: any,
   adCostPerOrder: number,
   rtoSet: Set<number>,
   shippingMap: Map<string, number>,
   cogsFields: any[],
-  overrides?: { pre?: TotalOverrides; post?: TotalOverrides }
+  overrides?: { pre?: TotalOverrides; post?: TotalOverrides },
+  rtoRate?: number  // historical COD RTO rate for expected-value estimation of pending orders
 ): OrderPnlBreakdown {
   if (cogsFields.length === 0 && !overrides) return { revenue: 0, cogs: 0, pnl: 0 };
 
@@ -210,6 +236,40 @@ function calcOrderPnl(
     revenue = 0;
     fieldsToUse = cogsFields.filter((f) => f.type === 'ndr' || f.type === 'both');
   } else {
+    // Pending order
+    if (!isPaymentPrepaid(order) && rtoRate !== undefined) {
+      // Expected-value model for pending COD orders:
+      //   With probability (1 − rtoRate) → will be delivered: full revenue + delivery COGS
+      //   With probability rtoRate        → will be RTO:       zero revenue + NDR COGS
+      const orderValue = parseFloat(order.current_total_price ?? order.total_price ?? '0') || 0;
+      const deliverProb = 1 - rtoRate;
+      const rtoProb     = rtoRate;
+      const k = `${variant}${pm}Value` as ValueKey;
+
+      const deliverFields = cogsFields.filter((f) => f.type === 'cogs' || f.type === 'both');
+      const rtoFields     = cogsFields.filter((f) => f.type === 'ndr'  || f.type === 'both');
+
+      let dCogs = 0; // COGS if delivered
+      let rCogs = 0; // COGS if RTO
+      for (const cat of ['pre', 'post'] as const) {
+        const ov = overrides?.[cat]?.[k];
+        if (ov !== undefined) {
+          dCogs += ov;
+          rCogs += ov;
+        } else {
+          dCogs += sumCategoryFields(deliverFields, cat, k, orderValue);
+          rCogs += sumCategoryFields(rtoFields,     cat, k, 0);
+        }
+      }
+
+      const oName    = (order.name ?? '').replace(/^#/, '');
+      const shipCost = shippingMap.get(oName) ?? shippingMap.get(`#${oName}`) ?? 0;
+
+      const expRevenue = orderValue * deliverProb;
+      const expCogs    = dCogs * deliverProb + rCogs * rtoProb + shipCost;
+      return { revenue: expRevenue, cogs: expCogs, pnl: expRevenue - expCogs - adCostPerOrder };
+    }
+    // Pending prepaid (or no rtoRate available): treat as 0 revenue
     revenue = 0;
     fieldsToUse = cogsFields.filter((f) => f.type === 'cogs' || f.type === 'both');
   }
@@ -318,11 +378,15 @@ export async function recomputePnlForDate(
   rtoSet?: Set<number>,
   shippingMap?: Map<string, number>,
   adSpendByDate?: Map<string, number>,
-  cogsVersions?: CogsVersion[]
+  cogsVersions?: CogsVersion[],
+  rtoRate?: number  // pre-computed historical COD RTO rate; derived from data when omitted
 ): Promise<void> {
-  const orders = ordersByDate
-    ? (ordersByDate.get(dateKey) ?? [])
-    : await (async () => { const m = await loadOrdersByDate(); return m.get(dateKey) ?? []; })();
+  // Keep the full map so we can compute the historical RTO rate when not pre-supplied
+  let allOrdersByDate = ordersByDate;
+  if (!allOrdersByDate) {
+    allOrdersByDate = await loadOrdersByDate();
+  }
+  const orders = allOrdersByDate.get(dateKey) ?? [];
 
   const rto = rtoSet ?? (await loadRtoSet());
   const shipMap = shippingMap ?? (await loadShippingMap());
@@ -339,6 +403,9 @@ export async function recomputePnlForDate(
   // Bar-chart completion: all orders explicitly delivered/failed (or no orders)
   const isCompleted = orderCount === 0 || orders.every((o) => orderIsFinalStatus(o, rto));
 
+  // Effective RTO rate: use pre-supplied value, or compute from full order history
+  const effectiveRtoRate = rtoRate ?? computeHistoricalRtoRate(allOrdersByDate, rto);
+
   let barChartProfit = 0;
   let heatmapProfit = 0;
   let hasHeatmapOrders = false;
@@ -346,7 +413,11 @@ export async function recomputePnlForDate(
   let totalCogs = 0;
 
   for (const order of orders) {
-    const { revenue, cogs: orderCogs, pnl } = calcOrderPnl(order, adCostPerOrder, rto, shipMap, cogs, overrides);
+    // Pass rtoRate only for incomplete days — completed days have no pending orders anyway
+    const { revenue, cogs: orderCogs, pnl } = calcOrderPnl(
+      order, adCostPerOrder, rto, shipMap, cogs, overrides,
+      isCompleted ? undefined : effectiveRtoRate
+    );
 
     totalRevenue += revenue;
     totalCogs += orderCogs;
@@ -392,12 +463,15 @@ export async function backfillDailyPnl(): Promise<{ upserted: number }> {
     loadCogsVersions(),
   ]);
 
+  // Compute RTO rate once from full history; reused for every date
+  const rtoRate = computeHistoricalRtoRate(ordersByDate, rtoSet);
+
   // Include both order dates and ad-spend dates
   const allDates = new Set([...ordersByDate.keys(), ...adSpendByDate.keys()]);
 
   let upserted = 0;
   for (const dateKey of allDates) {
-    await recomputePnlForDate(dateKey, ordersByDate, rtoSet, shippingMap, adSpendByDate, cogsVersions);
+    await recomputePnlForDate(dateKey, ordersByDate, rtoSet, shippingMap, adSpendByDate, cogsVersions, rtoRate);
     upserted++;
   }
 

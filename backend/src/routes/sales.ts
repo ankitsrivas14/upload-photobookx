@@ -3,10 +3,10 @@ import { DiscardedOrder, RTOOrder, ProfitPrediction, ShippingCharge, OrderDelive
 import { requireAdmin } from './adminAuth';
 import { AuthenticatedRequest } from '../types';
 import aiService from '../services/aiService';
-import { backfillAllDates } from '../services/roasService';
+import { backfillAllDates, recomputeForDate } from '../services/roasService';
 import { backfillShippingStats } from '../services/shippingStatsService';
 import { backfillOrderStats } from '../services/orderStatsService';
-import { backfillDailyPnl, getVariantPerformance } from '../services/dailyPnlService';
+import { backfillDailyPnl, recomputePnlForDate, getVariantPerformance } from '../services/dailyPnlService';
 import { computeBreakevenMetrics } from '../services/breakevenService';
 import shopifyService from '../services/shopifyService';
 
@@ -1015,6 +1015,18 @@ router.post('/ads-performance', requireAdmin, async (req: AuthenticatedRequest, 
 router.get('/daily-roas', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
+
+    // Always recompute the last 3 days so today's revenue is never stale
+    const IST_OFFSET = 5.5 * 60 * 60 * 1000;
+    const todayIST = new Date(Date.now() + IST_OFFSET);
+    const recentDates: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const d = new Date(todayIST);
+      d.setDate(d.getDate() - i);
+      recentDates.push(d.toISOString().slice(0, 10));
+    }
+    await Promise.all(recentDates.map((dk) => recomputeForDate(dk)));
+
     const filter: Record<string, any> = {};
     if (startDate || endDate) {
       filter.dateKey = {};
@@ -1212,6 +1224,18 @@ router.post('/daily-order-stats/backfill', requireAdmin, async (_req: Authentica
 router.get('/daily-pnl', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { month, year, startDate, endDate } = req.query as Record<string, string | undefined>;
+
+    // Always recompute the last 3 days so today's figures are never stale
+    const IST_OFFSET = 5.5 * 60 * 60 * 1000;
+    const todayIST = new Date(Date.now() + IST_OFFSET);
+    const recentDates: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const d = new Date(todayIST);
+      d.setDate(d.getDate() - i);
+      recentDates.push(d.toISOString().slice(0, 10));
+    }
+    await Promise.all(recentDates.map((dk) => recomputePnlForDate(dk)));
+
     const filter: Record<string, any> = {};
 
     if (month) {

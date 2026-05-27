@@ -29,7 +29,9 @@ async function buildRevenueByDate(): Promise<Record<string, number>> {
 
       const dateKey = toDateKey(new Date(order.created_at));
       if (dateKey < DATA_START_DATE) continue;
-      revenueByDate[dateKey] = (revenueByDate[dateKey] || 0) + parseFloat(order.total_price || '0');
+      // Use current_total_price (reflects edits/discounts) falling back to total_price — same as dailyPnlService
+      const price = parseFloat(order.current_total_price ?? order.total_price ?? '0') || 0;
+      revenueByDate[dateKey] = (revenueByDate[dateKey] || 0) + price;
     }
   }
 
