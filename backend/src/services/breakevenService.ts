@@ -86,7 +86,10 @@ export async function computeBreakevenMetrics(): Promise<BreakevenMetrics> {
       }
       return map;
     }),
-    COGSConfiguration.findOne().lean().then((c) => (c as any)?.fields ?? []),
+    COGSConfiguration.findOne({ effectiveFrom: { $lte: new Date() } })
+      .sort({ effectiveFrom: -1 })
+      .lean()
+      .then((c) => (c as any)?.fields ?? []),
     ShopifyOrderCache.find({ cacheKey: { $regex: /^all_orders_/ } }, { orders: 1 }).lean(),
   ]);
 

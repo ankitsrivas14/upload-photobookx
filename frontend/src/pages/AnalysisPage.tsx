@@ -92,6 +92,12 @@ export function AnalysisPage() {
             <main className={styles['dashboard-main']}>
                 <div className={styles['analysis-nav']}>
                     <Link
+                        to="/admin/analysis/ads"
+                        className={`${styles['analysis-nav-item']} ${isAds ? styles.active : ''}`}
+                    >
+                        Ads Analysis
+                    </Link>
+                    <Link
                         to="/admin/analysis/failed-orders"
                         className={`${styles['analysis-nav-item']} ${isFailedOrders ? styles.active : ''}`}
                     >
@@ -115,22 +121,16 @@ export function AnalysisPage() {
                     >
                         Tickets
                     </Link>
-                    <Link
-                        to="/admin/analysis/ads"
-                        className={`${styles['analysis-nav-item']} ${isAds ? styles.active : ''}`}
-                    >
-                        Ads Analysis
-                    </Link>
                 </div>
 
                 <Routes>
+                    <Route path="ads" element={<AdsAnalysis />} />
                     <Route path="failed-orders" element={<FailedOrdersAnalysis />} />
                     <Route path="pin-codes" element={<PinCodesAnalysis />} />
                     <Route path="stuck-orders" element={<StuckOrdersAnalysis />} />
                     <Route path="tickets" element={<TicketsAnalysis />} />
                     <Route path="tickets/new" element={<CreateTicketForm />} />
-                    <Route path="ads" element={<AdsAnalysis />} />
-                    <Route path="*" element={<Navigate to="failed-orders" replace />} />
+                    <Route path="*" element={<Navigate to="ads" replace />} />
                 </Routes>
             </main>
         </div>

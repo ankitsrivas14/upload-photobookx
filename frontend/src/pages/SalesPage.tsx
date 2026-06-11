@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
 import styles from './SalesPage.module.css';
@@ -30,12 +30,40 @@ interface COGSBreakdown {
   calculatedCost: number;
 }
 
+interface COGSTotalOverrides {
+  smallPrepaidValue?: number;
+  smallCODValue?: number;
+  largePrepaidValue?: number;
+  largeCODValue?: number;
+}
+
+interface COGSOverrides {
+  pre?: COGSTotalOverrides;
+  post?: COGSTotalOverrides;
+}
+
+interface COGSVersionEntry {
+  effectiveFrom: string; // YYYY-MM-DD
+  fields: COGSField[];
+  totalOverrides?: COGSOverrides;
+}
+
 // Store timezone for order date (match Shopify reports: India = Asia/Kolkata)
 const STORE_TIMEZONE = 'Asia/Kolkata';
 
 /** Order date as YYYY-MM-DD in store timezone so daily revenue matches Shopify (e.g. "Yesterday") */
 function getOrderDateKey(createdAt: string): string {
   return new Date(createdAt).toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+}
+
+/** Pick the COGS version whose effectiveFrom <= dateKey (versions must be sorted oldest-first) */
+function getCogsVersionForDate(dateKey: string, versions: COGSVersionEntry[]): COGSVersionEntry | null {
+  let result: COGSVersionEntry | null = null;
+  for (const v of versions) {
+    if (v.effectiveFrom <= dateKey) result = v;
+    else break;
+  }
+  return result;
 }
 
 // Helper function to format numbers with Indian comma notation
@@ -150,7 +178,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
   const [showCogsModal, setShowCogsModal] = useState(false);
   const [selectedOrderForCogs, setSelectedOrderForCogs] = useState<ShopifyOrder | null>(null);
   const [selectedVariant, setSelectedVariant] = useState<'small' | 'large'>('small');
-  const [cogsConfig, setCogsConfig] = useState<COGSField[]>([]);
+  const [cogsVersions, setCogsVersions] = useState<COGSVersionEntry[]>([]);
   const [cogsBreakdown, setCogsBreakdown] = useState<COGSBreakdown[]>([]);
 
   // Delivery Status Update Modal State
@@ -161,8 +189,9 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
   // Per-order P/L cache (orderId -> profit/loss)
   const [orderProfitLoss, setOrderProfitLoss] = useState<Map<number, number>>(new Map());
 
-  // Ad cost per order by date (YYYY-MM-DD -> cost). Used to deduct Meta ad cost from P/L.
-  const [adCostPerOrderByDate, setAdCostPerOrderByDate] = useState<Record<string, number>>({});
+  // Fixed monthly expenses total for the selected month (deducted from Total P/L)
+  const [fixedMonthlyTotal, setFixedMonthlyTotal] = useState(0);
+
   // Ad spend by date (YYYY-MM-DD -> total amount). Used to show "Ad spend" in day header row.
   const [adSpendByDate, setAdSpendByDate] = useState<Record<string, number>>({});
 
@@ -170,12 +199,21 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
   const [aiPrediction, setAiPrediction] = useState<any>(null);
   const [isPredicting, setIsPredicting] = useState(false);
 
-  useEffect(() => {
-    loadData(selectedMonthFilter);
-    if (selectedMonthFilter !== 'all') {
-      fetchCurrentPrediction();
-    }
-  }, [selectedMonthFilter]);
+  // Derived: ad cost per order per day — depends on orders + adSpendByDate, no fetch needed
+  const adCostPerOrderByDate = useMemo(() => {
+    const orderCountByDate: Record<string, number> = {};
+    orders.forEach((o) => {
+      if (o.cancelledAt) return;
+      const d = getOrderDateKey(o.createdAt);
+      orderCountByDate[d] = (orderCountByDate[d] || 0) + 1;
+    });
+    const result: Record<string, number> = {};
+    Object.keys(adSpendByDate).forEach((d) => {
+      const count = orderCountByDate[d] || 0;
+      if (count > 0) result[d] = adSpendByDate[d] / count;
+    });
+    return result;
+  }, [orders, adSpendByDate]);
 
   const fetchCurrentPrediction = async () => {
     const monthYear = selectedMonthFilter === 'current' 
@@ -205,88 +243,14 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
 
     setIsPredicting(true);
     try {
-      // 1. Fetch ALL orders to build 6-month history (Feb 2026 onwards)
-      const allOrdersRes = await api.getOrders(10000, true, undefined, 'all');
-      const allOrdersList = allOrdersRes.success && allOrdersRes.orders ? allOrdersRes.orders : [];
-      
-      const CUTOFF_DATE = new Date('2026-02-01T00:00:00Z');
-      const sixMonthsOrders = allOrdersList.filter(o => new Date(o.createdAt) >= CUTOFF_DATE && !o.cancelledAt && !discardedOrderIds.has(o.id));
-
-      const monthlyStatsMap = new Map<string, any>();
-      const dailyDataMap = new Map<string, any>();
-
-      sixMonthsOrders.forEach(o => {
-        const dateKey = getOrderDateKey(o.createdAt);
-        const monthKey = dateKey.substring(0, 7); // YYYY-MM
-        
-        if (!monthlyStatsMap.has(monthKey)) {
-          monthlyStatsMap.set(monthKey, { totalOrders: 0, codOrders: 0, prepaidOrders: 0, codFailed: 0, prepaidFailed: 0, codDelivered: 0, prepaidDelivered: 0, totalPL: 0 });
-        }
-        if (!dailyDataMap.has(dateKey)) {
-          dailyDataMap.set(dateKey, { placed: 0, delivered: 0, failed: 0 });
-        }
-        
-        const mStat = monthlyStatsMap.get(monthKey);
-        const dStat = dailyDataMap.get(dateKey);
-        
-        mStat.totalOrders++;
-        dStat.placed++;
-        
-        const isPrepaid = o.paymentMethod?.toLowerCase() === 'prepaid';
-        const status = o.deliveryStatus?.toLowerCase() || '';
-        const isFailed = rtoOrderIds.has(o.id) || status === 'failure' || status.includes('failed') || status.includes('rto');
-        const isDelivered = status === 'delivered';
-        
-        if (isPrepaid) mStat.prepaidOrders++;
-        else mStat.codOrders++;
-        
-        if (isFailed) {
-          dStat.failed++;
-          if (isPrepaid) mStat.prepaidFailed++;
-          else mStat.codFailed++;
-        } else if (isDelivered) {
-          dStat.delivered++;
-          if (isPrepaid) mStat.prepaidDelivered++;
-          else mStat.codDelivered++;
-        }
-        
-        if (isDelivered || isPrepaid) {
-          mStat.totalPL += orderProfitLoss.get(o.id) ?? expectedProfit.avgPLPerDeliveredOrder;
-        } else if (isFailed && !isPrepaid) {
-          mStat.totalPL -= (expectedProfit as any).avgLossPerFailedOrder || 0;
-        }
-      });
-      
-      Object.entries(adSpendByDate).forEach(([dateStr, spend]) => {
-        const d = new Date(dateStr);
-        if (d >= CUTOFF_DATE) {
-          const monthKey = dateStr.substring(0, 7);
-          if (monthlyStatsMap.has(monthKey)) {
-            monthlyStatsMap.get(monthKey).totalPL -= spend;
-          }
-        }
-      });
-
-      const sixMonthsStats = Array.from(monthlyStatsMap.entries()).map(([month, s]) => {
-        const codNdr = s.codFailed + s.codDelivered > 0 ? (s.codFailed / (s.codFailed + s.codDelivered) * 100).toFixed(1) : '0.0';
-        const prepaidNdr = s.prepaidFailed + s.prepaidDelivered > 0 ? (s.prepaidFailed / (s.prepaidFailed + s.prepaidDelivered) * 100).toFixed(1) : '0.0';
-        const totalNdr = s.codFailed + s.prepaidFailed + s.codDelivered + s.prepaidDelivered > 0 ? 
-          ((s.codFailed + s.prepaidFailed) / (s.codFailed + s.prepaidFailed + s.codDelivered + s.prepaidDelivered) * 100).toFixed(1) : '0.0';
-          
-        return {
-          month,
-          totalOrders: s.totalOrders,
-          ndrRateTotal: parseFloat(totalNdr),
-          ndrRateCOD: parseFloat(codNdr),
-          ndrRatePrepaid: parseFloat(prepaidNdr),
-          totalPL: Math.round(s.totalPL)
-        };
-      }).sort((a, b) => a.month.localeCompare(b.month));
-      
-      const sixMonthsDailyData = Array.from(dailyDataMap.entries()).map(([date, d]) => ({
-        date,
-        ...d
-      })).sort((a, b) => a.date.localeCompare(b.date));
+      // Fetch pre-computed historical stats from DB (replaces 10k-order fetch)
+      const predDataRes = await api.getAiPredictionData('2026-02-01');
+      if (!predDataRes.success) {
+        toast.error(predDataRes.error || 'Failed to load historical data');
+        return;
+      }
+      const sixMonthsStats = predDataRes.sixMonthsStats ?? [];
+      const sixMonthsDailyData = predDataRes.sixMonthsDailyData ?? [];
 
       const res = await api.predictProfit({
         monthYear,
@@ -335,139 +299,100 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showDelayDropdown]);
 
-  const loadData = async (monthArg?: string) => {
-    setIsLoading(true);
-    const targetMonth = monthArg || selectedMonthFilter;
+  const loadStaticData = async () => {
     try {
-      const [ordersResponse, discardedResponse, rtoResponse, cogsConfigResponse, adSpendResponse, acknowledgedResponse, ticketRaisedResponse] = await Promise.all([
-        api.getOrders(10000, true, undefined, targetMonth), // Fetch ONLY segmented orders natively from backend!
+      const [discardedResponse, rtoResponse, cogsVersionsResponse, adSpendResponse, acknowledgedResponse, ticketRaisedResponse] = await Promise.all([
         api.getDiscardedOrderIds(),
         api.getRTOOrderIds(),
-        api.getCOGSConfiguration(),
+        api.getCOGSVersions(),
         api.getDailyAdSpend(),
         api.getAcknowledgedOrderIds(),
         api.getTicketRaisedOrderIds(),
       ]);
 
+      if (discardedResponse.success) {
+        setDiscardedOrderIds(new Set(discardedResponse.discardedOrderIds));
+      }
+      if (rtoResponse.success) {
+        setRTOOrderIds(new Set(rtoResponse.rtoOrderIds));
+      }
+      if (acknowledgedResponse.success) {
+        setAcknowledgedOrderIds(new Set(acknowledgedResponse.acknowledgedOrderIds));
+      }
+      if (ticketRaisedResponse?.success) {
+        setTicketRaisedOrderIds(new Set(ticketRaisedResponse.ticketRaisedOrderIds));
+      }
+      if (cogsVersionsResponse?.success && cogsVersionsResponse.versions?.length > 0) {
+        // Sort oldest-first so getCogsVersionForDate can pick correct version per order date
+        const sorted = [...cogsVersionsResponse.versions]
+          .sort((a, b) => a.effectiveFrom.localeCompare(b.effectiveFrom))
+          .map(v => ({
+            effectiveFrom: new Date(v.effectiveFrom).toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE }),
+            fields: v.fields as COGSField[],
+            totalOverrides: v.totalOverrides as COGSOverrides | undefined,
+          }));
+        setCogsVersions(sorted);
+      }
+      const adSpendEntries = adSpendResponse.success && adSpendResponse.entries ? adSpendResponse.entries : [];
+      const adSpend: Record<string, number> = {};
+      adSpendEntries.forEach((e) => {
+        const d = new Date(e.date).toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+        adSpend[d] = (adSpend[d] || 0) + e.amount;
+      });
+      setAdSpendByDate(adSpend);
+    } catch (err) {
+      console.error('Failed to load static data:', err);
+    }
+  };
+
+  const loadOrders = async (monthArg?: string) => {
+    setIsLoading(true);
+    const targetMonth = monthArg || selectedMonthFilter;
+    try {
+      const ordersResponse = await api.getOrders(10000, true, undefined, targetMonth);
       if (ordersResponse.success && ordersResponse.orders) {
-        console.log(`Loaded ${ordersResponse.orders.length} orders from API`);
-
-        // Debug: Check date range of fetched orders
-        if (ordersResponse.orders.length > 0) {
-          const dates = ordersResponse.orders.map(o => new Date(o.createdAt).toISOString().split('T')[0]);
-          const uniqueDates = [...new Set(dates)].sort();
-          console.log(`Frontend: Order dates range: ${uniqueDates[0]} to ${uniqueDates[uniqueDates.length - 1]}`);
-
-          // Count orders per date
-          const dateCounts: Record<string, number> = {};
-          dates.forEach(d => {
-            dateCounts[d] = (dateCounts[d] || 0) + 1;
-          });
-          console.log('Frontend: Orders per date:', dateCounts);
-        }
-
-        // Debug: Log delivery statuses to understand what we're getting
-        const deliveryStatusCounts: Record<string, number> = {};
-        const fulfillmentStatusCounts: Record<string, number> = {};
-        let unfulfilledCount = 0;
-        let deliveredCount = 0;
-        let failedCount = 0;
-
-        let cancelledCount = 0;
-
-        ordersResponse.orders.forEach(order => {
-          // Skip cancelled orders in categorization
-          if (order.cancelledAt) {
-            cancelledCount++;
-            return;
-          }
-
-          const deliveryStatus = order.deliveryStatus || 'no_delivery_status';
-          const fulfillmentStatus = order.fulfillmentStatus || 'no_fulfillment_status';
-
-          deliveryStatusCounts[deliveryStatus] = (deliveryStatusCounts[deliveryStatus] || 0) + 1;
-          fulfillmentStatusCounts[fulfillmentStatus] = (fulfillmentStatusCounts[fulfillmentStatus] || 0) + 1;
-
-          // Categorize
-          const deliveryStatusLower = order.deliveryStatus?.toLowerCase() || '';
-          const fulfillmentStatusLower = order.fulfillmentStatus?.toLowerCase() || '';
-
-          if (deliveryStatusLower === 'delivered') {
-            deliveredCount++;
-          } else if (deliveryStatusLower === 'failure') {
-            failedCount++;
-          } else if (!fulfillmentStatusLower || fulfillmentStatusLower === '' || fulfillmentStatusLower === 'unfulfilled') {
-            unfulfilledCount++;
-          }
-        });
-
-        console.log('Delivery status breakdown:', deliveryStatusCounts);
-        console.log('Fulfillment status breakdown:', fulfillmentStatusCounts);
-        console.log('Filter categories:', {
-          unfulfilled: unfulfilledCount,
-          delivered: deliveredCount,
-          failed: failedCount,
-          cancelled: cancelledCount,
-          other: ordersResponse.orders.length - unfulfilledCount - deliveredCount - failedCount - cancelledCount
-        });
-
-        // Orders already include shipping breakdown from AWB data
-        // (Wallet transactions API not available for this account)
         setOrders(ordersResponse.orders);
         if (ordersResponse.availableMonths) {
           setAvailableMonthsList(ordersResponse.availableMonths);
         }
       }
-
-      if (discardedResponse.success) {
-        setDiscardedOrderIds(new Set(discardedResponse.discardedOrderIds));
-      }
-
-      if (rtoResponse.success) {
-        setRTOOrderIds(new Set(rtoResponse.rtoOrderIds));
-      }
-
-      if (acknowledgedResponse.success) {
-        setAcknowledgedOrderIds(new Set(acknowledgedResponse.acknowledgedOrderIds));
-      }
-
-      if (ticketRaisedResponse && ticketRaisedResponse.success) {
-        setTicketRaisedOrderIds(new Set(ticketRaisedResponse.ticketRaisedOrderIds));
-      }
-
-      if (cogsConfigResponse && cogsConfigResponse.fields) {
-        setCogsConfig(cogsConfigResponse.fields);
-      }
-
-      // Build ad cost per order by date (for P/L deduction)
-      const ordersList = ordersResponse.success && ordersResponse.orders ? ordersResponse.orders : [];
-      const adSpendEntries = adSpendResponse.success && adSpendResponse.entries ? adSpendResponse.entries : [];
-      const orderCountByDate: Record<string, number> = {};
-      ordersList.forEach((o) => {
-        if (o.cancelledAt) return;
-        const d = getOrderDateKey(o.createdAt);
-        orderCountByDate[d] = (orderCountByDate[d] || 0) + 1;
-      });
-      const adSpendByDate: Record<string, number> = {};
-      adSpendEntries.forEach((e) => {
-        const d = new Date(e.date).toISOString().split('T')[0];
-        adSpendByDate[d] = (adSpendByDate[d] || 0) + e.amount;
-      });
-      const adCostPerOrder: Record<string, number> = {};
-      Object.keys(adSpendByDate).forEach((d) => {
-        const count = orderCountByDate[d] || 0;
-        if (count > 0) adCostPerOrder[d] = adSpendByDate[d] / count;
-      });
-      console.log('Ad spend by date:', adSpendByDate);
-      console.log('Order count by date:', orderCountByDate);
-      setAdCostPerOrderByDate(adCostPerOrder);
-      setAdSpendByDate(adSpendByDate);
     } catch (err) {
-      console.error('Failed to load data:', err);
+      console.error('Failed to load orders:', err);
     } finally {
       setIsLoading(false);
     }
   };
+
+  useEffect(() => {
+    loadStaticData();
+  }, []);
+
+  useEffect(() => {
+    loadOrders(selectedMonthFilter);
+    if (selectedMonthFilter !== 'all') {
+      fetchCurrentPrediction();
+    }
+  }, [selectedMonthFilter]);
+
+  // Fetch fixed monthly expenses total whenever the selected month changes
+  useEffect(() => {
+    const getMonthKey = () => {
+      if (selectedMonthFilter === 'all' || selectedMonthFilter === 'last30') return null;
+      if (selectedMonthFilter === 'current') {
+        return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }).slice(0, 7);
+      }
+      return selectedMonthFilter; // already YYYY-MM
+    };
+    const monthKey = getMonthKey();
+    if (!monthKey) { setFixedMonthlyTotal(0); return; }
+    api.getFixedMonthlyExpenses(monthKey)
+      .then(res => {
+        if (res.success) {
+          setFixedMonthlyTotal(res.entries.reduce((sum, e) => sum + e.amount, 0));
+        }
+      })
+      .catch(() => setFixedMonthlyTotal(0));
+  }, [selectedMonthFilter]);
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -530,9 +455,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
           .map((o: any) => o.name);
 
         // Count breakdown for display
-        const totalOrders = response.orders.length;
         const fulfilledOrders = response.orders.filter((o: any) => o.fulfillmentStatus && o.fulfillmentStatus !== 'unfulfilled').length;
-        console.log(`Refresh: Total: ${totalOrders}, Fulfilled: ${fulfilledOrders}, Sync needed: ${orderNumbersToSync.length}`);
 
         if (orderNumbersToSync.length === 0) {
           setRefreshStatus(`All ${fulfilledOrders} deliveries up to date!`);
@@ -557,9 +480,13 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
         }
       }
 
-      // Step 4: Reload to get updated data with shipping breakdown
+      // Step 4: Recompute DailyPnl (updates totalRevenue/totalCogs for averages page)
+      setRefreshStatus('Recomputing daily P&L...');
+      await api.backfillDailyPnl();
+
+      // Step 5: Reload to get updated data with shipping breakdown
       setRefreshStatus('Refreshing display...');
-      await loadData(selectedMonthFilter);
+      await loadOrders(selectedMonthFilter);
     } catch (err) {
       console.error('Failed to refresh data:', err);
       toast.error('Failed to refresh data. Please try again.');
@@ -636,7 +563,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
   };
 
   // Orders for stats: month filter + exclude discarded/cancelled only (no status filter). Header stats never change when status filters are applied.
-  const getOrdersForStats = () => {
+  const ordersForStats = useMemo(() => {
     let filtered = orders.filter(order =>
       !discardedOrderIds.has(order.id) && !order.cancelledAt
     );
@@ -665,12 +592,10 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       }
     }
     return filtered;
-  };
-
-  const ordersForStats = getOrdersForStats();
+  }, [orders, discardedOrderIds, selectedMonthFilter]);
 
   // Filter orders based on selected month, status filters, and exclude discarded/cancelled orders
-  const getFilteredOrders = () => {
+  const filteredOrders = useMemo(() => {
     let filtered = ordersForStats;
 
     // Apply Payment Method filters
@@ -698,17 +623,18 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
         if (showNotAcknowledged) conditions.push(!acknowledgedOrderIds.has(order.id));
         if (showTicketRaised) conditions.push(ticketRaisedOrderIds.has(order.id) || order.hasTicket);
 
-        if (conditions.length === 0) return true; // Should ideally never hit this due to outer wrapper
-        
-        return filterOperator === 'AND' 
+        if (conditions.length === 0) return true;
+
+        return filterOperator === 'AND'
           ? conditions.every(c => c)
           : conditions.some(c => c);
       });
     }
     return filtered;
-  };
-
-  const filteredOrders = getFilteredOrders();
+  }, [ordersForStats, showPrepaid, showCOD, showUnfulfilled, showDelivered, showFailed,
+      showAttemptedDelivery, showInTransit, showOutForDelivery, showConfirmed,
+      showNotAcknowledged, showTicketRaised, acknowledgedOrderIds, ticketRaisedOrderIds,
+      rtoOrderIds, filterOperator]);
 
   const hasStatusFilter =
     showUnfulfilled || showDelivered || showFailed || showAttemptedDelivery || showInTransit || showOutForDelivery || showConfirmed || showNotAcknowledged || showTicketRaised;
@@ -732,7 +658,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
 
   // Group filtered orders by date; include ad-spend-only dates only when they're in the selected month
   // Global NDR rate from ALL orders (not filtered by month) — for expected NDR per day
-  const globalNdrRate = (() => {
+  const globalNdrRate = useMemo(() => {
     let delivered = 0;
     let failed = 0;
     orders.forEach((o) => {
@@ -749,10 +675,10 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
     });
     const finalCount = delivered + failed;
     return finalCount > 0 ? (failed / finalCount) * 100 : 0;
-  })();
+  }, [orders, discardedOrderIds, rtoOrderIds]);
 
   // Average P/L per final-status order (all orders) — for estimated P/L per day
-  const avgPnlPerFinalOrder = (() => {
+  const avgPnlPerFinalOrder = useMemo(() => {
     let totalPnl = 0;
     let count = 0;
     orders.forEach((o) => {
@@ -770,9 +696,9 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       }
     });
     return count > 0 ? totalPnl / count : 0;
-  })();
+  }, [orders, discardedOrderIds, rtoOrderIds, orderProfitLoss]);
 
-  const ordersGroupedByDate = (() => {
+  const ordersGroupedByDate = useMemo(() => {
     const byDate: Record<string, ShopifyOrder[]> = {};
     filteredOrders.forEach((order) => {
       const dateKey = getOrderDateKey(order.createdAt);
@@ -784,7 +710,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       if (!byDate[dateKey]) byDate[dateKey] = [];
     });
 
-    const grouped = Object.entries(byDate)
+    return Object.entries(byDate)
       .sort(([a], [b]) => b.localeCompare(a))
       .map(([dateKey, orders]) => ({
         dateKey,
@@ -792,24 +718,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
         orders,
         adSpend: adSpendByDate[dateKey] ?? 0,
       }));
-
-    // Debug logging
-    console.log('Orders grouped by date:', grouped.map(g => ({ date: g.dateKey, orderCount: g.orders.length, adSpend: g.adSpend })));
-    console.log('Total ordersForStats:', ordersForStats.length);
-    console.log('Filtered orders:', filteredOrders.length);
-
-    // Log ordersForStats date breakdown
-    if (ordersForStats.length > 0) {
-      const statsDateCounts: Record<string, number> = {};
-      ordersForStats.forEach(o => {
-        const d = getOrderDateKey(o.createdAt);
-        statsDateCounts[d] = (statsDateCounts[d] || 0) + 1;
-      });
-      console.log('OrdersForStats by date (after month filter):', statsDateCounts);
-    }
-
-    return grouped;
-  })();
+  }, [filteredOrders, adSpendByDate, selectedMonthFilter]);
 
   // Clear selections when filters change
   useEffect(() => {
@@ -898,7 +807,8 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
   };
 
   // Calculate stats from ordersForStats (month only, no status filter) so header stats don't change when filters are applied
-  const calculateStats = () => {
+  const stats = useMemo(() => {
+    const calculateStats = () => {
     const totalOrders = ordersForStats.length;
     let ndrCount = 0;
     let deliveredCount = 0;
@@ -1036,12 +946,13 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       unfulfilledCODCount,
       fulfilledCount,
     };
-  };
-
-  const stats = calculateStats();
+    };
+    return calculateStats();
+  }, [ordersForStats, rtoOrderIds]);
 
   // Calculate Expected Profit for current month
-  const calculateExpectedProfit = () => {
+  const expectedProfit = useMemo(() => {
+    const calculateExpectedProfit = () => {
     // Only calculate for current month or specific month selection
     if (selectedMonthFilter === 'all') {
       return null;
@@ -1099,6 +1010,9 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       if (!isDateInSelectedMonth(dateKey)) return;
       if (!datesWithOrders.has(dateKey)) currentPL -= amount;
     });
+
+    // Deduct fixed monthly expenses
+    currentPL -= fixedMonthlyTotal;
 
     // Count pending orders (not yet delivered/failed, EXCLUDING prepaid which are already counted)
     const pendingOrders = ordersForStats.filter(o => {
@@ -1210,9 +1124,10 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       remainingDays,
       isCurrentMonth,
     };
-  };
-
-  const expectedProfit = calculateExpectedProfit();
+    };
+    return calculateExpectedProfit();
+  }, [ordersForStats, orders, selectedMonthFilter, rtoOrderIds, discardedOrderIds,
+      orderProfitLoss, adSpendByDate, globalNdrRate, fixedMonthlyTotal]);
 
   const handleDiscardOrders = async () => {
     if (selectedOrders.size === 0) return;
@@ -1458,9 +1373,11 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
 
   // Calculate profit/loss for an order based on delivery status and payment method
   const calculateOrderProfitLoss = useCallback((order: ShopifyOrder): number => {
-    if (cogsConfig.length === 0) {
-      return 0;
-    }
+    if (cogsVersions.length === 0) return 0;
+
+    const orderDateStr = getOrderDateKey(order.createdAt);
+    const version = getCogsVersionForDate(orderDateStr, cogsVersions);
+    if (!version || version.fields.length === 0) return 0;
 
     const variant = detectVariant(order);
     const isDelivered = isOrderDelivered(order);
@@ -1471,68 +1388,59 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       status.includes('rto');
     const paymentMethod = order.paymentMethod?.toLowerCase() === 'prepaid' ? 'prepaid' : 'cod';
 
-    // Determine revenue and which fields to use
     let revenue = 0;
     let fieldsToUse: COGSField[] = [];
 
     if (isDelivered) {
-      // Delivered = Got money
       revenue = order.totalPrice || 0;
-      // Use COGS only + Both fields
-      fieldsToUse = cogsConfig.filter(f => f.type === 'cogs' || f.type === 'both');
+      fieldsToUse = version.fields.filter(f => f.type === 'cogs' || f.type === 'both');
     } else if (isFailed) {
-      // NDR/RTO/Failed = No money, apply NDR cost (attempted_delivery excluded)
       revenue = 0;
-      fieldsToUse = cogsConfig.filter(f => f.type === 'ndr' || f.type === 'both');
+      fieldsToUse = version.fields.filter(f => f.type === 'ndr' || f.type === 'both');
     } else {
-      // Pending (e.g. attempted_delivery, in_transit): no revenue, COGS only
       revenue = 0;
-      fieldsToUse = cogsConfig.filter(f => f.type === 'cogs' || f.type === 'both');
+      fieldsToUse = version.fields.filter(f => f.type === 'cogs' || f.type === 'both');
     }
 
-    // Calculate total costs using variant + payment method
-    let totalCosts = 0;
-    fieldsToUse.forEach(field => {
-      // Get the correct value based on variant and payment method
-      const key = `${variant}${paymentMethod === 'prepaid' ? 'Prepaid' : 'COD'}Value` as keyof COGSField;
-      let value = field[key] as number;
+    const valueKey = `${variant}${paymentMethod === 'prepaid' ? 'Prepaid' : 'COD'}Value` as keyof COGSField;
+    const salePrice = order.totalPrice || 0;
 
-      // Fallback to old structure if new structure not available
-      if (value === undefined || value === null) {
-        value = variant === 'small' ? (field.smallValue || 0) : (field.largeValue || 0);
-      }
-
-      if (field.calculationType === 'fixed') {
-        totalCosts += value;
-      } else {
-        // Percentage calculation based on type
-        const salePrice = order.totalPrice || 0;
-        const percentageType = field.percentageType || 'excluded'; // Default to excluded for backwards compatibility
-
-        if (percentageType === 'included') {
-          // Included: percentage is part of total amount
-          // Formula: amount × (percentage / (100 + percentage))
-          // Example: ₹100 with 12% included = ₹100 × (12/112) = ₹10.71
-          totalCosts += (value / (100 + value)) * salePrice;
-        } else {
-          // Excluded: percentage is added on top
-          // Formula: amount × (percentage / 100)
-          // Example: ₹100 with 12% excluded = ₹100 × 0.12 = ₹12
-          totalCosts += (value / 100) * salePrice;
+    const sumFields = (fields: COGSField[]) => {
+      let sum = 0;
+      fields.forEach(field => {
+        let value = field[valueKey] as number;
+        if (value === undefined || value === null) {
+          value = variant === 'small' ? (field.smallValue || 0) : (field.largeValue || 0);
         }
-      }
-    });
+        if (field.calculationType === 'fixed') {
+          sum += value;
+        } else {
+          const pct = field.percentageType || 'excluded';
+          sum += pct === 'included' ? (value / (100 + value)) * salePrice : (value / 100) * salePrice;
+        }
+      });
+      return sum;
+    };
 
-    const orderDateStr = getOrderDateKey(order.createdAt);
+    let totalCosts = 0;
+    for (const cat of ['pre', 'post'] as const) {
+      const override = version.totalOverrides?.[cat]?.[valueKey as keyof COGSTotalOverrides];
+      if (override !== undefined) {
+        totalCosts += override;
+      } else {
+        totalCosts += sumFields(fieldsToUse.filter(f => (f as any).category === cat || (cat === 'pre' && !(f as any).category)));
+      }
+    }
+
     const adCost = adCostPerOrderByDate[orderDateStr] ?? 0;
     const shippingCharge = calculateActualShippingCharge(order);
 
     return revenue - totalCosts - adCost - shippingCharge;
-  }, [cogsConfig, isOrderDelivered, adCostPerOrderByDate, rtoOrderIds, calculateActualShippingCharge]);
+  }, [cogsVersions, isOrderDelivered, adCostPerOrderByDate, rtoOrderIds, calculateActualShippingCharge]);
 
   // Calculate P/L for all orders when config loads
   useEffect(() => {
-    if (cogsConfig.length > 0 && orders.length > 0) {
+    if (cogsVersions.length > 0 && orders.length > 0) {
       const profitLossMap = new Map<number, number>();
       orders.forEach(order => {
         const profitLoss = calculateOrderProfitLoss(order);
@@ -1540,7 +1448,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       });
       setOrderProfitLoss(profitLossMap);
     }
-  }, [cogsConfig, orders, calculateOrderProfitLoss]);
+  }, [cogsVersions, orders, calculateOrderProfitLoss]);
 
   const handleOpenCogsModal = (order: ShopifyOrder) => {
     setSelectedOrderForCogs(order);
@@ -1548,12 +1456,13 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
     const paymentMethod = order.paymentMethod?.toLowerCase() === 'prepaid' ? 'prepaid' : 'cod';
     const orderDateStr = getOrderDateKey(order.createdAt);
     const adCost = adCostPerOrderByDate[orderDateStr] ?? 0;
+    const version = getCogsVersionForDate(orderDateStr, cogsVersions);
 
     // Determine config type based on delivery status
     const configType = isOrderDelivered(order) ? 'cogs' : 'ndr';
 
     setSelectedVariant(variant);
-    calculateCogsBreakdown(cogsConfig, order.totalPrice || 0, variant, paymentMethod, configType, adCost);
+    calculateCogsBreakdown(version?.fields ?? [], order.totalPrice || 0, variant, paymentMethod, configType, adCost, version?.totalOverrides);
     setShowCogsModal(true);
   };
 
@@ -1571,7 +1480,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
 
       if (response.success) {
         // Reload data to reflect the change
-        await loadData();
+        await loadOrders(selectedMonthFilter);
         setShowDeliveryStatusModal(false);
         setSelectedOrderForStatus(null);
         toast.success('Delivery status updated successfully');
@@ -1592,7 +1501,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
         const response = await api.addCustomerTag(customerId, tag);
         if (response.success) {
           await api.clearOrdersCache();
-          await loadData();
+          await loadOrders(selectedMonthFilter);
           toast.success('Tag added successfully');
         } else {
           toast.error(`Error: ${response.error || 'Failed to add tag'}`);
@@ -1657,7 +1566,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       const response = await api.bulkAddCustomerTags(customerIds, 'no-cod');
       if (response.success) {
         await api.clearOrdersCache();
-        await loadData();
+        await loadOrders(selectedMonthFilter);
         setSelectedOrders(new Set());
         setSelectAll(false);
         setShowBulkMenu(false);
@@ -1715,49 +1624,58 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
     variant: 'small' | 'large',
     paymentMethod: 'prepaid' | 'cod',
     configType: 'cogs' | 'ndr' | 'both',
-    adCost?: number
+    adCost?: number,
+    overrides?: COGSOverrides
   ) => {
     const breakdown: COGSBreakdown[] = [];
 
-    // Filter fields based on config type
     const fieldsToUse: COGSField[] =
       configType === 'cogs' ? fields.filter(f => f.type === 'cogs' || f.type === 'both') :
         configType === 'ndr' ? fields.filter(f => f.type === 'ndr' || f.type === 'both') :
-          fields; // 'both' uses all fields
+          fields;
 
-    fieldsToUse.forEach(field => {
-      // Get the correct value based on variant and payment method
-      const key = `${variant}${paymentMethod === 'prepaid' ? 'Prepaid' : 'COD'}Value` as keyof COGSField;
-      let value = field[key] as number;
+    const valueKey = `${variant}${paymentMethod === 'prepaid' ? 'Prepaid' : 'COD'}Value` as keyof COGSField;
 
-      // Fallback to old structure if new structure not available
+    const calcField = (field: COGSField) => {
+      let value = field[valueKey] as number;
       if (value === undefined || value === null) {
         value = variant === 'small' ? (field.smallValue || 0) : (field.largeValue || 0);
       }
-
       let calculatedCost = 0;
-
       if (field.calculationType === 'fixed') {
         calculatedCost = value;
       } else {
-        // Percentage calculation based on type
-        const percentageType = field.percentageType || 'excluded';
-
-        if (percentageType === 'included') {
-          calculatedCost = (value / (100 + value)) * salePrice;
-        } else {
-          calculatedCost = (value / 100) * salePrice;
-        }
+        const pct = field.percentageType || 'excluded';
+        calculatedCost = pct === 'included' ? (value / (100 + value)) * salePrice : (value / 100) * salePrice;
       }
+      return { value, calculatedCost };
+    };
 
-      breakdown.push({
-        fieldName: field.name,
-        type: field.type,
-        calculationType: field.calculationType,
-        value: value,
-        calculatedCost: calculatedCost,
-      });
-    });
+    for (const cat of ['pre', 'post'] as const) {
+      const catFields = fieldsToUse.filter(f => (f as any).category === cat || (cat === 'pre' && !(f as any).category));
+      const override = overrides?.[cat]?.[valueKey as keyof COGSTotalOverrides];
+      if (override !== undefined) {
+        const catLabel = cat === 'pre' ? 'Pre-cost total' : 'Post-cost total';
+        breakdown.push({
+          fieldName: `${catLabel} (override)`,
+          type: 'cogs',
+          calculationType: 'fixed',
+          value: override,
+          calculatedCost: override,
+        });
+      } else {
+        catFields.forEach(field => {
+          const { value, calculatedCost } = calcField(field);
+          breakdown.push({
+            fieldName: field.name,
+            type: field.type,
+            calculationType: field.calculationType,
+            value,
+            calculatedCost,
+          });
+        });
+      }
+    }
 
     if (adCost !== undefined && adCost > 0) {
       breakdown.push({
@@ -2011,7 +1929,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
 
           <div className={styles['stat-card']}>
             <div className={styles['stat-label']}>Total P/L</div>
-            <div className={`${styles['stat-value']} ${(() => {
+            {(() => {
               const ordersCountedInPnl = ordersForStats.filter(o => {
                 const deliveryStatus = o.deliveryStatus?.toLowerCase() || '';
                 const isDelivered = deliveryStatus === 'delivered';
@@ -2029,32 +1947,22 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
                 if (!isDateInSelectedMonth(dateKey)) return;
                 if (!datesWithOrders.has(dateKey)) totalPL -= amount;
               });
-              return totalPL > 0 ? styles.profit : totalPL < 0 ? styles.loss : '';
-            })()}`}>
-              {(() => {
-                const ordersCountedInPnl = ordersForStats.filter(o => {
-                  const deliveryStatus = o.deliveryStatus?.toLowerCase() || '';
-                  const isDelivered = deliveryStatus === 'delivered';
-                  const isFailed = rtoOrderIds.has(o.id) ||
-                    deliveryStatus === 'failure' ||
-                    deliveryStatus.includes('failed') ||
-                    deliveryStatus.includes('rto');
-                  return isDelivered || isFailed || (o.paymentMethod?.toLowerCase() === 'prepaid');
-                });
-                let totalPL = Array.from(orderProfitLoss.entries())
-                  .filter(([orderId]) => ordersCountedInPnl.some(o => o.id === orderId))
-                  .reduce((sum, [, pl]) => sum + pl, 0);
-                const datesWithOrders = new Set(ordersForStats.map(o => getOrderDateKey(o.createdAt)));
-                Object.entries(adSpendByDate).forEach(([dateKey, amount]) => {
-                  if (!isDateInSelectedMonth(dateKey)) return;
-                  if (!datesWithOrders.has(dateKey)) totalPL -= amount;
-                });
-                return `${totalPL > 0 ? '+' : ''}₹${formatIndianNumber(totalPL, 0)}`;
-              })()}
-            </div>
-            <div className={styles['stat-subtext']}>
-              {cogsConfig.length > 0 ? 'Delivered, failed & prepaid orders + ad-spend-only days' : 'Configure COGS to calculate'}
-            </div>
+              totalPL -= fixedMonthlyTotal;
+              return (
+                <>
+                  <div className={`${styles['stat-value']} ${totalPL > 0 ? styles.profit : totalPL < 0 ? styles.loss : ''}`}>
+                    {`${totalPL > 0 ? '+' : ''}₹${formatIndianNumber(totalPL, 0)}`}
+                  </div>
+                  <div className={styles['stat-subtext']}>
+                    {cogsVersions.length > 0
+                      ? fixedMonthlyTotal > 0
+                        ? `Incl. ₹${formatIndianNumber(fixedMonthlyTotal, 0)} fixed expenses`
+                        : 'Delivered, failed & prepaid orders + ad-spend-only days'
+                      : 'Configure COGS to calculate'}
+                  </div>
+                </>
+              );
+            })()}
           </div>
 
           {expectedProfit && (

@@ -9,6 +9,7 @@ interface EmployeeStat {
   monthlySalary: number;
   joiningDate: string;
   isActive: boolean;
+  terminationDate?: string;
   stats: {
     presentDays: number;
     absentDays: number;
@@ -46,11 +47,14 @@ export function AttendancePage() {
   // Modals
   const [showEmployeeModal, setShowEmployeeModal] = useState(false);
   const [showAdvanceModal, setShowAdvanceModal] = useState(false);
+  const [showStatusModal, setShowStatusModal] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState<string>('');
+  const [allEmployeesList, setAllEmployeesList] = useState<any[]>([]);
 
   // Form states
   const [empForm, setEmpForm] = useState({ name: '', employeeType: 'monthly' as 'monthly' | 'hourly', monthlySalary: '', hourlyRate: '', joiningDate: '' });
   const [advForm, setAdvForm] = useState({ amount: '', reason: '' });
+  const [statusForm, setStatusForm] = useState({ employeeId: '', name: '', isActive: true, terminationDate: '', isFnfMarked: false, fnfAmount: '' });
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -65,6 +69,17 @@ export function AttendancePage() {
       setLoading(false);
     }
   }, [monthStr]);
+
+  const loadAllEmployees = useCallback(async () => {
+    try {
+      const res = await api.getAllEmployees();
+      if (res.success && res.employees) {
+        setAllEmployeesList(res.employees);
+      }
+    } catch (error) {
+      toast.error('Failed to load all employees');
+    }
+  }, []);
 
   const loadHourlyData = useCallback(async () => {
     try {
@@ -98,7 +113,8 @@ export function AttendancePage() {
     loadData();
     if (activeTab === 'attendance') loadMonthlyData();
     if (activeTab === 'hourly') loadHourlyData();
-  }, [loadData, loadMonthlyData, loadHourlyData, activeTab]);
+    if (activeTab === 'employees') loadAllEmployees();
+  }, [loadData, loadMonthlyData, loadHourlyData, loadAllEmployees, activeTab]);
 
   const markMonthlyAttendance = async (empId: string, dateStr: string, currentStatus: string) => {
     const isSunday = new Date(dateStr).getDay() === 0;
@@ -183,6 +199,24 @@ export function AttendancePage() {
       loadData();
     } catch (error) {
       toast.error('Failed to record advance');
+    }
+  };
+
+  const handleStatusSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await api.updateEmployee(statusForm.employeeId, {
+        isActive: statusForm.isActive,
+        terminationDate: statusForm.isActive ? null : statusForm.terminationDate,
+        isFnfMarked: statusForm.isActive ? false : statusForm.isFnfMarked,
+        fnfAmount: statusForm.isActive || !statusForm.isFnfMarked ? null : Number(statusForm.fnfAmount)
+      });
+      toast.success('Employee status updated');
+      setShowStatusModal(false);
+      loadAllEmployees();
+      loadData();
+    } catch (error) {
+      toast.error('Failed to update employee status');
     }
   };
 
@@ -303,19 +337,25 @@ export function AttendancePage() {
                           const joiningDate = new Date(emp.joiningDate).setHours(0,0,0,0);
                           const selectedDate = new Date(dateStr).setHours(0,0,0,0);
                           const isBeforeJoining = selectedDate < joiningDate;
+                          
+                          const terminationDate = emp.terminationDate ? new Date(emp.terminationDate).setHours(0,0,0,0) : null;
+                          const isAfterTermination = terminationDate ? selectedDate > terminationDate : false;
+                          
                           const status = monthlyRecords[dateStr]?.[emp._id] || (isSunday ? 'holiday' : 'none');
                           
                           return (
                             <td key={emp._id} className={styles.statusCell}>
-                              {!isBeforeJoining ? (
+                              {isBeforeJoining ? (
+                                <span className={styles.notJoined}>-</span>
+                              ) : isAfterTermination ? (
+                                <span className={styles.notJoined} style={{ color: '#ef4444', fontWeight: 'bold' }} title="Terminated">T</span>
+                              ) : (
                                 <button 
                                   className={`${styles.gridStatusBtn} ${styles[status]}`}
                                   onClick={() => markMonthlyAttendance(emp._id, dateStr, status)}
                                 >
                                   {getStatusLabel(status)}
                                 </button>
-                              ) : (
-                                <span className={styles.notJoined}>-</span>
                               )}
                             </td>
                           );
@@ -339,6 +379,7 @@ export function AttendancePage() {
             <span><strong>H</strong>: Half Day</span>
             <span><strong>A</strong>: Absent</span>
             <span><strong>Sun</strong>: Sunday/Holiday</span>
+            <span><strong style={{ color: '#ef4444' }}>T</strong>: Terminated</span>
           </div>
         </div>
       )}
@@ -619,18 +660,60 @@ export function AttendancePage() {
             <thead>
               <tr>
                 <th>Name</th>
-                <th>Monthly Salary</th>
+                <th>Type</th>
+                <th>Salary / Rate</th>
                 <th>Joining Date</th>
                 <th>Status</th>
+                <th>Termination Info</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {employees.map(emp => (
-                <tr key={emp._id}>
+              {allEmployeesList.map(emp => (
+                <tr key={emp._id} style={{ opacity: emp.isActive ? 1 : 0.6 }}>
                   <td>{emp.name}</td>
-                  <td>₹{emp.monthlySalary.toLocaleString()}</td>
+                  <td style={{ textTransform: 'capitalize' }}>{emp.employeeType}</td>
+                  <td>
+                    {emp.employeeType === 'hourly' 
+                      ? `₹${emp.hourlyRate}/hr` 
+                      : `₹${emp.monthlySalary.toLocaleString()}/mo`}
+                  </td>
                   <td>{new Date(emp.joiningDate).toLocaleDateString()}</td>
-                  <td>{emp.isActive ? 'Active' : 'Inactive'}</td>
+                  <td>
+                    <span className={`${styles.badge} ${emp.isActive ? styles.paid : styles.unpaid}`}>
+                      {emp.isActive ? 'Active' : 'Inactive'}
+                    </span>
+                  </td>
+                  <td>
+                    {!emp.isActive && emp.terminationDate ? (
+                      <div style={{ fontSize: '0.85rem' }}>
+                        <div>Term: {new Date(emp.terminationDate).toLocaleDateString()}</div>
+                        <div style={{ color: emp.isFnfMarked ? '#16a34a' : '#ef4444' }}>
+                          {emp.isFnfMarked ? `✓ FNF (₹${emp.fnfAmount?.toLocaleString() || 0})` : '⚠ FNF Pending'}
+                        </div>
+                      </div>
+                    ) : (
+                      <span style={{ color: '#94a3b8' }}>-</span>
+                    )}
+                  </td>
+                  <td>
+                    <button 
+                      className={styles.actionBtn}
+                      onClick={() => {
+                        setStatusForm({
+                          employeeId: emp._id,
+                          name: emp.name,
+                          isActive: emp.isActive,
+                          terminationDate: emp.terminationDate ? new Date(emp.terminationDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+                          isFnfMarked: emp.isFnfMarked || false,
+                          fnfAmount: emp.fnfAmount ? emp.fnfAmount.toString() : ''
+                        });
+                        setShowStatusModal(true);
+                      }}
+                    >
+                      Manage Status
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -704,6 +787,72 @@ export function AttendancePage() {
               <div className={styles.modalActions}>
                 <button type="button" className={styles.btnSecondary} onClick={() => setShowAdvanceModal(false)}>Cancel</button>
                 <button type="submit" className={styles.btnPrimary}>Save Advance</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Manage Status Modal */}
+      {showStatusModal && (
+        <div className={styles.modalOverlay} onClick={() => setShowStatusModal(false)}>
+          <div className={styles.modal} onClick={e => e.stopPropagation()}>
+            <h3>Manage Status: {statusForm.name}</h3>
+            <form onSubmit={handleStatusSubmit}>
+              <div className={styles.formGroup}>
+                <label>Employment Status</label>
+                <div className={styles.typeToggle}>
+                  <button type="button"
+                    className={statusForm.isActive ? styles.typeActive : styles.typeInactive}
+                    onClick={() => setStatusForm({...statusForm, isActive: true})}>
+                    Active
+                  </button>
+                  <button type="button"
+                    className={!statusForm.isActive ? styles.typeActive : styles.typeInactive}
+                    onClick={() => setStatusForm({...statusForm, isActive: false})}>
+                    Terminated / Inactive
+                  </button>
+                </div>
+              </div>
+              
+              {!statusForm.isActive && (
+                <>
+                  <div className={styles.formGroup}>
+                    <label>Termination Date</label>
+                    <input 
+                      required 
+                      type="date" 
+                      value={statusForm.terminationDate} 
+                      onChange={e => setStatusForm({...statusForm, terminationDate: e.target.value})} 
+                    />
+                  </div>
+                  <div className={styles.formGroup} style={{ flexDirection: 'row', alignItems: 'center', gap: '0.5rem' }}>
+                    <input 
+                      type="checkbox" 
+                      id="fnfCheck"
+                      checked={statusForm.isFnfMarked} 
+                      onChange={e => setStatusForm({...statusForm, isFnfMarked: e.target.checked})}
+                      style={{ width: 'auto' }}
+                    />
+                    <label htmlFor="fnfCheck" style={{ marginBottom: 0, cursor: 'pointer' }}>Mark Full & Final (FNF) Settled</label>
+                  </div>
+                  {statusForm.isFnfMarked && (
+                    <div className={styles.formGroup}>
+                      <label>FNF Amount (₹)</label>
+                      <input 
+                        required 
+                        type="number" 
+                        value={statusForm.fnfAmount} 
+                        onChange={e => setStatusForm({...statusForm, fnfAmount: e.target.value})} 
+                      />
+                    </div>
+                  )}
+                </>
+              )}
+              
+              <div className={styles.modalActions} style={{ marginTop: '1.5rem' }}>
+                <button type="button" className={styles.btnSecondary} onClick={() => setShowStatusModal(false)}>Cancel</button>
+                <button type="submit" className={styles.btnPrimary}>Save Status</button>
               </div>
             </form>
           </div>

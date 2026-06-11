@@ -1,0 +1,311 @@
+.page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 0 1rem;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
+}
+
+.title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #0f172a;
+  margin: 0 0 0.25rem;
+}
+
+.subtitle {
+  font-size: 0.875rem;
+  color: #64748b;
+  margin: 0;
+}
+
+.monthRow {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+  padding: 0.75rem 1rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.monthLabel {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #475569;
+  white-space: nowrap;
+}
+
+.monthInput {
+  padding: 0.375rem 0.75rem;
+  font-size: 0.875rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  background: white;
+  color: #0f172a;
+}
+
+.monthInput:focus {
+  outline: none;
+  border-color: #00B8D4;
+  box-shadow: 0 0 0 2px rgba(0, 184, 212, 0.1);
+}
+
+/* Add row */
+.addRow {
+  display: flex;
+  gap: 0.625rem;
+  margin-bottom: 1.25rem;
+}
+
+.labelInput {
+  flex: 1;
+  padding: 0.625rem 0.875rem;
+  font-size: 0.875rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: white;
+  transition: all 0.15s;
+}
+
+.labelInput:focus {
+  outline: none;
+  border-color: #00B8D4;
+  box-shadow: 0 0 0 2px rgba(0, 184, 212, 0.1);
+}
+
+.amountInput {
+  width: 140px;
+  padding: 0.625rem 0.875rem;
+  font-size: 0.875rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: white;
+  transition: all 0.15s;
+}
+
+.amountInput:focus {
+  outline: none;
+  border-color: #00B8D4;
+  box-shadow: 0 0 0 2px rgba(0, 184, 212, 0.1);
+}
+
+.addBtn {
+  padding: 0.625rem 1.25rem;
+  background: #00B8D4;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+.addBtn:hover:not(:disabled) {
+  background: #0097A7;
+}
+
+.addBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Table */
+.tableWrap {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.emptyState {
+  padding: 3rem 2rem;
+  text-align: center;
+  color: #94a3b8;
+  font-size: 0.875rem;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table thead th {
+  padding: 0.75rem 1rem;
+  background: #f8fafc;
+  border-bottom: 2px solid #e2e8f0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.thLabel { text-align: left; }
+.thAmount { text-align: right; }
+.thActions { width: 120px; }
+
+.table tbody tr {
+  border-bottom: 1px solid #f1f5f9;
+  transition: background 0.1s;
+}
+
+.table tbody tr:hover {
+  background: #fafafa;
+}
+
+.table tbody tr:last-child {
+  border-bottom: none;
+}
+
+.tdLabel {
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;
+  color: #0f172a;
+}
+
+.tdAmount {
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;
+  color: #0f172a;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.tdActions {
+  padding: 0.5rem 0.75rem;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.editInput {
+  width: 100%;
+  padding: 0.375rem 0.625rem;
+  font-size: 0.875rem;
+  border: 1px solid #00B8D4;
+  border-radius: 4px;
+  background: #fafbff;
+  box-shadow: 0 0 0 2px rgba(0, 184, 212, 0.1);
+}
+
+.editInput:focus {
+  outline: none;
+}
+
+.editAmountInput {
+  width: 110px;
+  text-align: right;
+}
+
+.editBtn {
+  padding: 0.3rem 0.625rem;
+  font-size: 0.8125rem;
+  background: transparent;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #475569;
+  transition: all 0.15s;
+  margin-right: 0.25rem;
+}
+
+.editBtn:hover {
+  border-color: #00B8D4;
+  color: #00B8D4;
+  background: #f0fdff;
+}
+
+.saveBtn {
+  padding: 0.3rem 0.625rem;
+  font-size: 0.8125rem;
+  background: #00B8D4;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s;
+  margin-right: 0.25rem;
+}
+
+.saveBtn:hover {
+  background: #0097A7;
+}
+
+.cancelBtn {
+  padding: 0.3rem 0.625rem;
+  font-size: 0.8125rem;
+  background: transparent;
+  color: #64748b;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.cancelBtn:hover {
+  background: #f1f5f9;
+}
+
+.deleteBtn {
+  padding: 0.3rem;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: inline-flex;
+  align-items: center;
+}
+
+.deleteBtn svg {
+  width: 15px;
+  height: 15px;
+  color: #cbd5e1;
+}
+
+.deleteBtn:hover {
+  background: #fef2f2;
+  border-color: #fee2e2;
+}
+
+.deleteBtn:hover svg {
+  color: #dc2626;
+}
+
+/* Footer total */
+.table tfoot td {
+  padding: 0.875rem 1rem;
+  border-top: 2px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.totalLabel {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #475569;
+}
+
+.totalAmount {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #0e7490;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 600px) {
+  .addRow {
+    flex-direction: column;
+  }
+  .amountInput {
+    width: 100%;
+  }
+}

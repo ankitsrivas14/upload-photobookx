@@ -11,6 +11,7 @@ interface AdminUser {
 interface COGSField {
   id: string;
   name: string;
+  category: 'pre' | 'post';
   // Old structure (deprecated, kept for backwards compatibility)
   smallValue?: number;
   largeValue?: number;
@@ -21,11 +22,27 @@ interface COGSField {
   largeCODValue: number;
   type: 'cogs' | 'ndr' | 'both';
   calculationType: 'fixed' | 'percentage';
-  percentageType: 'included' | 'excluded'; // For percentage: included (part of total) or excluded (added on top)
+  percentageType: 'included' | 'excluded';
 }
 
 interface COGSConfiguration {
   fields: COGSField[];
+}
+
+export interface COGSTotalOverrides {
+  smallPrepaidValue?: number;
+  smallCODValue?: number;
+  largePrepaidValue?: number;
+  largeCODValue?: number;
+}
+
+export interface COGSVersion {
+  _id: string;
+  fields: COGSField[];
+  totalOverrides?: { pre?: COGSTotalOverrides; post?: COGSTotalOverrides };
+  effectiveFrom: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 interface LoginResponse {
@@ -75,6 +92,17 @@ interface CreateMagicLinkResponse {
   success: boolean;
   magicLink?: MagicLinkInfo;
   error?: string;
+}
+
+// Lightweight order shape for the Backlog Mosaic page
+export interface BacklogOrder {
+  id: number;
+  name: string;
+  createdAt: string;
+  fulfillmentStatus: string | null;
+  deliveryStatus: string | null;
+  customerName: string | null;
+  lineItems: { title: string; quantity: number; variantTitle: string | null }[];
 }
 
 // Shopify Order Types
@@ -298,6 +326,10 @@ class ApiService {
     const dateParam = createdAtMin ? `&created_at_min=${encodeURIComponent(createdAtMin)}` : '';
     const monthParam = month ? `&month=${encodeURIComponent(month)}` : '';
     return this.request<OrdersResponse>(`/api/admin/magic-links/shopify/orders?limit=${limit}${allParam}${dateParam}${monthParam}`);
+  }
+
+  async getBacklogOrders(): Promise<{ success: boolean; orders?: BacklogOrder[]; error?: string }> {
+    return this.request('/api/admin/sales/backlog-orders');
   }
 
   async getOrder(orderNumber: string): Promise<{ success: boolean; order?: ShopifyOrder; error?: string }> {
@@ -770,7 +802,7 @@ class ApiService {
   }
 
   // COGS Configuration
-  async getCOGSConfiguration(): Promise<COGSConfiguration> {
+  async getCOGSConfiguration(): Promise<COGSConfiguration & { totalOverrides?: COGSVersion['totalOverrides'] }> {
     const token = localStorage.getItem('adminToken');
     const response = await fetch(`${this.baseUrl}/api/admin/cogs/configuration`, {
       headers: {
@@ -785,7 +817,7 @@ class ApiService {
     return response.json();
   }
 
-  async saveCOGSConfiguration(config: COGSConfiguration): Promise<{ success: boolean; message?: string }> {
+  async saveCOGSConfiguration(config: COGSConfiguration & { effectiveFrom: string; totalOverrides?: COGSVersion['totalOverrides'] }): Promise<{ success: boolean; message?: string; version?: COGSVersion }> {
     const token = localStorage.getItem('adminToken');
     const response = await fetch(`${this.baseUrl}/api/admin/cogs/configuration`, {
       method: 'POST',
@@ -797,10 +829,73 @@ class ApiService {
     });
 
     if (!response.ok) {
-      throw new Error('Failed to save COGS configuration');
+      const err = await response.json().catch(() => ({}));
+      throw new Error((err as any).error || 'Failed to save COGS configuration');
     }
 
     return response.json();
+  }
+
+  async getCOGSVersions(): Promise<{ success: boolean; versions: COGSVersion[] }> {
+    return this.request('/api/admin/cogs/configuration/versions');
+  }
+
+  async updateCOGSVersion(id: string, update: { fields?: COGSField[]; effectiveFrom?: string; totalOverrides?: COGSVersion['totalOverrides'] }): Promise<{ success: boolean; version?: COGSVersion }> {
+    const token = localStorage.getItem('adminToken');
+    const response = await fetch(`${this.baseUrl}/api/admin/cogs/configuration/${id}`, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(update),
+    });
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error((err as any).error || 'Failed to update COGS version');
+    }
+
+    return response.json();
+  }
+
+  async deleteCOGSVersion(id: string): Promise<{ success: boolean }> {
+    const token = localStorage.getItem('adminToken');
+    const response = await fetch(`${this.baseUrl}/api/admin/cogs/configuration/${id}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error((err as any).error || 'Failed to delete COGS version');
+    }
+
+    return response.json();
+  }
+
+  // Fixed Monthly Expenses
+  async getFixedMonthlyExpenses(month?: string): Promise<{ success: boolean; entries: { _id: string; month: string; label: string; amount: number }[] }> {
+    const qs = month ? `?month=${month}` : '';
+    return this.request(`/api/admin/fixed-monthly-expenses${qs}`);
+  }
+
+  async createFixedMonthlyExpense(data: { month: string; label: string; amount: number }): Promise<{ success: boolean; entry: { _id: string; month: string; label: string; amount: number } }> {
+    return this.request('/api/admin/fixed-monthly-expenses', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateFixedMonthlyExpense(id: string, data: Partial<{ month: string; label: string; amount: number }>): Promise<{ success: boolean; entry: { _id: string; month: string; label: string; amount: number } }> {
+    return this.request(`/api/admin/fixed-monthly-expenses/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteFixedMonthlyExpense(id: string): Promise<{ success: boolean }> {
+    return this.request(`/api/admin/fixed-monthly-expenses/${id}`, { method: 'DELETE' });
   }
 
   // Bank Account
@@ -989,7 +1084,7 @@ class ApiService {
     });
   }
 
-  async saveAdsPerformance(adData: any[], level?: string, date?: string): Promise<{ success: boolean; count: number; error?: string }> {
+async saveAdsPerformance(adData: any[], level?: string, date?: string): Promise<{ success: boolean; count: number; error?: string }> {
     return this.request('/api/admin/sales/ads-performance', {
       method: 'POST',
       body: JSON.stringify({ adData, level, date }),
@@ -1081,6 +1176,10 @@ class ApiService {
     return this.request(`/api/admin/attendance/employees/stats?month=${month}`);
   }
 
+  async getAllEmployees(): Promise<{ success: boolean; employees?: any[]; error?: string }> {
+    return this.request('/api/admin/attendance/employees');
+  }
+
   async addEmployee(name: string, joiningDate: string, employeeType: 'monthly' | 'hourly', monthlySalary?: number, hourlyRate?: number): Promise<{ success: boolean; employee?: any; error?: string }> {
     return this.request('/api/admin/attendance/employees', {
       method: 'POST',
@@ -1154,6 +1253,21 @@ class ApiService {
       codDeliveredCount: number; codFailedCount: number;
     };
     completedDates?: string[];
+    records?: Array<{
+      dateKey: string;
+      prepaidCount: number;
+      codCount: number;
+      deliveredCount: number;
+      failedCount: number;
+      inTransitCount: number;
+      outForDeliveryCount: number;
+      attemptedDeliveryCount: number;
+      confirmedCount: number;
+      codDeliveredCount: number;
+      codFailedCount: number;
+      isCompleted: boolean;
+      sessions?: number;
+    }>;
     error?: string;
   }> {
     const params = new URLSearchParams();
@@ -1165,6 +1279,87 @@ class ApiService {
 
   async backfillDailyOrderStats(): Promise<{ success: boolean; upserted?: number; error?: string }> {
     return this.request('/api/admin/sales/daily-order-stats/backfill', { method: 'POST' });
+  }
+
+  async getDailyAverages(days = 30): Promise<{
+    success: boolean;
+    summary?: {
+      days: number;
+      completedDays: number;
+      orders: number;
+      revenue: number;
+      cogs: number;
+      adSpend: number;
+      profit: number;
+      avgRevenuePerOrder: number;
+      avgCogsPerOrder: number;
+      avgProfitPerOrder: number;
+      profitMargin: number;
+      roas: number;
+    };
+    daily?: Array<{
+      date: string;
+      orders: number;
+      revenue: number;
+      cogs: number;
+      adSpend: number;
+      profit: number;
+      isCompleted: boolean;
+      avgRevenuePerOrder: number;
+      avgCogsPerOrder: number;
+      avgProfitPerOrder: number;
+      roas: number;
+    }>;
+    error?: string;
+  }> {
+    return this.request(`/api/admin/sales/daily-averages?days=${days}`);
+  }
+
+  async getFailedOrdersAnalysis(): Promise<{
+    success: boolean;
+    failedCount?: number;
+    courierStats?: Record<string, { failed: number; total: number }>;
+    cityStats?: Record<string, { failed: number; total: number }>;
+    delayStats?: Record<string, { failed: number; total: number }>;
+    attemptStats?: Record<string, { failed: number; total: number }>;
+  }> {
+    return this.request('/api/admin/sales/failed-orders-analysis');
+  }
+
+  async getCodAddedCities(): Promise<{ success: boolean; cities?: string[] }> {
+    return this.request('/api/admin/pincodes/cod-added-cities');
+  }
+
+  async addCodAddedCity(city: string): Promise<{ success: boolean }> {
+    return this.request('/api/admin/pincodes/cod-added-cities', { method: 'POST', body: JSON.stringify({ city }) });
+  }
+
+  async removeCodAddedCity(city: string): Promise<{ success: boolean }> {
+    return this.request(`/api/admin/pincodes/cod-added-cities/${encodeURIComponent(city)}`, { method: 'DELETE' });
+  }
+
+async getVariantPerformance(days = 30): Promise<{
+    success: boolean;
+    days?: number;
+    buckets?: Array<{
+      variant: 'small' | 'large';
+      payment: 'prepaid' | 'cod';
+      orders: number;
+      delivered: number;
+      rto: number;
+      pending: number;
+      deliveryRate: number;
+      rtoRate: number;
+      revenue: number;
+      cogs: number;
+      adSpend: number;
+      profit: number;
+      avgRevenuePerOrder: number;
+      avgProfitPerOrder: number;
+      profitMargin: number;
+    }>;
+  }> {
+    return this.request(`/api/admin/sales/variant-performance?days=${days}`);
   }
 
   async getDailyPnl(params: { month?: string; year?: string; startDate?: string; endDate?: string } = {}): Promise<{
@@ -1190,6 +1385,27 @@ class ApiService {
 
   async backfillDailyPnl(): Promise<{ success: boolean; upserted?: number; error?: string }> {
     return this.request('/api/admin/sales/daily-pnl/backfill', { method: 'POST' });
+  }
+
+  async getAiPredictionData(startDate: string): Promise<{
+    success: boolean;
+    sixMonthsStats?: Array<{
+      month: string;
+      totalOrders: number;
+      ndrRateTotal: number;
+      ndrRateCOD: number;
+      ndrRatePrepaid: number;
+      totalPL: number;
+    }>;
+    sixMonthsDailyData?: Array<{
+      date: string;
+      placed: number;
+      delivered: number;
+      failed: number;
+    }>;
+    error?: string;
+  }> {
+    return this.request(`/api/admin/sales/ai-prediction-data?startDate=${startDate}`);
   }
 
   async getBreakevenMetrics(): Promise<{

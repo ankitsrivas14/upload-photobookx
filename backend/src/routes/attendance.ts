@@ -43,16 +43,36 @@ router.post('/employees', requireAdmin, async (req: AuthenticatedRequest, res: R
 // Update employee
 router.put('/employees/:id', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { name, monthlySalary, isActive } = req.body;
+    const { name, monthlySalary, isActive, terminationDate, isFnfMarked, fnfAmount, hourlyRate } = req.body;
+    
+    const updateData: any = {};
+    if (name !== undefined) updateData.name = name;
+    if (monthlySalary !== undefined) updateData.monthlySalary = monthlySalary;
+    if (hourlyRate !== undefined) updateData.hourlyRate = hourlyRate;
+    if (isActive !== undefined) updateData.isActive = isActive;
+    if (terminationDate !== undefined) updateData.terminationDate = terminationDate ? new Date(terminationDate) : null;
+    if (isFnfMarked !== undefined) updateData.isFnfMarked = isFnfMarked;
+    if (fnfAmount !== undefined) updateData.fnfAmount = fnfAmount;
+
     const employee = await Employee.findByIdAndUpdate(
       req.params.id,
-      { name, monthlySalary, isActive },
+      updateData,
       { new: true }
     );
     
     await logAudit('UPDATE_EMPLOYEE', `Updated employee ${name} (Active: ${isActive})`, req.params.id as string, req);
 
     res.json({ success: true, employee });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Get all employees (for management tab)
+router.get('/employees', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const employees = await Employee.find({}).sort({ isActive: -1, createdAt: -1 }).lean();
+    res.json({ success: true, employees });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -70,7 +90,18 @@ router.get('/employees/stats', requireAdmin, async (req: AuthenticatedRequest, r
     const endDate = new Date(year, monthNum, 0, 23, 59, 59);
     const daysInMonth = endDate.getDate();
 
-    const employees = await Employee.find({ isActive: true }).lean();
+    const employeesData = await Employee.find({ employeeType: { $ne: 'hourly' } }).lean();
+    
+    // Only include active employees, or those terminated on/after the start of this month
+    const employees = employeesData.filter(emp => {
+      if (new Date(emp.joiningDate) > endDate) return false; // Joined after this month ends
+      if (emp.isActive) return true;
+      if (emp.terminationDate) {
+        if (new Date(emp.terminationDate) >= startDate) return true;
+      }
+      return false;
+    });
+    
     const employeeIds = employees.map(e => e._id);
 
     const attendances = await Attendance.find({
@@ -95,12 +126,16 @@ router.get('/employees/stats', requireAdmin, async (req: AuthenticatedRequest, r
 
       const dailyWage = emp.monthlySalary / daysInMonth;
       
-      // Calculate eligible days (days in month on or after joining date)
+      // Calculate eligible days (days in month on or after joining date and on or before termination date)
       let eligibleDaysInMonth = 0;
       for (let d = 1; d <= daysInMonth; d++) {
         const date = new Date(year, monthNum - 1, d);
-        if (date >= new Date(emp.joiningDate)) {
-          eligibleDaysInMonth++;
+        // Start counting from joining date
+        if (date >= new Date(new Date(emp.joiningDate).setHours(0,0,0,0))) {
+          // Stop counting after termination date
+          if (!emp.terminationDate || date <= new Date(new Date(emp.terminationDate).setHours(0,0,0,0))) {
+            eligibleDaysInMonth++;
+          }
         }
       }
 

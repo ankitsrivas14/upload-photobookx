@@ -3,11 +3,12 @@ import { DiscardedOrder, RTOOrder, ProfitPrediction, ShippingCharge, OrderDelive
 import { requireAdmin } from './adminAuth';
 import { AuthenticatedRequest } from '../types';
 import aiService from '../services/aiService';
-import { backfillAllDates } from '../services/roasService';
+import { backfillAllDates, recomputeForDate } from '../services/roasService';
 import { backfillShippingStats } from '../services/shippingStatsService';
 import { backfillOrderStats } from '../services/orderStatsService';
-import { backfillDailyPnl } from '../services/dailyPnlService';
+import { backfillDailyPnl, recomputePnlForDate, getVariantPerformance } from '../services/dailyPnlService';
 import { computeBreakevenMetrics } from '../services/breakevenService';
+import shopifyService from '../services/shopifyService';
 
 const router = express.Router();
 
@@ -692,7 +693,7 @@ router.post('/predict', requireAdmin, async (req: AuthenticatedRequest, res: Res
       res.status(500).json({ success: false, error: 'Failed' });
     }
   });
-  router.post('/ads-performance', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/ads-performance', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { adData, level, date } = req.body;
       if (!adData || !Array.isArray(adData) || adData.length === 0) {
@@ -1014,6 +1015,18 @@ router.post('/predict', requireAdmin, async (req: AuthenticatedRequest, res: Res
 router.get('/daily-roas', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
+
+    // Always recompute the last 3 days so today's revenue is never stale
+    const IST_OFFSET = 5.5 * 60 * 60 * 1000;
+    const todayIST = new Date(Date.now() + IST_OFFSET);
+    const recentDates: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const d = new Date(todayIST);
+      d.setDate(d.getDate() - i);
+      recentDates.push(d.toISOString().slice(0, 10));
+    }
+    await Promise.all(recentDates.map((dk) => recomputeForDate(dk)));
+
     const filter: Record<string, any> = {};
     if (startDate || endDate) {
       filter.dateKey = {};
@@ -1145,9 +1158,41 @@ router.get('/daily-order-stats', requireAdmin, async (req: AuthenticatedRequest,
       agg.codFailedCount += r.codFailedCount ?? 0;
     }
 
+    let finalStartDate = startDate;
+    let finalEndDate = endDate;
+
+    if (records.length > 0) {
+      if (!finalStartDate) finalStartDate = records[0].dateKey;
+      if (!finalEndDate) finalEndDate = records[records.length - 1].dateKey;
+    }
+
+    let sessionsMap: Record<string, number> = {};
+    if (finalStartDate && finalEndDate) {
+      sessionsMap = await shopifyService.getDailySessions(finalStartDate, finalEndDate);
+    }
+
     const completedDates = (records as any[]).filter((r) => r.isCompleted).map((r) => r.dateKey as string);
 
-    res.json({ success: true, stats: agg, completedDates });
+    res.json({
+      success: true,
+      stats: agg,
+      completedDates,
+      records: records.map((r: any) => ({
+        dateKey: r.dateKey,
+        prepaidCount: r.prepaidCount,
+        codCount: r.codCount,
+        deliveredCount: r.deliveredCount,
+        failedCount: r.failedCount,
+        inTransitCount: r.inTransitCount,
+        outForDeliveryCount: r.outForDeliveryCount,
+        attemptedDeliveryCount: r.attemptedDeliveryCount,
+        confirmedCount: r.confirmedCount,
+        codDeliveredCount: r.codDeliveredCount,
+        codFailedCount: r.codFailedCount,
+        isCompleted: r.isCompleted,
+        sessions: sessionsMap[r.dateKey] ?? 0,
+      })),
+    });
   } catch (error) {
     console.error('Error fetching daily order stats:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch order stats' });
@@ -1179,6 +1224,18 @@ router.post('/daily-order-stats/backfill', requireAdmin, async (_req: Authentica
 router.get('/daily-pnl', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { month, year, startDate, endDate } = req.query as Record<string, string | undefined>;
+
+    // Always recompute the last 3 days so today's figures are never stale
+    const IST_OFFSET = 5.5 * 60 * 60 * 1000;
+    const todayIST = new Date(Date.now() + IST_OFFSET);
+    const recentDates: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const d = new Date(todayIST);
+      d.setDate(d.getDate() - i);
+      recentDates.push(d.toISOString().slice(0, 10));
+    }
+    await Promise.all(recentDates.map((dk) => recomputePnlForDate(dk)));
+
     const filter: Record<string, any> = {};
 
     if (month) {
@@ -1238,5 +1295,462 @@ router.get('/breakeven-metrics', requireAdmin, async (_req: AuthenticatedRequest
     res.status(500).json({ success: false, error: 'Failed to compute breakeven metrics' });
   }
 });
+
+/**
+ * GET /api/admin/sales/ai-prediction-data?startDate=YYYY-MM-DD
+ * Returns pre-computed sixMonthsStats and sixMonthsDailyData for AI profit prediction,
+ * sourced from DailyOrderStats + DailyPnl — no raw order scan needed.
+ */
+router.get('/ai-prediction-data', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const startDate = (req.query.startDate as string) || '2026-02-01';
+
+    const [orderStatsDocs, pnlDocs] = await Promise.all([
+      DailyOrderStats.find({ dateKey: { $gte: startDate } }).sort({ dateKey: 1 }).lean(),
+      DailyPnl.find({ dateKey: { $gte: startDate } }).sort({ dateKey: 1 }).lean(),
+    ]);
+
+    // Build a pnl lookup by dateKey
+    const pnlByDate = new Map<string, number>();
+    for (const p of pnlDocs as any[]) {
+      pnlByDate.set(p.dateKey as string, (p.heatmapProfit as number) ?? 0);
+    }
+
+    // Per-day data for AI context
+    const sixMonthsDailyData = (orderStatsDocs as any[]).map((r) => ({
+      date: r.dateKey as string,
+      placed: (r.prepaidCount ?? 0) + (r.codCount ?? 0),
+      delivered: r.deliveredCount ?? 0,
+      failed: r.failedCount ?? 0,
+    }));
+
+    // Monthly aggregates
+    const monthlyMap = new Map<string, {
+      totalOrders: number;
+      codOrders: number; prepaidOrders: number;
+      codFailed: number; prepaidFailed: number;
+      codDelivered: number; prepaidDelivered: number;
+      totalPL: number;
+    }>();
+
+    for (const r of orderStatsDocs as any[]) {
+      const monthKey = (r.dateKey as string).substring(0, 7);
+      if (!monthlyMap.has(monthKey)) {
+        monthlyMap.set(monthKey, { totalOrders: 0, codOrders: 0, prepaidOrders: 0, codFailed: 0, prepaidFailed: 0, codDelivered: 0, prepaidDelivered: 0, totalPL: 0 });
+      }
+      const m = monthlyMap.get(monthKey)!;
+      const prepaid = r.prepaidCount ?? 0;
+      const cod = r.codCount ?? 0;
+      m.totalOrders += prepaid + cod;
+      m.prepaidOrders += prepaid;
+      m.codOrders += cod;
+      m.codDelivered += r.codDeliveredCount ?? 0;
+      m.codFailed += r.codFailedCount ?? 0;
+      // prepaid delivered/failed = total minus COD
+      m.prepaidDelivered += Math.max(0, (r.deliveredCount ?? 0) - (r.codDeliveredCount ?? 0));
+      m.prepaidFailed += Math.max(0, (r.failedCount ?? 0) - (r.codFailedCount ?? 0));
+      m.totalPL += pnlByDate.get(r.dateKey as string) ?? 0;
+    }
+
+    const sixMonthsStats = Array.from(monthlyMap.entries()).map(([month, s]) => {
+      const codFinal = s.codDelivered + s.codFailed;
+      const prepaidFinal = s.prepaidDelivered + s.prepaidFailed;
+      const totalFinal = codFinal + prepaidFinal;
+      return {
+        month,
+        totalOrders: s.totalOrders,
+        ndrRateTotal: totalFinal > 0 ? parseFloat(((s.codFailed + s.prepaidFailed) / totalFinal * 100).toFixed(1)) : 0,
+        ndrRateCOD: codFinal > 0 ? parseFloat((s.codFailed / codFinal * 100).toFixed(1)) : 0,
+        ndrRatePrepaid: prepaidFinal > 0 ? parseFloat((s.prepaidFailed / prepaidFinal * 100).toFixed(1)) : 0,
+        totalPL: Math.round(s.totalPL),
+      };
+    }).sort((a, b) => a.month.localeCompare(b.month));
+
+    res.json({ success: true, sixMonthsStats, sixMonthsDailyData });
+  } catch (error) {
+    console.error('Error fetching AI prediction data:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch AI prediction data' });
+  }
+});
+
+/**
+ * GET /api/admin/sales/daily-averages?days=30
+ * Returns per-day averages (revenue, COGS, ad spend, profit) and a rolled-up
+ * summary for the requested window. Used by the Profit Prediction Calculator.
+ * Source: DailyPnl — same numbers shown in the Sales page bar chart.
+ */
+router.get('/daily-averages', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const days = Math.min(Math.max(parseInt(req.query.days as string) || 30, 1), 365);
+
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - (days - 1));
+    startDate.setHours(0, 0, 0, 0);
+    const startKey = startDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+
+    const docs = await DailyPnl.find({ dateKey: { $gte: startKey } })
+      .sort({ dateKey: 1 })
+      .lean();
+
+    const daily = (docs as any[]).map((d) => {
+      const orders = d.orderCount ?? 0;
+      const revenue = d.totalRevenue ?? 0;
+      const cogs = d.totalCogs ?? 0;
+      const adSpend = d.adSpend ?? 0;
+      const profit = d.barChartProfit ?? 0;
+      const isCompleted = d.isCompleted ?? false;
+      return {
+        date: d.dateKey as string,
+        orders,
+        revenue,
+        cogs,
+        adSpend,
+        profit,
+        isCompleted,
+        avgRevenuePerOrder: orders > 0 ? revenue / orders : 0,
+        avgCogsPerOrder: orders > 0 ? (cogs + adSpend) / orders : 0,
+        avgProfitPerOrder: orders > 0 ? profit / orders : 0,
+        roas: adSpend > 0 ? revenue / adSpend : 0,
+      };
+    });
+
+    // Summary averages use only completed days (isCompleted=true) — days where every
+    // order has an explicit delivered/failed outcome, so the P&L is final and accurate.
+    // Pending/in-transit orders have unknown final status and would skew the averages.
+    const completedDays = daily.filter((d) => d.isCompleted);
+    let totOrders = 0, totRevenue = 0, totCogs = 0, totAdSpend = 0, totProfit = 0;
+    for (const d of completedDays) {
+      totOrders += d.orders;
+      totRevenue += d.revenue;
+      totCogs += d.cogs;
+      totAdSpend += d.adSpend;
+      totProfit += d.profit;
+    }
+
+    const summary = {
+      days,
+      completedDays: completedDays.length,
+      orders: totOrders,
+      revenue: totRevenue,
+      cogs: totCogs,
+      adSpend: totAdSpend,
+      profit: totProfit,
+      avgRevenuePerOrder: totOrders > 0 ? totRevenue / totOrders : 0,
+      avgCogsPerOrder: totOrders > 0 ? (totCogs + totAdSpend) / totOrders : 0,
+      avgProfitPerOrder: totOrders > 0 ? totProfit / totOrders : 0,
+      profitMargin: totRevenue > 0 ? (totProfit / totRevenue) * 100 : 0,
+      roas: totAdSpend > 0 ? totRevenue / totAdSpend : 0,
+    };
+
+    res.json({ success: true, summary, daily });
+  } catch (error) {
+    console.error('Error fetching daily averages:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch daily averages' });
+  }
+});
+
+/**
+ * GET /api/admin/sales/backlog-orders
+ * Lightweight endpoint for the Backlog Mosaic page.
+ * Reads directly from ShopifyOrderCache, applies server-side filters (Jan 2026+,
+ * non-cancelled), and returns only the 7 fields the mosaic needs.
+ * No shipping charge lookups, no delivery-date lookups — ~20x smaller payload.
+ */
+router.get('/backlog-orders', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    // Shopify created_at strings are ISO-8601 and sort lexicographically, so a
+    // string prefix comparison ">=2026-01-01" correctly excludes pre-2026 orders.
+    const BACKLOG_START_STR = '2026-01-01';
+
+    // Aggregation pipeline: all heavy work (filter + field projection) runs inside
+    // MongoDB so only the 7 needed fields for post-2026 non-cancelled orders are
+    // transferred to Node.js — typically 10-20x less data than loading raw orders.
+    const cacheEntries = await ShopifyOrderCache.aggregate([
+      { $match: { cacheKey: { $regex: /^all_orders_/ } } },
+      {
+        $project: {
+          _id: 0,
+          orders: {
+            $map: {
+              // Filter to Jan 2026+ non-cancelled orders inside MongoDB
+              input: {
+                $filter: {
+                  input: '$orders',
+                  as: 'o',
+                  cond: {
+                    $and: [
+                      { $not: [{ $ifNull: ['$$o.cancelled_at', false] }] },
+                      { $gte: ['$$o.created_at', BACKLOG_START_STR] },
+                    ],
+                  },
+                },
+              },
+              as: 'o',
+              // Project only the 7 fields the mosaic needs
+              in: {
+                id: '$$o.id',
+                name: '$$o.name',
+                created_at: '$$o.created_at',
+                fulfillment_status: '$$o.fulfillment_status',
+                // Extract just the last fulfillment's shipment_status
+                last_shipment_status: {
+                  $getField: {
+                    field: 'shipment_status',
+                    input: { $arrayElemAt: [{ $ifNull: ['$$o.fulfillments', []] }, -1] },
+                  },
+                },
+                // Customer name: prefer shipping_address.name, fallback to customer fields
+                customer_name: {
+                  $ifNull: [
+                    '$$o.shipping_address.name',
+                    {
+                      $trim: {
+                        input: {
+                          $concat: [
+                            { $ifNull: ['$$o.customer.first_name', ''] },
+                            ' ',
+                            { $ifNull: ['$$o.customer.last_name', ''] },
+                          ],
+                        },
+                      },
+                    },
+                  ],
+                },
+                line_items: {
+                  $map: {
+                    input: { $ifNull: ['$$o.line_items', []] },
+                    as: 'li',
+                    in: {
+                      title: '$$li.title',
+                      quantity: '$$li.quantity',
+                      variant_title: '$$li.variant_title',
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    ]);
+
+    // Deduplicate across cache chunks (there may be multiple all_orders_* entries)
+    const seen = new Set<number | string>();
+    const result: any[] = [];
+
+    for (const entry of cacheEntries) {
+      for (const o of (entry.orders ?? []) as any[]) {
+        if (!o.id || seen.has(o.id)) continue;
+        seen.add(o.id);
+
+        const deliveryStatus: string | null =
+          o.last_shipment_status || o.fulfillment_status || null;
+
+        result.push({
+          id: o.id,
+          name: o.name,
+          createdAt: o.created_at,
+          fulfillmentStatus: o.fulfillment_status || null,
+          deliveryStatus,
+          customerName: o.customer_name || null,
+          lineItems: (o.line_items as any[]) ?? [],
+        });
+      }
+    }
+
+    res.json({ success: true, orders: result });
+  } catch (error) {
+    console.error('Error fetching backlog orders:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch backlog orders' });
+  }
+});
+
+/**
+ * GET /api/admin/sales/failed-orders-analysis
+ * Returns pre-aggregated stats for the Failed Orders analysis page.
+ * All heavy computation (joining RTOOrder, DiscardedOrder, ShippingCharge,
+ * bucketing into courier/city/delay categories) happens here on the server.
+ * The frontend receives only 4 small stat objects instead of ~10k raw orders.
+ */
+router.get('/failed-orders-analysis', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const DATA_START = '2026-01-28';
+
+    // Load all support data in parallel
+    const [rtoRows, discardedRows, shippingRows, cacheEntries] = await Promise.all([
+      RTOOrder.find({}, { shopifyOrderId: 1 }).lean(),
+      DiscardedOrder.find({}, { orderId: 1 }).lean(),
+      ShippingCharge.find({}, { orderNumber: 1, courierName: 1, pickupDate: 1, firstAttemptDate: 1, customerCity: 1 }).lean(),
+      ShopifyOrderCache.aggregate([
+        { $match: { cacheKey: { $regex: /^all_orders_/ } } },
+        { $project: {
+          orders: {
+            $map: {
+              input: { $filter: {
+                input: '$orders', as: 'o',
+                cond: { $and: [
+                  { $not: [{ $ifNull: ['$$o.cancelled_at', false] }] },
+                  { $gte: ['$$o.created_at', DATA_START] },
+                ]},
+              }},
+              as: 'o',
+              in: {
+                id: '$$o.id',
+                name: '$$o.name',
+                created_at: '$$o.created_at',
+                fulfillment_status: '$$o.fulfillment_status',
+                shipment_status: { $ifNull: [
+                  { $getField: { field: 'shipment_status', input: { $arrayElemAt: [{ $ifNull: ['$$o.fulfillments', []] }, -1] } } },
+                  null,
+                ]},
+              },
+            },
+          },
+        }},
+      ]),
+    ]);
+
+    const rtoSet = new Set((rtoRows as any[]).map(r => r.shopifyOrderId as number));
+    const discardedSet = new Set((discardedRows as any[]).map(d => d.orderId as number));
+
+    // Build shipping map: normalise order number → { courierName, pickupDate, firstAttemptDate, city }
+    const shipMap = new Map<string, { courierName: string | null; pickupDate: string | null; firstAttemptDate: string | null; city: string | null }>();
+    for (const s of shippingRows as any[]) {
+      const base = (s.orderNumber as string).replace(/^#/, '');
+      const val = { courierName: s.courierName ?? null, pickupDate: s.pickupDate ?? null, firstAttemptDate: s.firstAttemptDate ?? null, city: s.customerCity ?? null };
+      shipMap.set(base, val);
+      shipMap.set(`#${base}`, val);
+    }
+
+    // Deduplicate orders across cache entries
+    const seen = new Set<number>();
+    const orders: Array<{ id: number; name: string; created_at: string; fulfillment_status: string | null; shipment_status: string | null }> = [];
+    for (const entry of cacheEntries as any[]) {
+      for (const o of (entry.orders ?? []) as any[]) {
+        if (!o.id || seen.has(o.id)) continue;
+        seen.add(o.id);
+        orders.push(o);
+      }
+    }
+
+    // Courier name normalisation
+    const groupCourier = (name: string | null | undefined): string => {
+      if (!name) return 'Unknown';
+      const n = name.toLowerCase();
+      if (n.includes('xpressbees')) return 'Xpressbees';
+      if (n.includes('shadowfax'))  return 'Shadowfax';
+      if (n.includes('amazon'))     return 'Amazon';
+      if (n.includes('delhivery'))  return 'Delhivery';
+      if (n.includes('blue dart') || n.includes('bluedart')) return 'Blue Dart';
+      if (n.includes('ekart'))      return 'Ekart';
+      if (n.includes('ecom'))       return 'Ecom Express';
+      if (n.includes('dtdc'))       return 'DTDC';
+      return name;
+    };
+
+    const diffDays = (a: string, b: string) => {
+      const da = new Date(a); da.setHours(0, 0, 0, 0);
+      const db = new Date(b); db.setHours(0, 0, 0, 0);
+      return Math.max(0, Math.floor((db.getTime() - da.getTime()) / 86400000));
+    };
+
+    const pickupCat = (createdAt: string, pickupDate: string | null): string => {
+      if (!pickupDate) return 'Not Picked Up';
+      const d = diffDays(createdAt, pickupDate);
+      if (d === 0) return '0 days (Same Day)';
+      if (d === 1) return '1 day';
+      if (d >= 5)  return '5+ days';
+      return `${d} days`;
+    };
+
+    const attemptCat = (createdAt: string, firstAttemptDate: string | null): string => {
+      if (!firstAttemptDate) return 'No Attempt Data';
+      const d = diffDays(createdAt, firstAttemptDate);
+      if (d === 0)  return '0 days (Same Day)';
+      if (d >= 10)  return '10+ days';
+      return `${d} days`;
+    };
+
+    type Stat = Record<string, { failed: number; total: number }>;
+    const courierStats: Stat = {};
+    const cityStats: Stat = {};
+    const delayStats: Stat = {};
+    const attemptStats: Stat = {};
+    let failedCount = 0;
+
+    for (const order of orders) {
+      if (discardedSet.has(order.id)) continue;
+
+      const shipInfo = shipMap.get(order.name) ?? shipMap.get(order.name.replace(/^#/, '')) ?? null;
+      const deliveryStatus = (order.shipment_status || order.fulfillment_status || '').toLowerCase();
+      const isFailed = rtoSet.has(order.id) || deliveryStatus === 'failure' || deliveryStatus.includes('failed') || deliveryStatus.includes('rto');
+
+      const courier = groupCourier(shipInfo?.courierName);
+      const city = (shipInfo?.city || 'Unknown').trim().toLowerCase();
+      const pCat = pickupCat(order.created_at, shipInfo?.pickupDate ?? null);
+      const aCat = attemptCat(order.created_at, shipInfo?.firstAttemptDate ?? null);
+
+      if (!courierStats[courier]) courierStats[courier] = { failed: 0, total: 0 };
+      courierStats[courier].total++;
+
+      if (!cityStats[city]) cityStats[city] = { failed: 0, total: 0 };
+      cityStats[city].total++;
+
+      if (!delayStats[pCat]) delayStats[pCat] = { failed: 0, total: 0 };
+      delayStats[pCat].total++;
+
+      if (!attemptStats[aCat]) attemptStats[aCat] = { failed: 0, total: 0 };
+      attemptStats[aCat].total++;
+
+      if (isFailed) {
+        courierStats[courier].failed++;
+        cityStats[city].failed++;
+        delayStats[pCat].failed++;
+        attemptStats[aCat].failed++;
+        failedCount++;
+      }
+    }
+
+    res.json({ success: true, failedCount, courierStats, cityStats, delayStats, attemptStats });
+  } catch (error) {
+    console.error('Error fetching failed orders analysis:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch failed orders analysis' });
+  }
+});
+
+/**
+ * GET /api/admin/sales/variant-performance?days=30
+ * Returns P&L broken down by variant (small/large) × payment (prepaid/COD).
+ */
+router.get('/variant-performance', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const days = Math.min(Math.max(parseInt(req.query.days as string) || 30, 1), 365);
+    const buckets = await getVariantPerformance(days);
+
+    const result = buckets.map(b => ({
+      variant: b.variant,
+      payment: b.payment,
+      orders: b.orders,
+      delivered: b.delivered,
+      rto: b.rto,
+      pending: b.pending,
+      deliveryRate: b.orders > 0 ? (b.delivered / b.orders) * 100 : 0,
+      rtoRate: b.orders > 0 ? (b.rto / b.orders) * 100 : 0,
+      revenue: b.revenue,
+      cogs: b.cogs,
+      adSpend: b.adSpend,
+      profit: b.profit,
+      avgRevenuePerOrder: b.delivered > 0 ? b.revenue / b.delivered : 0,
+      avgProfitPerOrder: b.orders > 0 ? b.profit / b.orders : 0,
+      profitMargin: b.revenue > 0 ? (b.profit / b.revenue) * 100 : 0,
+    }));
+
+    res.json({ success: true, days, buckets: result });
+  } catch (error) {
+    console.error('Error fetching variant performance:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch variant performance' });
+  }
+});
+
 
 export default router;

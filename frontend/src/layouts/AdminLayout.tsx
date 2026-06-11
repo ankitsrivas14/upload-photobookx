@@ -128,7 +128,7 @@ export function AdminLayout() {
           </Link>
 
           <Link
-            to="/admin/analysis"
+            to="/admin/analysis/ads"
             className={`${styles['nav-item']} ${isActive('/admin/analysis') ? styles.active : ''}`}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

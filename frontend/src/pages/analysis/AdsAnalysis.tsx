@@ -186,7 +186,7 @@ export function AdsAnalysis() {
         }
     };
 
-    const handleExportJSON = async () => {
+const handleExportJSON = async () => {
         const toastId = toast.loading('Exporting performance snapshot...');
         try {
             const allRes = await api.getAdsPerformanceAll();
@@ -462,7 +462,7 @@ export function AdsAnalysis() {
                                                 width: '12px',
                                                 height: '12px',
                                                 borderRadius: '2px',
-                                                backgroundColor: hasData ? '#6366f1' : '#e2e8f0', // Crisp Indigo for active
+                                                backgroundColor: hasData ? '#6366f1' : '#e2e8f0',
                                                 cursor: hasData ? 'pointer' : 'default',
                                                 transition: 'transform 0.1s ease',
                                             }}

@@ -1,14 +1,14 @@
-import { useState, useEffect } from 'react';
-import { api } from '../services/api';
+import { useState, useEffect, useRef } from 'react';
+import toast from 'react-hot-toast';
+import { api, type COGSVersion, type COGSTotalOverrides } from '../services/api';
 import styles from './COGSPage.module.css';
 
 interface CostField {
   id: string;
   name: string;
-  // Old structure (deprecated)
+  category: 'pre' | 'post';
   smallValue?: number;
   largeValue?: number;
-  // New structure with payment method support
   smallPrepaidValue: number;
   smallCODValue: number;
   largePrepaidValue: number;
@@ -18,261 +18,194 @@ interface CostField {
   percentageType: 'included' | 'excluded';
 }
 
-export function COGSPage() {
-  const [costFields, setCostFields] = useState<CostField[]>([]);
-  const [newFieldName, setNewFieldName] = useState('');
-  const [isSaving, setIsSaving] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
+type ValueKey = 'smallPrepaidValue' | 'smallCODValue' | 'largePrepaidValue' | 'largeCODValue';
 
-  useEffect(() => {
-    loadConfiguration();
-  }, []);
+function normaliseFields(raw: any[]): CostField[] {
+  return raw.map((f) => ({
+    ...f,
+    category: f.category ?? 'pre',
+    smallPrepaidValue: f.smallPrepaidValue ?? f.smallValue ?? 0,
+    smallCODValue: f.smallCODValue ?? f.smallValue ?? 0,
+    largePrepaidValue: f.largePrepaidValue ?? f.largeValue ?? 0,
+    largeCODValue: f.largeCODValue ?? f.largeValue ?? 0,
+    type: f.type ?? 'cogs',
+    calculationType: f.calculationType ?? 'fixed',
+    percentageType: f.percentageType ?? 'excluded',
+  }));
+}
 
-  const loadConfiguration = async () => {
-    try {
-      setIsLoading(true);
-      const config = await api.getCOGSConfiguration();
-      if (config && config.fields) {
-        // Migrate old structure to new structure and ensure defaults
-          const fieldsWithDefaults = config.fields.map(field => {
-            // If old structure exists but not new, migrate
-            const smallPrepaidValue = field.smallPrepaidValue ?? field.smallValue ?? 0;
-            const smallCODValue = field.smallCODValue ?? field.smallValue ?? 0;
-            const largePrepaidValue = field.largePrepaidValue ?? field.largeValue ?? 0;
-            const largeCODValue = field.largeCODValue ?? field.largeValue ?? 0;
-            
-            return {
-              ...field,
-              smallPrepaidValue,
-              smallCODValue,
-              largePrepaidValue,
-              largeCODValue,
-              type: field.type ?? 'cogs',
-              calculationType: field.calculationType ?? 'fixed',
-              percentageType: field.percentageType ?? 'excluded', // Default to excluded for backwards compatibility
-            };
-          });
-        setCostFields(fieldsWithDefaults);
-      }
-    } catch (error) {
-      console.error('Failed to load COGS configuration:', error);
-    } finally {
-      setIsLoading(false);
-    }
+function toDateInputValue(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-CA');
+}
+
+function versionLabel(v: COGSVersion): string {
+  return new Date(v.effectiveFrom).toLocaleDateString('en-IN', {
+    day: 'numeric', month: 'short', year: 'numeric',
+  });
+}
+
+function versionBadge(v: COGSVersion, now: Date): { label: string; cls: string } {
+  const eff = new Date(v.effectiveFrom);
+  if (eff > now) return { label: 'Scheduled', cls: styles['badge-scheduled'] };
+  return { label: 'Past', cls: styles['badge-past'] };
+}
+
+function emptyField(category: 'pre' | 'post'): CostField {
+  return {
+    id: Date.now().toString() + Math.random(),
+    name: '',
+    category,
+    smallPrepaidValue: 0,
+    smallCODValue: 0,
+    largePrepaidValue: 0,
+    largeCODValue: 0,
+    type: 'cogs',
+    calculationType: 'fixed',
+    percentageType: 'excluded',
+  };
+}
+
+// ── sub-component: one cost table ────────────────────────────────────────────
+
+const VALUE_KEYS: ValueKey[] = ['smallPrepaidValue', 'smallCODValue', 'largePrepaidValue', 'largeCODValue'];
+const VALUE_LABELS: Record<ValueKey, string> = {
+  smallPrepaidValue: 'Small Prepaid',
+  smallCODValue: 'Small COD',
+  largePrepaidValue: 'Large Prepaid',
+  largeCODValue: 'Large COD',
+};
+
+interface CostTableProps {
+  category: 'pre' | 'post';
+  fields: CostField[];
+  overrides: COGSTotalOverrides;
+  onChange: (fields: CostField[]) => void;
+  onOverrideChange: (key: ValueKey, value: number | undefined) => void;
+}
+
+function CostTable({ category, fields, overrides, onChange, onOverrideChange }: CostTableProps) {
+  const [newName, setNewName] = useState('');
+  // Track raw string input per total cell so user can type freely before blur
+  const totalInputRefs = useRef<Partial<Record<ValueKey, string>>>({});
+
+  const rows = fields.filter((f) => f.category === category);
+  const otherRows = fields.filter((f) => f.category !== category);
+
+  const update = (updated: CostField[]) => onChange([...otherRows, ...updated]);
+
+  const addField = () => {
+    if (!newName.trim()) return;
+    update([...rows, { ...emptyField(category), id: Date.now().toString(), name: newName.trim() }]);
+    setNewName('');
   };
 
-  const handleAddField = () => {
-    if (!newFieldName.trim()) return;
+  const deleteField = (id: string) => update(rows.filter((f) => f.id !== id));
 
-    const newField: CostField = {
-      id: Date.now().toString(),
-      name: newFieldName.trim(),
-      smallPrepaidValue: 0,
-      smallCODValue: 0,
-      largePrepaidValue: 0,
-      largeCODValue: 0,
-      type: 'cogs',
-      calculationType: 'fixed',
-      percentageType: 'excluded',
-    };
+  const setField = (id: string, patch: Partial<CostField>) =>
+    update(rows.map((f) => f.id === id ? { ...f, ...patch } : f));
 
-    setCostFields([...costFields, newField]);
-    setNewFieldName('');
+  const updateValue = (id: string, key: ValueKey, value: number) => {
+    // Editing a cell clears the override for that column
+    onOverrideChange(key, undefined);
+    setField(id, { [key]: value });
   };
 
-  const handleDeleteField = (id: string) => {
-    setCostFields(costFields.filter(field => field.id !== id));
-  };
+  const computedTotal = (key: ValueKey) => rows.reduce((s, f) => s + (f[key] || 0), 0);
 
-  const handleUpdateValue = (id: string, variant: 'small' | 'large', paymentMethod: 'prepaid' | 'cod', value: number) => {
-    setCostFields(costFields.map(field => {
-      if (field.id !== id) return field;
-      
-      const key = `${variant}${paymentMethod === 'prepaid' ? 'Prepaid' : 'COD'}Value` as keyof CostField;
-      return { ...field, [key]: value };
-    }));
-  };
-
-  const handleUpdateType = (id: string, type: 'cogs' | 'ndr' | 'both') => {
-    setCostFields(costFields.map(field => 
-      field.id === id ? { ...field, type } : field
-    ));
-  };
-
-  const handleUpdateCalculationType = (id: string, calculationType: 'fixed' | 'percentage') => {
-    setCostFields(costFields.map(field => 
-      field.id === id ? { ...field, calculationType } : field
-    ));
-  };
-
-  const handleUpdatePercentageType = (id: string, percentageType: 'included' | 'excluded') => {
-    setCostFields(costFields.map(field => 
-      field.id === id ? { ...field, percentageType } : field
-    ));
-  };
-
-  const handleSaveConfiguration = async () => {
-    try {
-      setIsSaving(true);
-      await api.saveCOGSConfiguration({ fields: costFields });
-      alert('Configuration saved successfully!');
-    } catch (error) {
-      console.error('Failed to save COGS configuration:', error);
-      alert('Failed to save configuration. Please try again.');
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const calculateTotal = (variant: 'small' | 'large', paymentMethod: 'prepaid' | 'cod') => {
-    return costFields.reduce((sum, field) => {
-      const key = `${variant}${paymentMethod === 'prepaid' ? 'Prepaid' : 'COD'}Value` as keyof CostField;
-      return sum + (field[key] as number || 0);
-    }, 0);
-  };
-
-  if (isLoading) {
-    return (
-      <div className={styles['loading-section']}>
-        <div className={styles.spinner}></div>
-        <p>Loading configuration...</p>
-      </div>
-    );
-  }
+  const title = category === 'pre' ? 'Pre Cost' : 'Post Cost';
+  const subtitle = category === 'pre'
+    ? 'Production costs before the order ships (materials, GST, payment fees…)'
+    : 'Delivery & logistics costs after the order ships (shipping, COD handling…)';
 
   return (
-    <div className={styles['cogs-page']}>
-      <div className={styles['page-header']}>
+    <div className={styles['cost-table-section']}>
+      <div className={styles['cost-table-header']}>
         <div>
-          <h2>COGS Configuration</h2>
-          <p>Configure cost components for Small and Large photobooks</p>
+          <h3 className={styles['cost-table-title']}>{title}</h3>
+          <p className={styles['cost-table-subtitle']}>{subtitle}</p>
         </div>
-        <button 
-          onClick={handleSaveConfiguration}
-          className={styles['save-btn']}
-          disabled={isSaving}
-        >
-          {isSaving ? 'Saving...' : 'Save Configuration'}
-        </button>
       </div>
 
-      {/* Add New Field */}
       <div className={styles['add-field-section']}>
         <input
           type="text"
-          placeholder="Enter cost component name (e.g., Printing Cost)"
-          value={newFieldName}
-          onChange={(e) => setNewFieldName(e.target.value)}
-          onKeyPress={(e) => e.key === 'Enter' && handleAddField()}
+          placeholder={`New ${title.toLowerCase()} component`}
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && addField()}
           className={styles['field-name-input']}
         />
-        <button 
-          onClick={handleAddField}
-          className={styles['add-field-btn']}
-          disabled={!newFieldName.trim()}
-        >
-          + Add Cost Field
+        <button className={styles['add-field-btn']} onClick={addField} disabled={!newName.trim()}>
+          + Add Field
         </button>
       </div>
 
-      {/* Editable Table View */}
       <div className={styles['table-container']}>
         <table className={styles['cogs-table']}>
           <thead>
             <tr>
               <th>Cost Field</th>
-              <th>Type</th>
-              <th>Calc</th>
-              <th className={styles['value-header']}>Small Prepaid</th>
-              <th className={styles['value-header']}>Small COD</th>
-              <th className={styles['value-header']}>Large Prepaid</th>
-              <th className={styles['value-header']}>Large COD</th>
+              {VALUE_KEYS.map((k) => (
+                <th key={k} className={styles['value-header']}>{VALUE_LABELS[k]}</th>
+              ))}
               <th></th>
             </tr>
           </thead>
           <tbody>
-            {costFields.map((field) => (
+            {rows.map((field) => (
               <tr key={field.id}>
-                <td className={styles['name-cell']}>{field.name}</td>
-                <td>
-                  <select
-                    value={field.type}
-                    onChange={(e) => handleUpdateType(field.id, e.target.value as 'cogs' | 'ndr' | 'both')}
-                    className={styles['table-select']}
-                  >
-                    <option value="cogs">COGS</option>
-                    <option value="ndr">NDR</option>
-                    <option value="both">Both</option>
-                  </select>
-                </td>
-                <td>
-                  <div className={styles['calc-cell']}>
+                <td className={styles['name-cell']}>
+                  <span className={styles['field-name']}>{field.name}</span>
+                  <div className={styles['field-controls']}>
+                    <select
+                      value={field.type}
+                      onChange={(e) => setField(field.id, { type: e.target.value as CostField['type'] })}
+                      className={styles['control-select']}
+                    >
+                      <option value="cogs">COGS</option>
+                      <option value="ndr">NDR</option>
+                      <option value="both">Both</option>
+                    </select>
                     <select
                       value={field.calculationType}
-                      onChange={(e) => handleUpdateCalculationType(field.id, e.target.value as 'fixed' | 'percentage')}
-                      className={styles['table-select-small']}
+                      onChange={(e) => setField(field.id, { calculationType: e.target.value as CostField['calculationType'] })}
+                      className={styles['control-select']}
                     >
-                      <option value="fixed">₹</option>
-                      <option value="percentage">%</option>
+                      <option value="fixed">Fixed (₹)</option>
+                      <option value="percentage">Percentage (%)</option>
                     </select>
                     {field.calculationType === 'percentage' && (
                       <select
                         value={field.percentageType}
-                        onChange={(e) => handleUpdatePercentageType(field.id, e.target.value as 'included' | 'excluded')}
-                        className={styles['table-select-small']}
+                        onChange={(e) => setField(field.id, { percentageType: e.target.value as CostField['percentageType'] })}
+                        className={styles['control-select']}
                       >
-                        <option value="excluded">Ex</option>
-                        <option value="included">In</option>
+                        <option value="excluded">Excl. of price</option>
+                        <option value="included">Incl. in price</option>
                       </select>
                     )}
                   </div>
                 </td>
+                {VALUE_KEYS.map((key) => {
+                  const isOverridden = overrides[key] !== undefined;
+                  return (
+                    <td key={key}>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={isOverridden ? '' : field[key]}
+                        placeholder={isOverridden ? '—' : undefined}
+                        className={`${styles['table-input']} ${isOverridden ? styles['cell-overridden'] : ''}`}
+                        onFocus={() => { if (isOverridden) onOverrideChange(key, undefined); }}
+                        onChange={(e) => updateValue(field.id, key, parseFloat(e.target.value) || 0)}
+                        title={isOverridden ? 'Click to edit and clear the total override' : undefined}
+                      />
+                    </td>
+                  );
+                })}
                 <td>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={field.smallPrepaidValue}
-                    onChange={(e) => handleUpdateValue(field.id, 'small', 'prepaid', parseFloat(e.target.value) || 0)}
-                    className={styles['table-input']}
-                  />
-                </td>
-                <td>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={field.smallCODValue}
-                    onChange={(e) => handleUpdateValue(field.id, 'small', 'cod', parseFloat(e.target.value) || 0)}
-                    className={styles['table-input']}
-                  />
-                </td>
-                <td>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={field.largePrepaidValue}
-                    onChange={(e) => handleUpdateValue(field.id, 'large', 'prepaid', parseFloat(e.target.value) || 0)}
-                    className={styles['table-input']}
-                  />
-                </td>
-                <td>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={field.largeCODValue}
-                    onChange={(e) => handleUpdateValue(field.id, 'large', 'cod', parseFloat(e.target.value) || 0)}
-                    className={styles['table-input']}
-                  />
-                </td>
-                <td>
-                  <button
-                    onClick={() => handleDeleteField(field.id)}
-                    className={styles['table-delete-btn']}
-                    title="Delete"
-                  >
+                  <button onClick={() => deleteField(field.id)} className={styles['table-delete-btn']} title="Delete">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
                     </svg>
@@ -280,19 +213,277 @@ export function COGSPage() {
                 </td>
               </tr>
             ))}
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={6} style={{ textAlign: 'center', padding: '1.5rem', color: '#94a3b8', fontSize: '0.875rem' }}>
+                  No fields yet. Add one above.
+                </td>
+              </tr>
+            )}
           </tbody>
           <tfoot>
             <tr>
-              <td colSpan={3} className={styles['totals-label']}>Total Costs</td>
-              <td className={styles['totals-cell']}>₹{calculateTotal('small', 'prepaid').toFixed(0)}</td>
-              <td className={styles['totals-cell']}>₹{calculateTotal('small', 'cod').toFixed(0)}</td>
-              <td className={styles['totals-cell']}>₹{calculateTotal('large', 'prepaid').toFixed(0)}</td>
-              <td className={styles['totals-cell']}>₹{calculateTotal('large', 'cod').toFixed(0)}</td>
+              <td className={styles['totals-label']}>{title} Total</td>
+              {VALUE_KEYS.map((key) => {
+                const isOverridden = overrides[key] !== undefined;
+                const displayValue = isOverridden ? overrides[key]! : computedTotal(key);
+                return (
+                  <td key={key} className={styles['totals-cell-editable']}>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={totalInputRefs.current[key] ?? displayValue}
+                      className={`${styles['total-input']} ${isOverridden ? styles['total-overridden'] : ''}`}
+                      onChange={(e) => {
+                        totalInputRefs.current[key] = e.target.value;
+                        const v = parseFloat(e.target.value);
+                        if (!isNaN(v)) onOverrideChange(key, v);
+                      }}
+                      onFocus={(e) => {
+                        totalInputRefs.current[key] = String(displayValue);
+                        e.target.select();
+                      }}
+                      onBlur={() => {
+                        delete totalInputRefs.current[key];
+                        // If user cleared the field, remove override
+                        if (overrides[key] === undefined) return;
+                      }}
+                      title={isOverridden ? 'Override active — edit a cell above to revert to computed total' : 'Edit to override the total for this column'}
+                    />
+                  </td>
+                );
+              })}
               <td></td>
             </tr>
           </tfoot>
         </table>
       </div>
+    </div>
+  );
+}
+
+// ── main page ────────────────────────────────────────────────────────────────
+
+export function COGSPage() {
+  const [versions, setVersions] = useState<COGSVersion[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [isNewDraft, setIsNewDraft] = useState(false);
+
+  const [editFields, setEditFields] = useState<CostField[]>([]);
+  const [editEffectiveFrom, setEditEffectiveFrom] = useState('');
+  const [preOverrides, setPreOverrides] = useState<COGSTotalOverrides>({});
+  const [postOverrides, setPostOverrides] = useState<COGSTotalOverrides>({});
+
+  const now = new Date();
+
+  const currentVersion = versions.find((v) => new Date(v.effectiveFrom) <= now);
+
+  useEffect(() => { loadVersions(); }, []);
+
+  const loadVersions = async () => {
+    try {
+      setIsLoading(true);
+      const res = await api.getCOGSVersions();
+      if (res.success) {
+        setVersions(res.versions);
+        const active = res.versions.find((v) => new Date(v.effectiveFrom) <= new Date());
+        if (active) openVersion(active);
+      }
+    } catch {
+      toast.error('Failed to load COGS versions');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const openVersion = (v: COGSVersion) => {
+    setIsNewDraft(false);
+    setSelectedId(v._id);
+    setEditFields(normaliseFields(v.fields));
+    setEditEffectiveFrom(toDateInputValue(v.effectiveFrom));
+    setPreOverrides(v.totalOverrides?.pre ?? {});
+    setPostOverrides(v.totalOverrides?.post ?? {});
+  };
+
+  const startNewVersion = () => {
+    setIsNewDraft(true);
+    setSelectedId(null);
+    const base = versions.length > 0 ? normaliseFields(versions[0].fields) : [];
+    setEditFields(base);
+    setEditEffectiveFrom('');
+    setPreOverrides(versions[0]?.totalOverrides?.pre ?? {});
+    setPostOverrides(versions[0]?.totalOverrides?.post ?? {});
+  };
+
+  const makeOverrideHandler = (setter: React.Dispatch<React.SetStateAction<COGSTotalOverrides>>) =>
+    (key: ValueKey, value: number | undefined) =>
+      setter((prev) => {
+        const next = { ...prev };
+        if (value === undefined) delete next[key];
+        else next[key] = value;
+        return next;
+      });
+
+  const handleSave = async () => {
+    if (!editEffectiveFrom) { toast.error('Please set an effective-from date'); return; }
+    setIsSaving(true);
+    const totalOverrides = { pre: preOverrides, post: postOverrides };
+    try {
+      if (isNewDraft) {
+        await api.saveCOGSConfiguration({ fields: editFields, effectiveFrom: editEffectiveFrom, totalOverrides });
+        toast.success('New COGS version created — P&L recomputing in background');
+      } else {
+        await api.updateCOGSVersion(selectedId!, { fields: editFields, effectiveFrom: editEffectiveFrom, totalOverrides });
+        toast.success('COGS version updated — P&L recomputing in background');
+      }
+      await loadVersions();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to save');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!window.confirm('Delete this version? P&L will recompute for affected dates.')) return;
+    try {
+      await api.deleteCOGSVersion(id);
+      toast.success('Version deleted');
+      setSelectedId(null);
+      setIsNewDraft(false);
+      await loadVersions();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to delete version');
+    }
+  };
+
+  // Grand total: use override if set, otherwise sum fields for each category
+  const grandTotal = (key: ValueKey) => {
+    const preVal = preOverrides[key] ?? editFields.filter(f => f.category === 'pre').reduce((s, f) => s + (f[key] || 0), 0);
+    const postVal = postOverrides[key] ?? editFields.filter(f => f.category === 'post').reduce((s, f) => s + (f[key] || 0), 0);
+    return preVal + postVal;
+  };
+
+  if (isLoading) {
+    return (
+      <div className={styles['loading-section']}>
+        <div className={styles.spinner}></div>
+        <p>Loading COGS versions...</p>
+      </div>
+    );
+  }
+
+  const editorOpen = isNewDraft || selectedId !== null;
+
+  return (
+    <div className={styles['cogs-page']}>
+      {/* Page header */}
+      <div className={styles['page-header']}>
+        <div>
+          <h2>COGS Configuration</h2>
+          <p>Version-based — Pre Cost + Post Cost combine into the final COGS per order</p>
+        </div>
+        <div className={styles['editor-actions']}>
+          {!isNewDraft && selectedId && versions.length > 1 && (
+            <button className={styles['delete-version-btn']} onClick={() => handleDelete(selectedId)}>
+              Delete version
+            </button>
+          )}
+          <button className={styles['save-btn']} onClick={handleSave} disabled={isSaving || !editorOpen}>
+            {isSaving ? 'Saving…' : isNewDraft ? 'Create Version' : 'Save Changes'}
+          </button>
+        </div>
+      </div>
+
+      {/* Version selector bar */}
+      <div className={styles['version-bar']}>
+        {versions.map((v) => {
+          const isActive = v._id === currentVersion?._id;
+          const badge = isActive
+            ? { label: 'Current', cls: styles['badge-current'] }
+            : versionBadge(v, now);
+          const isSelected = !isNewDraft && selectedId === v._id;
+          return (
+            <button
+              key={v._id}
+              className={`${styles['version-chip']} ${isSelected ? styles['chip-selected'] : ''}`}
+              onClick={() => openVersion(v)}
+            >
+              <span className={`${styles['version-badge']} ${badge.cls}`}>{badge.label}</span>
+              <span className={styles['chip-date']}>{versionLabel(v)}</span>
+            </button>
+          );
+        })}
+        {isNewDraft && (
+          <button className={`${styles['version-chip']} ${styles['chip-selected']} ${styles['chip-draft']}`}>
+            <span className={`${styles['version-badge']} ${styles['badge-draft']}`}>Draft</span>
+            <span className={styles['chip-date']}>New version</span>
+          </button>
+        )}
+        <button className={styles['new-version-chip']} onClick={startNewVersion}>
+          + New Version
+        </button>
+      </div>
+
+      {/* Editor */}
+      {editorOpen ? (
+        <div className={styles['editor-panel']}>
+          {/* Effective-from date */}
+          <div className={styles['effective-date-row']}>
+            <span className={styles['effective-date-label']}>Effective from</span>
+            <input
+              type="date"
+              className={styles['effective-date-input']}
+              value={editEffectiveFrom}
+              onChange={(e) => setEditEffectiveFrom(e.target.value)}
+            />
+            <span className={styles['date-hint']}>
+              Orders placed on this date or later will use these values
+            </span>
+          </div>
+
+          {/* Pre Cost table */}
+          <CostTable
+            category="pre"
+            fields={editFields}
+            overrides={preOverrides}
+            onChange={setEditFields}
+            onOverrideChange={makeOverrideHandler(setPreOverrides)}
+          />
+
+          {/* Post Cost table */}
+          <CostTable
+            category="post"
+            fields={editFields}
+            overrides={postOverrides}
+            onChange={setEditFields}
+            onOverrideChange={makeOverrideHandler(setPostOverrides)}
+          />
+
+          {/* Grand total summary */}
+          <div className={styles['grand-total-row']}>
+            <span className={styles['grand-total-label']}>Total COGS (Pre + Post)</span>
+            <div className={styles['grand-total-values']}>
+              {(['smallPrepaidValue', 'smallCODValue', 'largePrepaidValue', 'largeCODValue'] as ValueKey[]).map((key) => (
+                <div key={key} className={styles['grand-total-item']}>
+                  <span className={styles['grand-total-variant']}>
+                    {key === 'smallPrepaidValue' ? 'Small Prepaid' : key === 'smallCODValue' ? 'Small COD' : key === 'largePrepaidValue' ? 'Large Prepaid' : 'Large COD'}
+                  </span>
+                  <span className={styles['grand-total-amount']}>₹{grandTotal(key).toFixed(0)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className={styles['no-version-placeholder']}>
+          <p>Select a version above or create a new one.</p>
+        </div>
+      )}
     </div>
   );
 }
