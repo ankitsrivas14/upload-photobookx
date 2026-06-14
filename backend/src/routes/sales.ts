@@ -855,35 +855,113 @@ router.post('/ads-performance', requireAdmin, async (req: AuthenticatedRequest, 
 
       const latestDate = adData?.[0]?.date || new Date().toISOString().split('T')[0];
 
-      const BATCH_SIZE = 12;
+      const BATCH_SIZE = 10;
       const allRecommendations: any[] = [];
       let overallStrategies: string[] = [];
 
-      // Process in batches to avoid OpenAI output token limits
-      for (let i = 0; i < adData.length; i += BATCH_SIZE) {
-        const batch = adData.slice(i, i + BATCH_SIZE);
-        const batchNames = batch.map((d: any) => d.name).filter(Boolean);
-        
-        // Fetch history ONLY for the current batch's ad sets
-        const batchHistoricalData = await MetaAdPerformance.find({
-          name: { $in: batchNames },
+      // Normalize a name for matching (tolerant of case / whitespace differences the AI may introduce)
+      const norm = (n: any) =>
+        (typeof n === 'string' ? n.trim().toLowerCase().replace(/\s+/g, ' ') : '');
+
+      // Override an AI recommendation with the authoritative stats from the uploaded data,
+      // so the table never shows numbers the model may have hallucinated or omitted.
+      const attachRealStats = (rec: any, d: any) => ({
+        ...rec,
+        name: d.name,
+        level: d.level,
+        stats: {
+          spend: d.spend || 0, roas: d.roas || 0, purchases: d.purchases || 0,
+          cpa: d.cpa || 0, cpc: d.cpc || 0, ctr: d.ctr || 0,
+          clicks: d.clicks || 0, cpm: d.cpm || 0, addsToCart: d.addsToCart || 0
+        }
+      });
+
+      // Safety net for an ad set the AI failed to return even after a retry: surface it
+      // (flagged for manual review) rather than letting it silently disappear from the table.
+      const buildFallback = (d: any) => attachRealStats({
+        name: d.name,
+        decision: 'MONITOR',
+        rationale: 'The AI did not return a recommendation for this ad set, so it has been flagged for manual review. Current-day stats are shown as reported.',
+        targetSpend: (typeof d.spend === 'number' && d.spend > 0) ? Math.round(d.spend) : 'N/A'
+      }, d);
+
+      // Index a batch of AI recommendations by normalized name. Duplicate names map to a
+      // queue so distinct ad sets that share a name each consume their own recommendation.
+      const indexByName = (recs: any[]) => {
+        const map = new Map<string, any[]>();
+        (recs || []).forEach((rec: any) => {
+          const k = norm(rec.name);
+          if (!k) return;
+          if (!map.has(k)) map.set(k, []);
+          map.get(k)!.push(rec);
+        });
+        return map;
+      };
+
+      const fetchHistoryFor = (names: string[]) =>
+        MetaAdPerformance.find({
+          name: { $in: names.filter(Boolean) },
           date: { $ne: latestDate }
         })
         .sort({ date: -1 })
         .limit(1000); // 1000 points of history for 50 adsets is plenty (~20 days each)
 
-        console.log(`Analyzing Batch ${Math.floor(i / BATCH_SIZE) + 1}... (${batch.length} items)`);
-        
-        const result = await aiService.analyzeAdsData(batch, batchHistoricalData);
-        if (result.recommendations) {
-          allRecommendations.push(...result.recommendations);
+      // Process in batches to avoid OpenAI output token limits
+      for (let i = 0; i < adData.length; i += BATCH_SIZE) {
+        const batch = adData.slice(i, i + BATCH_SIZE);
+        const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+
+        // Fetch history ONLY for the current batch's ad sets
+        const batchHistoricalData = await fetchHistoryFor(batch.map((d: any) => d.name));
+
+        console.log(`Analyzing Batch ${batchNum}... (${batch.length} items)`);
+
+        // A failed batch (e.g. truncated JSON) must not kill the whole analysis: leave its
+        // recommendations empty so every item flows into the retry/fallback path below.
+        let result: any = { recommendations: [], overallStrategy: '' };
+        try {
+          result = await aiService.analyzeAdsData(batch, batchHistoricalData);
+        } catch (batchErr) {
+          console.error(`Batch ${batchNum} analysis failed; recovering each item via retry/fallback.`, batchErr);
         }
         if (result.overallStrategy) {
           overallStrategies.push(result.overallStrategy);
         }
+
+        // Reconcile: every entity in this batch MUST end up with exactly one recommendation.
+        const recsByName = indexByName(result.recommendations);
+        const missing: any[] = [];
+        const reconciled: any[] = batch.map((d: any) => {
+          const queue = recsByName.get(norm(d.name));
+          const rec = queue && queue.length ? queue.shift() : null;
+          if (rec) return attachRealStats(rec, d);
+          missing.push(d);
+          return null;
+        });
+
+        // One targeted retry for any ad sets the AI skipped in this batch.
+        if (missing.length > 0) {
+          console.warn(`Batch ${batchNum}: AI skipped ${missing.length} ad set(s); retrying just those.`);
+          try {
+            const retryHistory = await fetchHistoryFor(missing.map((d: any) => d.name));
+            const retryResult = await aiService.analyzeAdsData(missing, retryHistory);
+            const retryByName = indexByName(retryResult.recommendations);
+            missing.forEach((d: any) => {
+              const idx = batch.indexOf(d);
+              const queue = retryByName.get(norm(d.name));
+              const rec = queue && queue.length ? queue.shift() : null;
+              reconciled[idx] = rec ? attachRealStats(rec, d) : buildFallback(d);
+            });
+          } catch (retryErr) {
+            console.error('Retry for skipped ad sets failed:', retryErr);
+            missing.forEach((d: any) => { reconciled[batch.indexOf(d)] = buildFallback(d); });
+          }
+        }
+
+        allRecommendations.push(...reconciled.filter(Boolean));
       }
 
-      console.log(`Total Final Recommendations: ${allRecommendations.length}`);
+      console.log(`Total Final Recommendations: ${allRecommendations.length} (expected ${adData.length})`);
       
       // PERSIST the analysis: Overwrite existing one for this date
       if (allRecommendations.length > 0) {
