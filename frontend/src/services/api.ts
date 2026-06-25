@@ -1008,6 +1008,40 @@ class ApiService {
     return this.request(`/api/admin/magic-links/tracking/${awb}`);
   }
 
+  // ─── Reels × Strategies matrix ──────────────────────────────────────────────
+  async getReelsData(): Promise<{ success: boolean; reels?: any[]; strategies?: any[]; error?: string }> {
+    return this.request('/api/admin/reels');
+  }
+
+  async createReel(name: string, url: string, date: string): Promise<{ success: boolean; reel?: any; error?: string }> {
+    return this.request('/api/admin/reels/reels', {
+      method: 'POST',
+      body: JSON.stringify({ name, url, date }),
+    });
+  }
+
+  async deleteReel(id: string): Promise<{ success: boolean; error?: string }> {
+    return this.request(`/api/admin/reels/reels/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  }
+
+  async createReelStrategy(name: string): Promise<{ success: boolean; strategy?: any; error?: string }> {
+    return this.request('/api/admin/reels/strategies', {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    });
+  }
+
+  async deleteReelStrategy(id: string): Promise<{ success: boolean; error?: string }> {
+    return this.request(`/api/admin/reels/strategies/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  }
+
+  async toggleReelStrategy(reelId: string, strategyId: string, marked: boolean): Promise<{ success: boolean; reel?: any; error?: string }> {
+    return this.request(`/api/admin/reels/reels/${encodeURIComponent(reelId)}/strategies/${encodeURIComponent(strategyId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ marked }),
+    });
+  }
+
   async getTickets(): Promise<{ success: boolean; tickets?: any[]; error?: string }> {
     return this.request('/api/admin/magic-links/tickets');
   }
