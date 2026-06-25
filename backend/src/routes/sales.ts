@@ -3,7 +3,7 @@ import { DiscardedOrder, RTOOrder, ProfitPrediction, ShippingCharge, OrderDelive
 import { requireAdmin } from './adminAuth';
 import { AuthenticatedRequest } from '../types';
 import aiService from '../services/aiService';
-import { backfillAllDates, recomputeForDate } from '../services/roasService';
+import { backfillAllDates, recomputeRange } from '../services/roasService';
 import { backfillShippingStats } from '../services/shippingStatsService';
 import { backfillOrderStats } from '../services/orderStatsService';
 import { backfillDailyPnl, recomputePnlForDate, getVariantPerformance } from '../services/dailyPnlService';
@@ -1094,16 +1094,11 @@ router.get('/daily-roas', requireAdmin, async (req: AuthenticatedRequest, res: R
   try {
     const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
 
-    // Always recompute the last 3 days so today's revenue is never stale
-    const IST_OFFSET = 5.5 * 60 * 60 * 1000;
-    const todayIST = new Date(Date.now() + IST_OFFSET);
-    const recentDates: string[] = [];
-    for (let i = 0; i < 3; i++) {
-      const d = new Date(todayIST);
-      d.setDate(d.getDate() - i);
-      recentDates.push(d.toISOString().slice(0, 10));
-    }
-    await Promise.all(recentDates.map((dk) => recomputeForDate(dk)));
+    // Recompute the entire viewed window from current order + ad-spend data so the
+    // chart always reflects the latest cache and self-heals any day whose stored
+    // revenue was frozen against a stale cache (e.g. ad spend entered before that
+    // day's orders synced). Falls back to all dated records when no range is given.
+    await recomputeRange(startDate, endDate);
 
     const filter: Record<string, any> = {};
     if (startDate || endDate) {

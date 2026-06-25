@@ -86,6 +86,48 @@ async function getSingleDayAdSpend(dateKey: string): Promise<number> {
 }
 
 /**
+ * Recompute DailyROAS for a window of dates from current order + ad-spend data.
+ *
+ * When an explicit [startDateKey, endDateKey] is given, EVERY calendar day in the
+ * window is recomputed — not just days that currently have data — so a day that was
+ * persisted against a stale order cache (e.g. ad spend entered before that day's
+ * orders had synced, which froze revenue at 0) is corrected on the next read. The
+ * revenue/ad-spend maps are built once and shared across the window to avoid N+1
+ * fetches. Without a range, falls back to every date that has revenue or ad spend.
+ */
+export async function recomputeRange(startDateKey?: string, endDateKey?: string): Promise<void> {
+  const [revenueByDate, adSpendByDate] = await Promise.all([
+    buildRevenueByDate(),
+    buildAdSpendByDate(),
+  ]);
+
+  const todayKey = toDateKey(new Date());
+
+  let dateKeys: string[];
+  if (startDateKey && endDateKey && startDateKey <= endDateKey) {
+    dateKeys = [];
+    // Iterate at noon UTC to stay clear of any day boundary; IST has no DST.
+    const cursor = new Date(`${startDateKey}T12:00:00Z`);
+    const end = new Date(`${endDateKey}T12:00:00Z`);
+    while (cursor <= end) {
+      dateKeys.push(cursor.toISOString().slice(0, 10));
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+  } else {
+    dateKeys = Array.from(new Set([
+      ...Object.keys(revenueByDate),
+      ...Object.keys(adSpendByDate),
+    ]));
+  }
+
+  for (const dateKey of dateKeys) {
+    if (dateKey < DATA_START_DATE) continue;
+    if (dateKey > todayKey) continue; // never persist future dates
+    await recomputeForDate(dateKey, revenueByDate, adSpendByDate);
+  }
+}
+
+/**
  * Backfill DailyROAS for all dates that have either ad spend or order revenue.
  * Safe to run multiple times (upserts).
  */

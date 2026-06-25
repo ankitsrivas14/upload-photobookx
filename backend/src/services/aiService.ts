@@ -1,20 +1,13 @@
 import OpenAI from 'openai';
-import Anthropic from '@anthropic-ai/sdk';
 import config from '../config';
 
 class AIService {
     private openai: OpenAI | null = null;
-    private anthropic: Anthropic | null = null;
 
     constructor() {
         const apiKey = process.env.OPENAI_API_KEY;
         if (apiKey) {
             this.openai = new OpenAI({ apiKey });
-        }
-
-        const anthropicKey = process.env.ANTHROPIC_API_KEY;
-        if (anthropicKey) {
-            this.anthropic = new Anthropic({ apiKey: anthropicKey });
         }
     }
 
@@ -296,8 +289,8 @@ class AIService {
         }
     }
     async analyzeAdsData(adData: any[], historicalData: any[] = []) {
-        if (!this.anthropic) {
-            throw new Error('Anthropic API key is missing. Please add ANTHROPIC_API_KEY to your .env file.');
+        if (!this.openai) {
+            throw new Error('OpenAI API key is missing.');
         }
 
         const inputCount = adData.length;
@@ -388,60 +381,17 @@ class AIService {
             }
         `;
 
-        // Structured-output schema mirroring the JSON contract described in the prompt,
-        // so Claude is constrained to return parseable JSON in the expected shape.
-        const responseSchema = {
-            type: 'object',
-            properties: {
-                recommendations: {
-                    type: 'array',
-                    items: {
-                        type: 'object',
-                        properties: {
-                            id: { type: 'string' },
-                            name: { type: 'string' },
-                            decision: { type: 'string', enum: ['SCALE', 'CONTINUE', 'MONITOR', 'CLOSE', 'DUPLICATE'] },
-                            rationale: { type: 'string' },
-                            targetSpend: { anyOf: [{ type: 'number' }, { type: 'string' }] },
-                            stats: {
-                                type: 'object',
-                                properties: {
-                                    spend: { type: 'number' }, roas: { type: 'number' }, purchases: { type: 'number' },
-                                    cpa: { type: 'number' }, cpc: { type: 'number' }, ctr: { type: 'number' },
-                                    clicks: { type: 'number' }, cpm: { type: 'number' }, addsToCart: { type: 'number' }
-                                },
-                                required: ['spend', 'roas', 'purchases', 'cpa', 'cpc', 'ctr', 'clicks', 'cpm', 'addsToCart'],
-                                additionalProperties: false
-                            }
-                        },
-                        required: ['id', 'name', 'decision', 'rationale', 'targetSpend', 'stats'],
-                        additionalProperties: false
-                    }
-                },
-                overallStrategy: { type: 'string' }
-            },
-            required: ['recommendations', 'overallStrategy'],
-            additionalProperties: false
-        };
-
         try {
-            const response = await this.anthropic.messages.create({
-                model: 'claude-opus-4-8',
-                max_tokens: 16000,
-                thinking: { type: 'adaptive' },
-                output_config: {
-                    effort: 'medium',
-                    format: { type: 'json_schema', schema: responseSchema }
-                },
-                system: 'You are an elite performance marketer who prioritizes historical trends over single-day fluctuations.',
-                messages: [{ role: 'user', content: prompt }]
+            const response = await this.openai.chat.completions.create({
+                model: 'gpt-5.4',
+                messages: [
+                    { role: 'system', content: 'You are an elite performance marketer who prioritizes historical trends over single-day fluctuations.' },
+                    { role: 'user', content: prompt }
+                ],
+                max_completion_tokens: 128000,
+                response_format: { type: 'json_object' }
             });
-
-            let raw = '';
-            for (const block of response.content) {
-                if (block.type === 'text') raw += block.text;
-            }
-            const result = JSON.parse(raw || '{}');
+            const result = JSON.parse(response.choices[0].message.content || '{}');
             return result;
         } catch (err: any) {
             console.error('AIService Ads Analysis Error:', err);
@@ -450,8 +400,8 @@ class AIService {
     }
 
 async chatWithAdsStrategist(userQuestion: string, adData: any[], historicalData: any[] = [], chatHistory: any[] = []) {
-        if (!this.anthropic) {
-            throw new Error('Anthropic API key is missing. Please add ANTHROPIC_API_KEY to your .env file.');
+        if (!this.openai) {
+            throw new Error('OpenAI API key is missing.');
         }
 
         const historyMap: Record<string, any[]> = {};
@@ -506,20 +456,15 @@ async chatWithAdsStrategist(userQuestion: string, adData: any[], historicalData:
         `;
 
         try {
-            const response = await this.anthropic.messages.create({
-                model: 'claude-opus-4-8',
-                max_tokens: 16000,
-                thinking: { type: 'adaptive' },
-                output_config: { effort: 'medium' },
-                system: 'You are a high-level performance marketing architect.',
-                messages: [{ role: 'user', content: prompt }]
+            const response = await this.openai.chat.completions.create({
+                model: 'gpt-5.4',
+                messages: [
+                    { role: 'system', content: 'You are a high-level performance marketing architect.' },
+                    { role: 'user', content: prompt }
+                ]
             });
 
-            let text = '';
-            for (const block of response.content) {
-                if (block.type === 'text') text += block.text;
-            }
-            return text || "I'm sorry, I couldn't process that strategy request.";
+            return response.choices[0].message.content || "I'm sorry, I couldn't process that strategy request.";
         } catch (err: any) {
             console.error('AIService Ad Strategy Chat Error:', err);
             throw err;
