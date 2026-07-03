@@ -3,7 +3,7 @@ import { DiscardedOrder, RTOOrder, ProfitPrediction, ShippingCharge, OrderDelive
 import { requireAdmin } from './adminAuth';
 import { AuthenticatedRequest } from '../types';
 import aiService from '../services/aiService';
-import { backfillAllDates, recomputeRange } from '../services/roasService';
+import { backfillAllDates } from '../services/roasService';
 import { backfillShippingStats } from '../services/shippingStatsService';
 import { backfillOrderStats } from '../services/orderStatsService';
 import { backfillDailyPnl, recomputePnlForDate, getVariantPerformance } from '../services/dailyPnlService';
@@ -1094,12 +1094,11 @@ router.get('/daily-roas', requireAdmin, async (req: AuthenticatedRequest, res: R
   try {
     const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
 
-    // Recompute the entire viewed window from current order + ad-spend data so the
-    // chart always reflects the latest cache and self-heals any day whose stored
-    // revenue was frozen against a stale cache (e.g. ad spend entered before that
-    // day's orders synced). Falls back to all dated records when no range is given.
-    await recomputeRange(startDate, endDate);
-
+    // Pure read — DailyROAS is kept up to date on the WRITE paths instead:
+    //  • ad-spend create/delete → recomputeForDate(dateKey)      (expenses.ts)
+    //  • order-cache refresh    → scheduleRoasRecompute()        (shopifyService.updateCache)
+    // Revenue and ad spend can only change through those two writers, so
+    // recomputing here on every FE load was pure wasted work.
     const filter: Record<string, any> = {};
     if (startDate || endDate) {
       filter.dateKey = {};

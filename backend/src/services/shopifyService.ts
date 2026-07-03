@@ -1,6 +1,7 @@
 import config from '../config';
 import type { ShopifyOrder, ShopifyOrdersResponse } from '../types';
 import ShopifyOrderCache from '../models/ShopifyOrderCache';
+import { scheduleRoasRecompute } from './roasService';
 
 /**
  * Simplified Shopify Admin API Service
@@ -235,6 +236,13 @@ class ShopifyService {
         },
         { upsert: true, new: true }
       );
+
+      // Order data is the revenue source for DailyROAS — refresh it in the
+      // background whenever the all_orders cache changes (the only event that
+      // can change any day's revenue). Reads of /daily-roas never recompute.
+      if (cacheKey.startsWith('all_orders_')) {
+        scheduleRoasRecompute(`order cache ${cacheKey} updated`);
+      }
 
     } catch (error) {
       console.error('Error updating cache:', error);
