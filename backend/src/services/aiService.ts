@@ -288,12 +288,25 @@ class AIService {
             throw err;
         }
     }
-    async analyzeAdsData(adData: any[], historicalData: any[] = []) {
+    async analyzeAdsData(adData: any[], historicalData: any[] = [], context: any = {}) {
         if (!this.openai) {
             throw new Error('OpenAI API key is missing.');
         }
 
         const inputCount = adData.length;
+
+        // Creative-funnel diagnostics: hook = stopped the scroll, hold = watched through.
+        // Falling hook rate on stable CPM = creative fatigue; stable hook + rising CPM = auction pressure.
+        const withVideoRates = (d: any) => {
+            const out: any = { ...d };
+            if (d.impressions > 0 && d.videoPlays25 > 0) {
+                out.hookRatePct = Number(((d.videoPlays25 / d.impressions) * 100).toFixed(2));
+            }
+            if (d.videoPlays25 > 0 && d.videoPlays95 >= 0) {
+                out.holdRatePct = Number(((d.videoPlays95 / d.videoPlays25) * 100).toFixed(2));
+            }
+            return out;
+        };
 
         // Group history by name for easier AI consumption
         const historyMap: Record<string, any[]> = {};
@@ -301,7 +314,7 @@ class AIService {
             if (!h || !h.name || typeof h.name !== 'string') return;
             const trimmedName = h.name.trim();
             if (!historyMap[trimmedName]) historyMap[trimmedName] = [];
-            historyMap[trimmedName].push({
+            historyMap[trimmedName].push(withVideoRates({
                 date: h.date,
                 spend: h.spend,
                 roas: h.roas,
@@ -315,9 +328,40 @@ class AIService {
                 cpm: h.cpm,
                 frequency: h.frequency,
                 addsToCart: h.addsToCart,
-                outboundClicks: h.outboundClicks
-            });
+                outboundClicks: h.outboundClicks,
+                dailyBudget: h.dailyBudget,
+                videoPlays25: h.videoPlays25,
+                videoPlays95: h.videoPlays95,
+                videoAvgPlayTime: h.videoAvgPlayTime
+            }));
         });
+
+        // Optional context sections (built server-side from the business's own DB)
+        const businessSection = context?.business ? `
+            BUSINESS ECONOMICS (from the store's own P&L database — this defines "profitable"):
+            - AOV: ₹${context.business.aov} | Contribution margin/order (after COGS+shipping): ₹${context.business.contributionMargin}
+            - BREAKEVEN ROAS: ${context.business.breakevenROAS} — an ad set below this loses money even when Meta shows "positive" ROAS.
+            ${context.business.deliveryFailureRatePct != null ? `- DELIVERY FAILURE (RTO/NDR) RATE: ~${context.business.deliveryFailureRatePct}% of orders never complete. Meta-reported ROAS therefore OVERSTATES realized revenue by roughly that fraction — judge against breakeven with this discount in mind.` : ''}
+            - Anchor every SCALE/CLOSE decision on breakeven ROAS, not on generic industry intuition.` : '';
+
+        const calendarSection = context?.calendar ? `
+            CALENDAR CONTEXT:
+            - Data date: ${context.calendar.date} (${context.calendar.weekday}), store timezone IST.
+            - This store sells devotional photobooks (Shiv Ji / Jyotirlinga themes). Demand swings with the Hindu devotional calendar — Mondays (Somwar) and festivals like Sawan/Shravan month or Mahashivratri lift demand; account for weekday/festival effects before attributing a spike or dip to the creative or auction.` : '';
+
+        const previousSection = context?.previousRecommendations ? `
+            YOUR PREVIOUS RECOMMENDATIONS (${context.previousRecommendations.date}):
+            ${JSON.stringify(context.previousRecommendations.calls)}
+            - Grade your own prior calls against today's outcomes. If a SCALE call degraded or a MONITOR recovered, say so in the rationale and correct course. Consistency without accountability is worthless.` : '';
+
+        const snapshotSection = context?.accountSnapshot?.length ? `
+            FULL ACCOUNT SNAPSHOT (all ad sets today — use for PORTFOLIO-level allocation even if this batch contains only some of them):
+            ${context.accountSnapshot.join('\n            ')}` : '';
+
+        const reelsSection = context?.reelStrategies?.length ? `
+            CREATIVE STRATEGY MATRIX (reels and the strategies used in each, maintained by the team):
+            ${JSON.stringify(context.reelStrategies)}
+            - Where an ad set's creative matches a reel by name, correlate performance with its strategies. In "overallStrategy", include a CREATIVE DIRECTION paragraph: which strategy combinations are winning, and what the team should produce next.` : '';
 
         const prompt = `
             Task: Ultimate Performance Marketing Architect
@@ -330,17 +374,29 @@ class AIService {
             
             HORIZONTAL SCALING RULE:
             - Max risk per ad set is 2,000 INR.
-            - If an ad set is performing exceptionally well but is already near or at the 2,000 INR daily budget cap, do NOT suggest vertical scaling (raising budget further). 
+            - Each entity's "dailyBudget" field is its ACTUAL current daily budget — base SCALE vs DUPLICATE decisions and budget-change percentages on it, not on inferred spend.
+            - If an ad set is performing exceptionally well but is already near or at the 2,000 INR daily budget cap, do NOT suggest vertical scaling (raising budget further).
             - Instead, suggest "DUPLICATE" to create a fresh copy and scale horizontally, spreading the risk.
-            
+            ${businessSection}
+            ${calendarSection}
+
             DATA CONTEXT:
             1. Current Performance: ${inputCount} ad sets from the most recent day.
             2. Historical Performance: Historical data grouped by name to help you see trends, momentum, and fatigue.
-            
+            ${snapshotSection}
+            ${previousSection}
+            ${reelsSection}
+
             UNBIASED ANALYSIS PROTOCOL:
             - **Rule**: Act entirely objectively based on the statistics (spend, purchases, ROAS, reach, impressions, CPA).
             - **Rule**: There is NO bias. If the stats dictate that an ad set should be closed—even if it is new—you must recommend "CLOSE". If it is performing well and scaling is logical, suggest "SCALE" or "DUPLICATE". Suggest exact budgets based on logic.
-            
+
+            STATISTICAL & META-MECHANICS GUARDRAILS:
+            - **Small samples**: at 1-5 purchases/day, single-day ROAS swings are mostly noise. Judge trend on 3-7 day spend-weighted aggregates. Do NOT close a historically profitable ad set on one bad day unless spend has clearly blown past CPA tolerance; prefer MONITOR with a reduced budget as the intermediate step.
+            - **Learning phase**: budget changes greater than ~25% reset Meta's learning phase and destabilize delivery. Keep SCALE/reduction steps within ±25% of the current dailyBudget unless you are closing or duplicating.
+            - **Attribution lag**: the most recent day's purchases may still be under-reported by Meta's attribution window. Weight the latest day slightly less than settled days.
+            - **Creative diagnostics**: "hookRatePct" (3s-equivalent views/impressions) and "holdRatePct" (95% completes/25% views) are provided where available. Falling hook rate with stable CPM = creative fatigue → recommend creative refresh/DUPLICATE with new creative, not just budget cuts. Stable hook but rising CPM = auction pressure → budget/bid problem, not a creative problem. Say which one you see.
+
             CRITICAL REQUIREMENTS:
             - Analyze ALL ${inputCount} entities. Do not skip any. Even if an entity has 0 spend or 0 activity, you MUST provide a recommendation for it.
             - Provide exactly ${inputCount} actionable recommendations in your JSON "recommendations" array.
@@ -353,17 +409,18 @@ class AIService {
             - Use your total autonomy. Consider trends, CPA stability, purchase volume, and ad fatigue signals.
             
             CURRENT DATA:
-            ${JSON.stringify(adData.map((d, index) => ({ id: `entity_${index+1}`, ...d, name: (typeof d.name === 'string' ? d.name.trim() : d.name || 'Unknown') })))}
-            
+            ${JSON.stringify(adData.map((d, index) => withVideoRates({ id: `entity_${index+1}`, ...d, name: (typeof d.name === 'string' ? d.name.trim() : d.name || 'Unknown') })))}
+
             HISTORICAL CONTEXT:
             ${JSON.stringify(historyMap)}
-            
+
             Instructions:
             1. Provide a recommendation for EVERY entity in the "CURRENT DATA" block, without exception. Treat identically named entities as separate items based on their unique 'id'.
             2. "targetSpend" (INR): If suggesting SCALE, MONITOR, CONTINUE, or DUPLICATE, suggest the next 24-hour budget allocation.
-            3. "Rationale": A surgical, expert insight comparing the current performance to the historical narrative and current parameters (min 30-40 words). 
+            3. "Rationale": A surgical, expert insight comparing the current performance to the historical narrative and current parameters (min 30-40 words).
                - State clearly why you made this specific decision purely based on the stats provided. No generic fluff.
             4. USE MARKDOWN: Use bolding (**Ad Name**, **₹Amount**, etc.) and clear vertical spacing within "overallStrategy" and "rationale".
+            5. "overallStrategy" must end with: (a) a one-line TOTAL next-24h budget across the whole account with the reallocation logic, and (b) if the creative strategy matrix was provided, a CREATIVE DIRECTION paragraph naming the strategy combinations to double down on next.
             
             Return ONLY a valid JSON object:
             {
@@ -399,7 +456,7 @@ class AIService {
         }
     }
 
-async chatWithAdsStrategist(userQuestion: string, adData: any[], historicalData: any[] = [], chatHistory: any[] = []) {
+async chatWithAdsStrategist(userQuestion: string, adData: any[], historicalData: any[] = [], chatHistory: any[] = [], businessContext: any = null) {
         if (!this.openai) {
             throw new Error('OpenAI API key is missing.');
         }
@@ -433,7 +490,11 @@ async chatWithAdsStrategist(userQuestion: string, adData: any[], historicalData:
             
             CONSULTATION GOAL:
             Answer the user's question with surgical precision. Use the provided data to back up your strategy.
-            
+            ${businessContext ? `
+            BUSINESS ECONOMICS (from the store's own P&L database):
+            - AOV ₹${businessContext.aov} | Contribution margin/order ₹${businessContext.contributionMargin} | BREAKEVEN ROAS ${businessContext.breakevenROAS}${businessContext.deliveryFailureRatePct != null ? ` | Delivery failure (RTO/NDR) ~${businessContext.deliveryFailureRatePct}% (Meta ROAS overstates realized revenue accordingly)` : ''}
+            - Anchor profitability judgements on breakeven ROAS, not generic benchmarks.
+            ` : ''}
             RELEVANT DATA:
             ${JSON.stringify(adData.map(d => ({ ...d, name: (typeof d.name === 'string' ? d.name.trim() : d.name || 'Unknown') })))}
             
