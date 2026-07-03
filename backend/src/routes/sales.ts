@@ -1,5 +1,5 @@
 import express, { Response } from 'express';
-import { DiscardedOrder, RTOOrder, ProfitPrediction, ShippingCharge, OrderDeliveryDate, ShopifyOrderCache, MetaAdPerformance, MetaAdAnalysis, AcknowledgedOrder, TicketRaisedOrder, DailyROAS, DailyShipping, DailyOrderStats, DailyPnl } from '../models';
+import { DiscardedOrder, RTOOrder, ProfitPrediction, ShippingCharge, OrderDeliveryDate, ShopifyOrderCache, MetaAdPerformance, MetaAdAnalysis, AcknowledgedOrder, TicketRaisedOrder, DailyROAS, DailyShipping, DailyOrderStats, DailyPnl, Reel, ReelStrategy } from '../models';
 import { requireAdmin } from './adminAuth';
 import { AuthenticatedRequest } from '../types';
 import aiService from '../services/aiService';
@@ -760,6 +760,16 @@ router.post('/ads-performance', requireAdmin, async (req: AuthenticatedRequest, 
         const frequency = parseNumber(findValue(d, ['frequency']));
         const addsToCart = parseNumber(findValue(d, ['adds to cart', 'addToCart', 'addsToCart']));
         const outboundClicks = parseNumber(findValue(d, ['outbound clicks', 'outboundClicks']));
+        const dailyBudget = parseNumber(findValue(d, ['dailyBudget', 'ad set budget']));
+        const videoPlays25 = parseNumber(findValue(d, ['videoPlays25', 'video plays at 25%']));
+        const videoPlays50 = parseNumber(findValue(d, ['videoPlays50', 'video plays at 50%']));
+        const videoPlays75 = parseNumber(findValue(d, ['videoPlays75', 'video plays at 75%']));
+        const videoPlays95 = parseNumber(findValue(d, ['videoPlays95', 'video plays at 95%']));
+        const videoPlays100 = parseNumber(findValue(d, ['videoPlays100', 'video plays at 100%']));
+        const videoAvgPlayTime = parseNumber(findValue(d, ['videoAvgPlayTime', 'video average play time']));
+        // 'videoPlays' must be matched AFTER the percentage variants would fail —
+        // exact-match pass runs first, so the bare key/column is picked correctly.
+        const videoPlays = parseNumber(findValue(d, ['videoPlays', 'video plays']));
         const name = (findValue(d, ['Ad Set Name', 'Campaign Name', 'Ad Name', 'Name']) || 'Unknown').trim();
         const status = findValue(d, ['Delivery Status', 'Delivery', 'Status']) || 'active';
         
@@ -795,7 +805,15 @@ router.post('/ads-performance', requireAdmin, async (req: AuthenticatedRequest, 
           cpm,
           frequency,
           addsToCart,
-          outboundClicks
+          outboundClicks,
+          dailyBudget,
+          videoPlays,
+          videoAvgPlayTime,
+          videoPlays25,
+          videoPlays50,
+          videoPlays75,
+          videoPlays95,
+          videoPlays100
         };
       });
 
@@ -854,6 +872,59 @@ router.post('/ads-performance', requireAdmin, async (req: AuthenticatedRequest, 
       adData = filteredAdData; // Resign back for the loop
 
       const latestDate = adData?.[0]?.date || new Date().toISOString().split('T')[0];
+
+      // ─── Business + portfolio context for the AI (best-effort; analysis proceeds without it) ───
+      const analysisContext: any = {};
+      try {
+        // Real unit economics: breakeven ROAS, contribution margin, delivery-failure (NDR) rate
+        const be = await computeBreakevenMetrics();
+        const settled = (be.deliveredCount || 0) + (be.failedCount || 0);
+        analysisContext.business = {
+          aov: Math.round(be.aov),
+          contributionMargin: Math.round(be.contributionMargin),
+          breakevenROAS: Number(be.breakevenROAS.toFixed(2)),
+          deliveryFailureRatePct: settled > 0 ? Number(((be.failedCount / settled) * 100).toFixed(1)) : null,
+        };
+      } catch (err) { console.error('analyze-ads: breakeven context failed', err); }
+
+      try {
+        // Yesterday's calls, so the model can grade and correct its own prior decisions
+        const prev = await MetaAdAnalysis.findOne({ date: { $lt: latestDate } }).sort({ date: -1 }).lean();
+        if (prev?.recommendations?.length) {
+          analysisContext.previousRecommendations = {
+            date: prev.date,
+            calls: prev.recommendations.map((r: any) => ({
+              name: r.name, decision: r.decision, targetSpend: r.targetSpend,
+            })),
+          };
+        }
+      } catch (err) { console.error('analyze-ads: previous analysis context failed', err); }
+
+      try {
+        // Creative strategy matrix from the Reels page — lets the AI correlate winning
+        // ad sets with the creative strategies behind their reels
+        const [reels, strategies] = await Promise.all([
+          Reel.find().sort({ date: -1 }).limit(100).lean(),
+          ReelStrategy.find().lean(),
+        ]);
+        if (reels.length && strategies.length) {
+          const stratName = new Map(strategies.map((s: any) => [String(s._id), s.name]));
+          analysisContext.reelStrategies = reels.map((r: any) => ({
+            reel: r.name,
+            date: new Date(r.date).toISOString().slice(0, 10),
+            strategies: (r.strategyIds || []).map((id: any) => stratName.get(String(id))).filter(Boolean),
+          }));
+        }
+      } catch (err) { console.error('analyze-ads: reels context failed', err); }
+
+      // Whole-account snapshot: every batch sees the full portfolio even though
+      // recommendations are generated in batches
+      analysisContext.accountSnapshot = adData.map((d: any) =>
+        `${d.name} | budget ₹${d.dailyBudget || '?'} | spend ₹${d.spend} | ROAS ${d.roas} | ${d.purchases || 0} purchases`
+      );
+
+      const weekday = new Date(`${latestDate}T12:00:00Z`).toLocaleDateString('en-IN', { weekday: 'long', timeZone: 'Asia/Kolkata' });
+      analysisContext.calendar = { date: latestDate, weekday };
 
       const BATCH_SIZE = 10;
       const allRecommendations: any[] = [];
@@ -920,7 +991,7 @@ router.post('/ads-performance', requireAdmin, async (req: AuthenticatedRequest, 
         // recommendations empty so every item flows into the retry/fallback path below.
         let result: any = { recommendations: [], overallStrategy: '' };
         try {
-          result = await aiService.analyzeAdsData(batch, batchHistoricalData);
+          result = await aiService.analyzeAdsData(batch, batchHistoricalData, analysisContext);
         } catch (batchErr) {
           console.error(`Batch ${batchNum} analysis failed; recovering each item via retry/fallback.`, batchErr);
         }
@@ -944,7 +1015,7 @@ router.post('/ads-performance', requireAdmin, async (req: AuthenticatedRequest, 
           console.warn(`Batch ${batchNum}: AI skipped ${missing.length} ad set(s); retrying just those.`);
           try {
             const retryHistory = await fetchHistoryFor(missing.map((d: any) => d.name));
-            const retryResult = await aiService.analyzeAdsData(missing, retryHistory);
+            const retryResult = await aiService.analyzeAdsData(missing, retryHistory, analysisContext);
             const retryByName = indexByName(retryResult.recommendations);
             missing.forEach((d: any) => {
               const idx = batch.indexOf(d);
@@ -1064,12 +1135,26 @@ router.post('/ads-performance', requireAdmin, async (req: AuthenticatedRequest, 
         date: { $lt: date }
       }).limit(500);
 
+      // Business economics context (best-effort)
+      let chatBusinessContext: any = null;
+      try {
+        const be = await computeBreakevenMetrics();
+        const settled = (be.deliveredCount || 0) + (be.failedCount || 0);
+        chatBusinessContext = {
+          aov: Math.round(be.aov),
+          contributionMargin: Math.round(be.contributionMargin),
+          breakevenROAS: Number(be.breakevenROAS.toFixed(2)),
+          deliveryFailureRatePct: settled > 0 ? Number(((be.failedCount / settled) * 100).toFixed(1)) : null,
+        };
+      } catch (err) { console.error('ads-chat: breakeven context failed', err); }
+
       // Call AI Chat
       const aiResponse = await aiService.chatWithAdsStrategist(
         userQuestion,
         adData,
         historicalData,
-        analysis.chat || []
+        analysis.chat || [],
+        chatBusinessContext
       );
 
       // Persist the messages

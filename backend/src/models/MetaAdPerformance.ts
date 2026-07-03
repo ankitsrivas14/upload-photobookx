@@ -18,6 +18,14 @@ export interface IMetaAdPerformance extends Document {
   frequency?: number;
   addsToCart?: number;
   outboundClicks?: number;
+  dailyBudget?: number;
+  videoPlays?: number;
+  videoAvgPlayTime?: number;
+  videoPlays25?: number;
+  videoPlays50?: number;
+  videoPlays75?: number;
+  videoPlays95?: number;
+  videoPlays100?: number;
   updatedAt: Date;
 }
 
@@ -39,8 +47,16 @@ const MetaAdPerformanceSchema: Schema = new Schema({
   frequency: { type: Number },
   addsToCart: { type: Number },
   outboundClicks: { type: Number },
-}, { 
-  timestamps: true 
+  dailyBudget: { type: Number },
+  videoPlays: { type: Number },
+  videoAvgPlayTime: { type: Number },
+  videoPlays25: { type: Number },
+  videoPlays50: { type: Number },
+  videoPlays75: { type: Number },
+  videoPlays95: { type: Number },
+  videoPlays100: { type: Number },
+}, {
+  timestamps: true
 });
 
 // Index for fast searching by date and level

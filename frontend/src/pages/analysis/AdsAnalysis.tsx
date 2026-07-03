@@ -160,12 +160,25 @@ export function AdsAnalysis() {
                         const outboundClicksKey = findActualKey(['outbound clicks']);
                         const outboundClicks = cleanNum(row[outboundClicksKey || '']);
 
+                        // Actual daily budget — critical for SCALE vs DUPLICATE decisions
+                        const budgetKey = findActualKey(['ad set budget', 'budget']);
+                        const dailyBudget = cleanNum(row[budgetKey || '']);
+
+                        // Video funnel — hook/hold diagnostics for reel creatives
+                        const videoPlays = cleanNum(row[findActualKey(['video plays']) || '']);
+                        const videoAvgPlayTime = cleanNum(row[findActualKey(['video average play time']) || '']);
+                        const videoPlays25 = cleanNum(row[findActualKey(['video plays at 25%']) || '']);
+                        const videoPlays50 = cleanNum(row[findActualKey(['video plays at 50%']) || '']);
+                        const videoPlays75 = cleanNum(row[findActualKey(['video plays at 75%']) || '']);
+                        const videoPlays95 = cleanNum(row[findActualKey(['video plays at 95%']) || '']);
+                        const videoPlays100 = cleanNum(row[findActualKey(['video plays at 100%']) || '']);
+
                         const dateKey = findActualKey(['reporting starts', 'date', 'day']);
                         const date = row[dateKey || ''] || '';
                         const statusKey = findActualKey(['delivery', 'status', 'ad delivery']);
                         const status = row[statusKey || ''] || 'Active';
 
-                        return { name, status, spend, purchases, roas, reach, impressions, cpc, ctr, cpa, clicks, cpm, frequency, addsToCart, outboundClicks, level, date };
+                        return { name, status, spend, purchases, roas, reach, impressions, cpc, ctr, cpa, clicks, cpm, frequency, addsToCart, outboundClicks, dailyBudget, videoPlays, videoAvgPlayTime, videoPlays25, videoPlays50, videoPlays75, videoPlays95, videoPlays100, level, date };
                     });
 
                     try {
