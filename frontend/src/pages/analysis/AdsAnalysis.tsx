@@ -285,7 +285,9 @@ const handleExportJSON = async () => {
 
             const res = await api.analyzeAds(dedupedData);
             if (res.success) {
-                toast.success(`Analysis ready for ${dedupedData.length} entities`);
+                // Only live ad sets are analyzed on the backend; report the real count.
+                const analyzed = res.recommendations?.length ?? 0;
+                toast.success(`Analysis ready for ${analyzed} live ad set${analyzed === 1 ? '' : 's'}`);
                 setRecommendations(res.recommendations);
                 setOverallStrategy(res.overallStrategy);
                 if (isFreshUpload) {
