@@ -977,6 +977,18 @@ router.post('/ads-performance', requireAdmin, async (req: AuthenticatedRequest, 
         .sort({ date: -1 })
         .limit(1000); // 1000 points of history for 50 adsets is plenty (~20 days each)
 
+      // Distinguish "the AI provider itself failed" (quota exhausted, bad key, rate limit)
+      // from "the model dropped a few items". The former should surface honestly instead of
+      // masquerading as a table full of "manual review" fallbacks.
+      const readAiError = (err: any): string => err?.error?.message || err?.message || 'Unknown AI provider error';
+      const isHardAiError = (err: any): boolean => {
+        const status = err?.status;
+        const code = err?.code || err?.error?.code;
+        return status === 401 || status === 429 || code === 'insufficient_quota' || code === 'invalid_api_key';
+      };
+      let aiProviderError: string | null = null;
+      let aiProducedAny = false;
+
       // Process in batches to avoid OpenAI output token limits
       for (let i = 0; i < adData.length; i += BATCH_SIZE) {
         const batch = adData.slice(i, i + BATCH_SIZE);
@@ -992,8 +1004,14 @@ router.post('/ads-performance', requireAdmin, async (req: AuthenticatedRequest, 
         let result: any = { recommendations: [], overallStrategy: '' };
         try {
           result = await aiService.analyzeAdsData(batch, batchHistoricalData, analysisContext);
-        } catch (batchErr) {
+          if (result.recommendations?.length) aiProducedAny = true;
+        } catch (batchErr: any) {
           console.error(`Batch ${batchNum} analysis failed; recovering each item via retry/fallback.`, batchErr);
+          // A quota/auth error won't recover on the next batch — stop and report it.
+          if (isHardAiError(batchErr)) {
+            aiProviderError = readAiError(batchErr);
+            break;
+          }
         }
         if (result.overallStrategy) {
           overallStrategies.push(result.overallStrategy);
@@ -1033,7 +1051,19 @@ router.post('/ads-performance', requireAdmin, async (req: AuthenticatedRequest, 
       }
 
       console.log(`Total Final Recommendations: ${allRecommendations.length} (expected ${adData.length})`);
-      
+
+      // If the AI never produced a single real recommendation and the provider errored,
+      // surface the actual reason instead of persisting a table of "manual review" rows.
+      if (!aiProducedAny && aiProviderError) {
+        const quota = /quota|billing|insufficient/i.test(aiProviderError);
+        return res.status(502).json({
+          success: false,
+          error: quota
+            ? `AI provider quota exceeded — add credits or raise the spending limit on the OpenAI account for OPENAI_API_KEY. (${aiProviderError})`
+            : `AI provider error: ${aiProviderError}`,
+        });
+      }
+
       // PERSIST the analysis: Overwrite existing one for this date
       if (allRecommendations.length > 0) {
         await MetaAdAnalysis.findOneAndUpdate(
