@@ -869,6 +869,22 @@ router.post('/ads-performance', requireAdmin, async (req: AuthenticatedRequest, 
         return true;
       });
 
+      // Only analyze LIVE ad sets. Closed/paused/inactive ad sets with no spend today
+      // are dead inventory — sending them to the AI just burns tokens to produce a canned
+      // CLOSE. "Live" = spent today OR the ad set's delivery status is active.
+      const isLive = (d: any) => {
+        const status = String(d.status || '').toLowerCase().trim();
+        const activelyDelivering = status === 'active'; // exact — avoids matching "inactive"
+        return (Number(d.spend) || 0) > 0 || activelyDelivering;
+      };
+      const liveAdData = filteredAdData.filter(isLive);
+      // Safety net: if nothing looks live (e.g. an all-zero-spend export), fall back to the
+      // full set rather than returning an empty analysis.
+      if (liveAdData.length > 0) {
+        console.log(`analyze-ads: ${liveAdData.length} live ad sets (skipped ${filteredAdData.length - liveAdData.length} closed/zero-spend)`);
+        filteredAdData = liveAdData;
+      }
+
       adData = filteredAdData; // Resign back for the loop
 
       const latestDate = adData?.[0]?.date || new Date().toISOString().split('T')[0];
