@@ -15,6 +15,7 @@ import pincodesRoutes from './routes/pincodes';
 import abandonedCheckoutsRoutes from './routes/abandonedCheckouts';
 import attendanceRoutes from './routes/attendance';
 import reelsRoutes from './routes/reels';
+import agencyRoutes from './routes/agency';
 
 
 const app = express();
@@ -57,6 +58,7 @@ app.use('/api/admin/pincodes', pincodesRoutes);
 app.use('/api/admin/abandoned-checkouts', abandonedCheckoutsRoutes);
 app.use('/api/admin/attendance', attendanceRoutes);
 app.use('/api/admin/reels', reelsRoutes);
+app.use('/api/admin/agency', agencyRoutes);
 app.use('/api/upload', uploadRoutes);
 
 
