@@ -6,27 +6,39 @@ import {
 import Papa from 'papaparse';
 import { api } from '../../services/api';
 import { toast } from 'react-hot-toast';
-import { Plus, Trash2, AlertTriangle, FileUp, X, Filter } from 'lucide-react';
+import { Plus, FileUp, X, Filter } from 'lucide-react';
 
-interface Campaign {
-  _id: string;
+interface DayCampaign {
   name: string;
-  createdDate: string;
-  matched: boolean;
-  matchesPrefix: boolean;
   spend: number;
   revenue: number;
   roas: number;
   purchases: number;
-  activeDays: number;
+  isNew: boolean;
+}
+
+interface Day {
+  dateKey: string;
+  spend: number;
+  revenue: number;
+  roas: number;
+  purchases: number;
+  launched: number;
+  campaigns: DayCampaign[];
+}
+
+interface Totals {
+  spend: number; revenue: number; roas: number;
+  purchases: number; campaigns: number; days: number;
 }
 
 const fmt = (n: number) => n.toLocaleString('en-IN');
 const dayLabel = (d: string) =>
-  new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+  new Date(`${d}T12:00:00Z`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 
 export function Agency() {
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [days, setDays] = useState<Day[]>([]);
+  const [totals, setTotals] = useState<Totals | null>(null);
   const [prefixes, setPrefixes] = useState<string[]>([]);
   const [prefixInput, setPrefixInput] = useState('');
   const [isLoading, setIsLoading] = useState(true);
@@ -38,7 +50,8 @@ export function Agency() {
     try {
       const res = await api.getAgencyData();
       if (res.success) {
-        setCampaigns(res.campaigns || []);
+        setDays(res.days || []);
+        setTotals(res.totals || null);
         setPrefixes(res.namePrefixes || []);
       }
     } catch (err) {
@@ -55,7 +68,7 @@ export function Agency() {
     const res = await api.saveAgencyPrefixes(next);
     if (res.success) {
       setPrefixes(res.namePrefixes || next);
-      await loadData(); // re-evaluates which logged campaigns still match
+      await loadData(); // re-filters which campaigns count as the agency's
     } else {
       setPrefixes(prev);
       toast.error(res.error || 'Failed to save prefixes');
@@ -73,19 +86,7 @@ export function Agency() {
     savePrefixes([...prefixes, p]);
   };
 
-  const handlePrune = async () => {
-    if (!window.confirm(`Remove ${strays.length} logged campaign(s) that don't start with your agency prefixes?`)) return;
-    const res = await api.pruneAgencyCampaigns();
-    if (res.success) {
-      toast.success(`Removed ${res.removed} non-matching campaign${res.removed === 1 ? '' : 's'}`);
-      await loadData();
-    } else {
-      toast.error(res.error || 'Failed to remove');
-    }
-  };
-
-  // Upload a Meta "Campaigns" CSV export: logs any new campaigns and stores their
-  // spend/ROAS. Re-uploading the same file is safe (rows upsert, logged campaigns skip).
+  // Upload one day's Meta "Campaigns" CSV. Re-uploading the same file is safe.
   const handleCsvUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -145,8 +146,9 @@ export function Agency() {
 
           const res = await api.importAgencyCampaigns(rows as any[]);
           if (res.success) {
-            const bits = [`${res.imported} new campaign${res.imported === 1 ? '' : 's'} logged`];
-            if (res.skipped) bits.push(`${res.skipped} already logged`);
+            const when = res.dates?.length === 1 ? dayLabel(res.dates[0]) : `${res.dates?.length} days`;
+            const bits = [`${when}: ${res.campaigns} agency campaign${res.campaigns === 1 ? '' : 's'}`];
+            if (res.newCampaigns) bits.push(`${res.newCampaigns} newly launched`);
             if (res.discarded) bits.push(`${res.discarded} not the agency's`);
             toast.success(bits.join(' · '), { id: toastId });
             await loadData();
@@ -164,59 +166,16 @@ export function Agency() {
     event.target.value = ''; // allow re-uploading the same file
   };
 
-  const handleDelete = async (id: string) => {
-    if (!window.confirm('Remove this campaign from the agency log?')) return;
-    const prev = campaigns;
-    setCampaigns((c) => c.filter((x) => x._id !== id));
-    const res = await api.deleteAgencyCampaign(id);
-    if (!res.success) {
-      setCampaigns(prev);
-      toast.error('Failed to delete');
-    }
-  };
-
-  // Group campaigns into creation-day cohorts: "the campaigns the agency launched
-  // on day X have together spent ₹S and returned ROAS R".
-  const cohorts = useMemo(() => {
-    const map = new Map<string, { dateKey: string; campaigns: Campaign[]; spend: number; revenue: number; purchases: number }>();
-    for (const c of campaigns) {
-      const dateKey = new Date(c.createdDate).toISOString().slice(0, 10);
-      if (!map.has(dateKey)) map.set(dateKey, { dateKey, campaigns: [], spend: 0, revenue: 0, purchases: 0 });
-      const g = map.get(dateKey)!;
-      g.campaigns.push(c);
-      g.spend += c.spend;
-      g.revenue += c.revenue;
-      g.purchases += c.purchases;
-    }
-    return Array.from(map.values()).sort((a, b) => (a.dateKey < b.dateKey ? 1 : -1));
-  }, [campaigns]);
-
   // Charts read oldest → newest
-  const chartData = useMemo(() =>
-    [...cohorts].reverse().map((g) => ({
-      date: dayLabel(g.dateKey),
-      spend: g.spend,
-      roas: g.spend > 0 ? Number((g.revenue / g.spend).toFixed(2)) : 0,
-      launched: g.campaigns.length,
-    })), [cohorts]);
-
-  // Logged campaigns that no longer start with any configured prefix
-  const strays = useMemo(
-    () => (prefixes.length ? campaigns.filter((c) => !c.matchesPrefix) : []),
-    [campaigns, prefixes]
+  const chartData = useMemo(
+    () => [...days].reverse().map((d) => ({
+      date: dayLabel(d.dateKey),
+      spend: d.spend,
+      roas: d.roas,
+      launched: d.launched,
+    })),
+    [days]
   );
-
-  const totals = useMemo(() => {
-    const spend = campaigns.reduce((s, c) => s + c.spend, 0);
-    const revenue = campaigns.reduce((s, c) => s + c.revenue, 0);
-    const purchases = campaigns.reduce((s, c) => s + c.purchases, 0);
-    return {
-      count: campaigns.length,
-      spend, revenue, purchases,
-      roas: spend > 0 ? revenue / spend : 0,
-      unmatched: campaigns.filter((c) => !c.matched).length,
-    };
-  }, [campaigns]);
 
   const inputStyle: React.CSSProperties = {
     border: '1px solid #e2e8f0', borderRadius: '8px', padding: '0.5rem 0.75rem',
@@ -240,7 +199,7 @@ export function Agency() {
         <div>
           <h1 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 600, color: '#1e293b' }}>Agency</h1>
           <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.8rem', color: '#94a3b8' }}>
-            Campaigns the agency created, grouped by launch day. Upload a Meta <strong>Campaigns</strong> CSV — spend, ROAS and launch dates are picked up from it automatically.
+            Day-by-day performance of the agency's campaigns, straight from your daily Meta <strong>Campaigns</strong> exports.
           </p>
         </div>
         <label style={{
@@ -248,7 +207,7 @@ export function Agency() {
           backgroundColor: '#0f172a', color: '#fff', border: 'none', padding: '0.5rem 1rem',
           borderRadius: '8px', fontSize: '0.825rem', fontWeight: 600, whiteSpace: 'nowrap',
         }}>
-          <FileUp size={14} /> Upload Campaigns CSV
+          <FileUp size={14} /> Upload day's CSV
           <input type="file" accept=".csv" onChange={handleCsvUpload} style={{ display: 'none' }} />
         </label>
       </div>
@@ -260,8 +219,8 @@ export function Agency() {
         </p>
         <p style={{ margin: '-0.4rem 0 0.75rem 0', fontSize: '0.75rem', color: '#94a3b8' }}>
           Your Meta export covers the whole account. Only campaigns whose name <strong>starts with</strong> one of these
-          strings are treated as the agency's — everything else in the CSV is discarded on import.
-          {prefixes.length === 0 && ' No prefixes set yet, so every campaign in the CSV is currently kept.'}
+          strings count as the agency's — everything else is ignored.
+          {prefixes.length === 0 && ' No prefixes set yet, so every campaign is currently counted.'}
         </p>
 
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', alignItems: 'center', marginBottom: '0.6rem' }}>
@@ -280,15 +239,13 @@ export function Agency() {
               </button>
             </span>
           ))}
-          {prefixes.length === 0 && (
-            <span style={{ fontSize: '0.78rem', color: '#cbd5e1' }}>No prefixes yet</span>
-          )}
+          {prefixes.length === 0 && <span style={{ fontSize: '0.78rem', color: '#cbd5e1' }}>No prefixes yet</span>}
         </div>
 
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
           <input
             style={{ ...inputStyle, flex: '1 1 260px' }}
-            placeholder='e.g. "S | " or "23 April"'
+            placeholder='e.g. "S | "'
             value={prefixInput}
             onChange={(e) => setPrefixInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') handleAddPrefix(); }}
@@ -306,57 +263,31 @@ export function Agency() {
         </div>
       </div>
 
-      {strays.length > 0 && (
-        <div style={{ ...card, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', borderColor: '#fecaca', backgroundColor: '#fef2f2' }}>
-          <span style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.8rem', color: '#991b1b' }}>
-            <AlertTriangle size={16} color="#dc2626" />
-            {strays.length} logged campaign{strays.length === 1 ? '' : 's'} no longer match your prefixes (imported before they were set).
-          </span>
-          <button
-            onClick={handlePrune}
-            style={{
-              display: 'flex', alignItems: 'center', gap: '0.4rem', backgroundColor: '#dc2626',
-              color: '#fff', border: 'none', padding: '0.4rem 0.85rem', borderRadius: '8px',
-              fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
-            }}
-          >
-            <Trash2 size={13} /> Remove them
-          </button>
-        </div>
-      )}
-
       {/* KPI tiles */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '0.75rem' }}>
-        {[
-          { k: 'Campaigns logged', v: fmt(totals.count) },
-          { k: 'Total ad spend', v: `₹${fmt(totals.spend)}` },
-          { k: 'Revenue (Meta)', v: `₹${fmt(totals.revenue)}` },
-          { k: 'Blended ROAS', v: totals.roas.toFixed(2) },
-          { k: 'Purchases', v: fmt(totals.purchases) },
-        ].map((t) => (
-          <div key={t.k} style={card}>
-            <div style={{ fontSize: '0.7rem', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{t.k}</div>
-            <div style={{ fontSize: '1.35rem', fontWeight: 700, color: '#0f172a', marginTop: '0.25rem' }}>{t.v}</div>
-          </div>
-        ))}
-      </div>
-
-      {totals.unmatched > 0 && (
-        <div style={{ ...card, display: 'flex', alignItems: 'center', gap: '0.6rem', borderColor: '#fde68a', backgroundColor: '#fffbeb' }}>
-          <AlertTriangle size={16} color="#d97706" />
-          <span style={{ fontSize: '0.8rem', color: '#92400e' }}>
-            {totals.unmatched} logged campaign{totals.unmatched === 1 ? '' : 's'} had no matching campaign in your uploaded Meta data — check the name matches exactly, or upload that day's campaign CSV.
-          </span>
+      {totals && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '0.75rem' }}>
+          {[
+            { k: 'Days tracked', v: fmt(totals.days) },
+            { k: 'Campaigns', v: fmt(totals.campaigns) },
+            { k: 'Total ad spend', v: `₹${fmt(totals.spend)}` },
+            { k: 'Revenue (Meta)', v: `₹${fmt(totals.revenue)}` },
+            { k: 'Blended ROAS', v: totals.roas.toFixed(2) },
+            { k: 'Purchases', v: fmt(totals.purchases) },
+          ].map((t) => (
+            <div key={t.k} style={card}>
+              <div style={{ fontSize: '0.7rem', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{t.k}</div>
+              <div style={{ fontSize: '1.35rem', fontWeight: 700, color: '#0f172a', marginTop: '0.25rem' }}>{t.v}</div>
+            </div>
+          ))}
         </div>
       )}
 
       {chartData.length > 0 && (
         <>
-          {/* Spend + ROAS by launch day */}
           <div style={card}>
-            <p style={label}>Spend & ROAS by launch day</p>
+            <p style={label}>Daily spend & ROAS</p>
             <p style={{ margin: '-0.4rem 0 0.75rem 0', fontSize: '0.75rem', color: '#94a3b8' }}>
-              For the campaigns launched on each day: total ad spend they have consumed, and the spend-weighted ROAS they returned.
+              What the agency's campaigns spent each day, and the ROAS they returned that day.
             </p>
             <ResponsiveContainer width="100%" height={280}>
               <ComposedChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
@@ -376,7 +307,6 @@ export function Agency() {
             </ResponsiveContainer>
           </div>
 
-          {/* Launch velocity */}
           <div style={card}>
             <p style={label}>Campaigns launched per day</p>
             <ResponsiveContainer width="100%" height={200}>
@@ -385,69 +315,64 @@ export function Agency() {
                 <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#94a3b8' }} />
                 <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#94a3b8' }} />
                 <Tooltip contentStyle={{ fontSize: '0.8rem', borderRadius: '8px', border: '1px solid #f1f5f9' }} />
-                <Bar dataKey="launched" name="Campaigns launched" fill="#6366f1" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="launched" name="Launched" fill="#6366f1" radius={[4, 4, 0, 0]} />
               </ComposedChart>
             </ResponsiveContainer>
           </div>
         </>
       )}
 
-      {/* Cohort table */}
+      {/* Day-by-day table */}
       <div style={{ ...card, padding: 0, overflowX: 'auto' }}>
-        {cohorts.length === 0 ? (
+        {days.length === 0 ? (
           <div style={{ padding: '2.5rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.85rem' }}>
-            No campaigns logged yet — add the first one above.
+            No data yet — upload a day's Campaigns CSV above.
           </div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ backgroundColor: '#f8fafc', borderBottom: '1px solid #f1f5f9', textAlign: 'left' }}>
-                {['Campaign', 'Ad spend', 'Revenue', 'ROAS', 'Purchases', 'Active days', ''].map((h, i) => (
-                  <th key={h} style={{ padding: '0.75rem', fontSize: '0.75rem', color: '#94a3b8', fontWeight: 600, textAlign: i === 0 ? 'left' : i === 6 ? 'center' : 'right' }}>{h}</th>
+                {['Day / Campaign', 'Ad spend', 'Revenue', 'ROAS', 'Purchases'].map((h, i) => (
+                  <th key={h} style={{ padding: '0.75rem', fontSize: '0.75rem', color: '#94a3b8', fontWeight: 600, textAlign: i === 0 ? 'left' : 'right' }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {cohorts.map((g) => {
-                const roas = g.spend > 0 ? g.revenue / g.spend : 0;
-                return (
-                  <Fragment key={g.dateKey}>
-                    <tr style={{ backgroundColor: '#f8fafc', borderBottom: '1px solid #f1f5f9' }}>
-                      <td style={{ padding: '0.5rem 0.75rem', fontSize: '0.8rem', fontWeight: 700, color: '#1e293b' }}>
-                        {dayLabel(g.dateKey)} — {g.campaigns.length} campaign{g.campaigns.length === 1 ? '' : 's'} launched
+              {days.map((d) => (
+                <Fragment key={d.dateKey}>
+                  <tr style={{ backgroundColor: '#f8fafc', borderBottom: '1px solid #f1f5f9' }}>
+                    <td style={{ padding: '0.5rem 0.75rem', fontSize: '0.8rem', fontWeight: 700, color: '#1e293b' }}>
+                      {dayLabel(d.dateKey)}
+                      <span style={{ fontWeight: 500, color: '#94a3b8' }}>
+                        {' '}— {d.campaigns.length} campaign{d.campaigns.length === 1 ? '' : 's'}
+                        {d.launched > 0 && `, ${d.launched} launched`}
+                      </span>
+                    </td>
+                    <td style={{ padding: '0.5rem 0.75rem', fontSize: '0.8rem', fontWeight: 700, textAlign: 'right', color: '#1e293b' }}>₹{fmt(d.spend)}</td>
+                    <td style={{ padding: '0.5rem 0.75rem', fontSize: '0.8rem', fontWeight: 700, textAlign: 'right', color: '#1e293b' }}>₹{fmt(d.revenue)}</td>
+                    <td style={{ padding: '0.5rem 0.75rem', fontSize: '0.8rem', fontWeight: 800, textAlign: 'right', color: d.roas >= 1 ? '#16a34a' : '#dc2626' }}>{d.roas.toFixed(2)}</td>
+                    <td style={{ padding: '0.5rem 0.75rem', fontSize: '0.8rem', fontWeight: 700, textAlign: 'right', color: '#1e293b' }}>{fmt(d.purchases)}</td>
+                  </tr>
+                  {d.campaigns.map((c) => (
+                    <tr key={`${d.dateKey}|${c.name}`} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                      <td style={{ padding: '0.6rem 0.75rem 0.6rem 1.75rem', fontSize: '0.825rem', color: '#475569' }}>
+                        {c.name}
+                        {c.isNew && (
+                          <span title="First day this campaign appears in your data" style={{
+                            marginLeft: '0.45rem', fontSize: '0.65rem', fontWeight: 800, color: '#4338ca',
+                            backgroundColor: '#e0e7ff', borderRadius: '999px', padding: '0.1rem 0.4rem',
+                            textTransform: 'uppercase', letterSpacing: '0.03em',
+                          }}>launched</span>
+                        )}
                       </td>
-                      <td style={{ padding: '0.5rem 0.75rem', fontSize: '0.8rem', fontWeight: 700, textAlign: 'right', color: '#1e293b' }}>₹{fmt(g.spend)}</td>
-                      <td style={{ padding: '0.5rem 0.75rem', fontSize: '0.8rem', fontWeight: 700, textAlign: 'right', color: '#1e293b' }}>₹{fmt(g.revenue)}</td>
-                      <td style={{ padding: '0.5rem 0.75rem', fontSize: '0.8rem', fontWeight: 800, textAlign: 'right', color: roas >= 1 ? '#16a34a' : '#dc2626' }}>{roas.toFixed(2)}</td>
-                      <td style={{ padding: '0.5rem 0.75rem', fontSize: '0.8rem', fontWeight: 700, textAlign: 'right', color: '#1e293b' }}>{fmt(g.purchases)}</td>
-                      <td colSpan={2} />
+                      <td style={{ padding: '0.6rem 0.75rem', fontSize: '0.825rem', textAlign: 'right', color: '#475569' }}>₹{fmt(c.spend)}</td>
+                      <td style={{ padding: '0.6rem 0.75rem', fontSize: '0.825rem', textAlign: 'right', color: '#475569' }}>₹{fmt(c.revenue)}</td>
+                      <td style={{ padding: '0.6rem 0.75rem', fontSize: '0.825rem', textAlign: 'right', fontWeight: 700, color: c.spend === 0 ? '#cbd5e1' : c.roas >= 1 ? '#16a34a' : '#dc2626' }}>{c.spend === 0 ? '—' : c.roas.toFixed(2)}</td>
+                      <td style={{ padding: '0.6rem 0.75rem', fontSize: '0.825rem', textAlign: 'right', color: '#475569' }}>{fmt(c.purchases)}</td>
                     </tr>
-                    {g.campaigns.map((c) => (
-                      <tr key={c._id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                        <td style={{ padding: '0.6rem 0.75rem 0.6rem 1.75rem', fontSize: '0.825rem', color: '#475569' }}>
-                          {c.name}
-                          {!c.matched && (
-                            <span title="No matching campaign found in uploaded Meta data" style={{ marginLeft: '0.4rem', fontSize: '0.68rem', color: '#d97706', fontWeight: 700 }}>· no data</span>
-                          )}
-                          {prefixes.length > 0 && !c.matchesPrefix && (
-                            <span title="Doesn't start with any configured agency prefix" style={{ marginLeft: '0.4rem', fontSize: '0.68rem', color: '#dc2626', fontWeight: 700 }}>· not agency</span>
-                          )}
-                        </td>
-                        <td style={{ padding: '0.6rem 0.75rem', fontSize: '0.825rem', textAlign: 'right', color: '#475569' }}>₹{fmt(c.spend)}</td>
-                        <td style={{ padding: '0.6rem 0.75rem', fontSize: '0.825rem', textAlign: 'right', color: '#475569' }}>₹{fmt(c.revenue)}</td>
-                        <td style={{ padding: '0.6rem 0.75rem', fontSize: '0.825rem', textAlign: 'right', fontWeight: 700, color: c.spend === 0 ? '#cbd5e1' : c.roas >= 1 ? '#16a34a' : '#dc2626' }}>{c.spend === 0 ? '—' : c.roas.toFixed(2)}</td>
-                        <td style={{ padding: '0.6rem 0.75rem', fontSize: '0.825rem', textAlign: 'right', color: '#475569' }}>{fmt(c.purchases)}</td>
-                        <td style={{ padding: '0.6rem 0.75rem', fontSize: '0.825rem', textAlign: 'right', color: '#94a3b8' }}>{c.activeDays || '—'}</td>
-                        <td style={{ padding: '0.6rem 0.75rem', textAlign: 'center' }}>
-                          <button onClick={() => handleDelete(c._id)} title="Remove from log" style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', opacity: 0.5, padding: 0, display: 'inline-flex' }}>
-                            <Trash2 size={14} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </Fragment>
-                );
-              })}
+                  ))}
+                </Fragment>
+              ))}
             </tbody>
           </table>
         )}
