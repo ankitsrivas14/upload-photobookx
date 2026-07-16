@@ -6,7 +6,7 @@ import type { AuthenticatedRequest } from '../types';
 
 const router = Router();
 
-/** Tolerant name key so CSV names join to stored names despite case/spacing drift. */
+/** Tolerant name key so names group despite case/spacing drift. */
 const norm = (n: any) => (typeof n === 'string' ? n.trim().toLowerCase().replace(/\s+/g, ' ') : '');
 
 /** The configured agency name prefixes ([] when unset = no filtering). */
@@ -25,11 +25,25 @@ function matchesPrefix(name: string, prefixes: string[]): boolean {
   return prefixes.some((p) => n.startsWith(norm(p)));
 }
 
+/** Inclusive list of YYYY-MM-DD keys from start to end. Noon-UTC anchored; IST has no DST. */
+function eachDay(start: string, end: string): string[] {
+  const out: string[] = [];
+  const cursor = new Date(`${start}T12:00:00Z`);
+  const last = new Date(`${end}T12:00:00Z`);
+  // Guard against a malformed range producing a runaway loop
+  let guard = 0;
+  while (cursor <= last && guard++ < 2000) {
+    out.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return out;
+}
+
 /**
  * GET /api/admin/agency
- * Day-by-day performance of the agency's campaigns, straight from the reporting data:
- * for each reporting day, that day's spend / revenue / ROAS per campaign, with campaigns
- * flagged as launched on the first day they appear.
+ * Campaign-by-campaign breakdown of the agency's campaigns, derived from the campaign
+ * data uploaded on the Ads Analysis page. Each campaign carries a daily series running
+ * from its first day to its last (or to the latest data we have, if it's still running).
  */
 router.get('/', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
   try {
@@ -40,81 +54,88 @@ router.get('/', requireAdmin, async (_req: AuthenticatedRequest, res: Response) 
       getNamePrefixes(),
     ]);
 
-    // Only the agency's campaigns, one row per (campaign, day). The same CSV can be
-    // uploaded from both the Ads Analysis and Agency pages, which would otherwise
-    // double-count that day's spend.
+    // Only the agency's campaigns, one row per (campaign, day) — the Ads Analysis
+    // upload inserts rather than upserts, so the same day can appear more than once.
     const rows = Array.from(
       new Map(
         (allRows as any[])
           .filter((r) => r.name && r.date && matchesPrefix(r.name, namePrefixes))
           .map((r) => [`${norm(r.name)}|${r.date}`, r])
       ).values()
-    );
+    ) as any[];
 
-    // First day each campaign appears = the day it launched.
-    const firstSeen = new Map<string, string>();
-    for (const r of rows as any[]) {
-      const k = norm(r.name);
-      const prev = firstSeen.get(k);
-      if (!prev || r.date < prev) firstSeen.set(k, r.date);
-    }
+    // Latest day we have any agency data for — a campaign still reporting on it is live.
+    const latestDate = rows.reduce((m: string, r: any) => (!m || r.date > m ? r.date : m), '');
 
-    // Group by reporting day. Revenue is derived per row as spend x roas, so a day's
-    // blended ROAS is spend-weighted rather than an average of campaign ROAS.
-    type DayAgg = {
-      dateKey: string; spend: number; revenue: number; purchases: number;
-      campaigns: { name: string; spend: number; revenue: number; roas: number; purchases: number; isNew: boolean }[];
-    };
-    const byDate = new Map<string, DayAgg>();
+    type Point = { spend: number; revenue: number; purchases: number };
+    const byCampaign = new Map<string, { name: string; days: Map<string, Point> }>();
 
-    for (const r of rows as any[]) {
-      if (!byDate.has(r.date)) {
-        byDate.set(r.date, { dateKey: r.date, spend: 0, revenue: 0, purchases: 0, campaigns: [] });
-      }
-      const day = byDate.get(r.date)!;
+    for (const r of rows) {
+      const key = norm(r.name);
+      if (!byCampaign.has(key)) byCampaign.set(key, { name: r.name, days: new Map() });
+      const c = byCampaign.get(key)!;
       const spend = Number(r.spend) || 0;
-      const revenue = spend * (Number(r.roas) || 0);
-      const purchases = Number(r.purchases) || 0;
-
-      day.spend += spend;
-      day.revenue += revenue;
-      day.purchases += purchases;
-      day.campaigns.push({
-        name: r.name,
-        spend: Math.round(spend),
-        revenue: Math.round(revenue),
-        roas: spend > 0 ? Number(((revenue) / spend).toFixed(2)) : 0,
-        purchases,
-        isNew: firstSeen.get(norm(r.name)) === r.date,
+      c.days.set(r.date, {
+        spend,
+        // Revenue per day = spend x that day's ROAS, so totals stay spend-weighted.
+        revenue: spend * (Number(r.roas) || 0),
+        purchases: Number(r.purchases) || 0,
       });
     }
 
-    const days = Array.from(byDate.values())
-      .map((d) => ({
-        dateKey: d.dateKey,
-        spend: Math.round(d.spend),
-        revenue: Math.round(d.revenue),
-        roas: d.spend > 0 ? Number((d.revenue / d.spend).toFixed(2)) : 0,
-        purchases: d.purchases,
-        launched: d.campaigns.filter((c) => c.isNew).length,
-        campaigns: d.campaigns.sort((a, b) => b.spend - a.spend),
-      }))
-      .sort((a, b) => (a.dateKey < b.dateKey ? 1 : -1)); // newest first for the table
+    const campaigns = Array.from(byCampaign.values()).map((c) => {
+      const dates = Array.from(c.days.keys()).sort();
+      const startDate = dates[0];
+      const endDate = dates[dates.length - 1];
 
-    const totalSpend = days.reduce((s, d) => s + d.spend, 0);
-    const totalRevenue = days.reduce((s, d) => s + d.revenue, 0);
+      // Continuous timeline start → end so paused days show as gaps rather than
+      // collapsing the chart into a misleading straight line.
+      const daily = eachDay(startDate, endDate).map((dateKey) => {
+        const p = c.days.get(dateKey);
+        const spend = p?.spend ?? 0;
+        const revenue = p?.revenue ?? 0;
+        return {
+          dateKey,
+          spend: Math.round(spend),
+          revenue: Math.round(revenue),
+          roas: spend > 0 ? Number((revenue / spend).toFixed(2)) : 0,
+          purchases: p?.purchases ?? 0,
+        };
+      });
+
+      const spend = daily.reduce((s, d) => s + d.spend, 0);
+      const revenue = daily.reduce((s, d) => s + d.revenue, 0);
+
+      return {
+        name: c.name,
+        startDate,
+        endDate,
+        isRunning: endDate === latestDate,
+        activeDays: dates.length,          // days it actually reported
+        spanDays: daily.length,            // calendar days start → end
+        spend,
+        revenue,
+        roas: spend > 0 ? Number((revenue / spend).toFixed(2)) : 0,
+        purchases: daily.reduce((s, d) => s + d.purchases, 0),
+        daily,
+      };
+    }).sort((a, b) => (a.startDate < b.startDate ? 1 : a.startDate > b.startDate ? -1 : b.spend - a.spend));
+
+    const totalSpend = campaigns.reduce((s, c) => s + c.spend, 0);
+    const totalRevenue = campaigns.reduce((s, c) => s + c.revenue, 0);
 
     res.json({
       success: true,
       namePrefixes,
-      days,
+      latestDate,
+      campaigns,
       totals: {
+        campaigns: campaigns.length,
+        running: campaigns.filter((c) => c.isRunning).length,
         spend: totalSpend,
         revenue: totalRevenue,
         roas: totalSpend > 0 ? Number((totalRevenue / totalSpend).toFixed(2)) : 0,
-        purchases: days.reduce((s, d) => s + d.purchases, 0),
-        campaigns: firstSeen.size,
-        days: days.length,
+        purchases: campaigns.reduce((s, c) => s + c.purchases, 0),
       },
     });
   } catch (error) {
@@ -153,88 +174,6 @@ router.put('/settings', requireAdmin, async (req: AuthenticatedRequest, res: Res
   } catch (error) {
     console.error('Error saving agency settings:', error);
     res.status(500).json({ success: false, error: 'Failed to save settings' });
-  }
-});
-
-/**
- * POST /api/admin/agency/import
- * Import a day's Meta Campaigns CSV (parsed client-side). Stores that day's performance
- * for the agency's campaigns only. Idempotent: rows upsert per (date, campaign), so
- * re-uploading the same file never double-counts.
- *
- * Body: { campaigns: [{ name, date, spend, roas, purchases, ... }] }
- */
-router.post('/import', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const { campaigns } = req.body as { campaigns?: any[] };
-    if (!Array.isArray(campaigns) || campaigns.length === 0) {
-      return res.status(400).json({ success: false, error: 'No campaign rows found in the CSV' });
-    }
-
-    const allRows = campaigns.filter((r) => r && typeof r.name === 'string' && r.name.trim() && r.date);
-    if (allRows.length === 0) {
-      return res.status(400).json({ success: false, error: 'CSV had no rows with a campaign name and date' });
-    }
-
-    // The export covers the whole account — keep only the agency's campaigns.
-    const prefixes = await getNamePrefixes();
-    const rows = allRows.filter((r) => matchesPrefix(r.name, prefixes));
-    const discarded = new Set(
-      allRows.filter((r) => !matchesPrefix(r.name, prefixes)).map((r) => r.name.trim())
-    ).size;
-
-    if (rows.length === 0) {
-      return res.status(400).json({
-        success: false,
-        error: prefixes.length
-          ? `No campaign in this CSV starts with any of your agency prefixes (${prefixes.join(', ')})`
-          : 'CSV had no usable campaign rows',
-      });
-    }
-
-    // Which campaigns are new to us (i.e. launched on this report's day)?
-    const names = Array.from(new Set(rows.map((r) => r.name.trim())));
-    const known = await MetaAdPerformance.find(
-      { level: 'campaign', name: { $in: names } },
-      { name: 1 }
-    ).lean();
-    const knownNames = new Set((known as any[]).map((k) => norm(k.name)));
-    const newCampaigns = names.filter((n) => !knownNames.has(norm(n))).length;
-
-    await Promise.all(rows.map((r) =>
-      MetaAdPerformance.findOneAndUpdate(
-        { date: r.date, level: 'campaign', name: r.name.trim() },
-        {
-          $set: {
-            date: r.date, level: 'campaign', name: r.name.trim(),
-            status: r.status || 'active',
-            spend: Number(r.spend) || 0,
-            purchases: Number(r.purchases) || 0,
-            roas: Number(r.roas) || 0,
-            impressions: Number(r.impressions) || 0,
-            clicks: Number(r.clicks) || 0,
-            ctr: Number(r.ctr) || 0,
-            cpc: Number(r.cpc) || 0,
-            frequency: Number(r.frequency) || 0,
-            addsToCart: Number(r.addsToCart) || 0,
-          },
-        },
-        { upsert: true }
-      )
-    ));
-
-    const dates = Array.from(new Set(rows.map((r) => r.date))).sort();
-    res.json({
-      success: true,
-      rows: rows.length,
-      campaigns: names.length,
-      newCampaigns,
-      discarded,
-      dates,
-    });
-  } catch (error) {
-    console.error('Error importing agency campaigns:', error);
-    res.status(500).json({ success: false, error: 'Failed to import campaigns CSV' });
   }
 });
 
