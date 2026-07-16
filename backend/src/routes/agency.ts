@@ -25,6 +25,35 @@ function matchesPrefix(name: string, prefixes: string[]): boolean {
   return prefixes.some((p) => n.startsWith(norm(p)));
 }
 
+/** Net totals for a bucket of (campaign, day) rows — used for the agency vs non-agency compare. */
+function bucketTotals(rows: any[]) {
+  const names = new Set<string>();
+  const days = new Set<string>();
+  let spend = 0;
+  let revenue = 0;
+  let purchases = 0;
+
+  for (const r of rows) {
+    names.add(norm(r.name));
+    if (r.date) days.add(r.date);
+    const s = Number(r.spend) || 0;
+    spend += s;
+    // Revenue per day = spend x that day's ROAS, so blended ROAS stays spend-weighted.
+    revenue += s * (Number(r.roas) || 0);
+    purchases += Number(r.purchases) || 0;
+  }
+
+  return {
+    campaigns: names.size,
+    days: days.size,
+    spend: Math.round(spend),
+    revenue: Math.round(revenue),
+    roas: spend > 0 ? Number((revenue / spend).toFixed(2)) : 0,
+    purchases,
+    cpa: purchases > 0 ? Math.round(spend / purchases) : 0,
+  };
+}
+
 /** Inclusive list of YYYY-MM-DD keys from start to end. Noon-UTC anchored; IST has no DST. */
 function eachDay(start: string, end: string): string[] {
   const out: string[] = [];
@@ -54,15 +83,18 @@ router.get('/', requireAdmin, async (_req: AuthenticatedRequest, res: Response) 
       getNamePrefixes(),
     ]);
 
-    // Only the agency's campaigns, one row per (campaign, day) — the Ads Analysis
-    // upload inserts rather than upserts, so the same day can appear more than once.
-    const rows = Array.from(
+    // One row per (campaign, day) — the Ads Analysis upload inserts rather than
+    // upserts, so the same day can appear more than once.
+    const deduped = Array.from(
       new Map(
         (allRows as any[])
-          .filter((r) => r.name && r.date && matchesPrefix(r.name, namePrefixes))
+          .filter((r) => r.name && r.date)
           .map((r) => [`${norm(r.name)}|${r.date}`, r])
       ).values()
     ) as any[];
+
+    const rows = deduped.filter((r) => matchesPrefix(r.name, namePrefixes));
+    const nonAgencyRows = deduped.filter((r) => !matchesPrefix(r.name, namePrefixes));
 
     // Latest day we have any agency data for — a campaign still reporting on it is live.
     const latestDate = rows.reduce((m: string, r: any) => (!m || r.date > m ? r.date : m), '');
@@ -129,6 +161,13 @@ router.get('/', requireAdmin, async (_req: AuthenticatedRequest, res: Response) 
       namePrefixes,
       latestDate,
       campaigns,
+      // Agency vs everything else in the account. Meaningless until prefixes exist,
+      // since without them every campaign counts as the agency's.
+      comparison: {
+        prefixesConfigured: namePrefixes.length > 0,
+        agency: bucketTotals(rows),
+        nonAgency: bucketTotals(nonAgencyRows),
+      },
       totals: {
         campaigns: campaigns.length,
         running: campaigns.filter((c) => c.isRunning).length,
