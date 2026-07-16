@@ -1043,7 +1043,7 @@ class ApiService {
   }
 
   // ─── Agency (campaigns the agency created, joined to Meta performance) ──────
-  async getAgencyData(): Promise<{ success: boolean; campaigns?: any[]; availableCampaigns?: string[]; namePrefixes?: string[]; error?: string }> {
+  async getAgencyData(): Promise<{ success: boolean; campaigns?: any[]; namePrefixes?: string[]; error?: string }> {
     return this.request('/api/admin/agency');
   }
 
@@ -1058,20 +1058,13 @@ class ApiService {
     return this.request('/api/admin/agency/prune', { method: 'POST' });
   }
 
-  async logAgencyCampaign(name: string, createdDate: string, notes?: string): Promise<{ success: boolean; campaign?: any; error?: string }> {
-    return this.request('/api/admin/agency/campaigns', {
-      method: 'POST',
-      body: JSON.stringify({ name, createdDate, notes }),
-    });
-  }
-
   async deleteAgencyCampaign(id: string): Promise<{ success: boolean; error?: string }> {
     return this.request(`/api/admin/agency/campaigns/${encodeURIComponent(id)}`, { method: 'DELETE' });
   }
 
   async importAgencyCampaigns(campaigns: any[]): Promise<{
-    success: boolean; imported?: number; skipped?: number; datedFromName?: number;
-    datedFromFirstSeen?: number; rows?: number; discarded?: number; error?: string;
+    success: boolean; imported?: number; skipped?: number;
+    rows?: number; discarded?: number; error?: string;
   }> {
     return this.request('/api/admin/agency/import', {
       method: 'POST',
