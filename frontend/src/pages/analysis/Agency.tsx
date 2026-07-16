@@ -5,7 +5,7 @@ import {
 } from 'recharts';
 import { api } from '../../services/api';
 import { toast } from 'react-hot-toast';
-import { Plus, X, Filter, ChevronDown, ChevronRight } from 'lucide-react';
+import { Plus, X, Filter, ChevronDown, ChevronRight, GitCompareArrows } from 'lucide-react';
 
 interface DailyPoint {
   dateKey: string;
@@ -34,6 +34,17 @@ interface Totals {
   revenue: number; roas: number; purchases: number;
 }
 
+interface Bucket {
+  campaigns: number; days: number; spend: number;
+  revenue: number; roas: number; purchases: number; cpa: number;
+}
+
+interface Comparison {
+  prefixesConfigured: boolean;
+  agency: Bucket;
+  nonAgency: Bucket;
+}
+
 const fmt = (n: number) => n.toLocaleString('en-IN');
 const dayLabel = (d: string) =>
   new Date(`${d}T12:00:00Z`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
@@ -47,6 +58,103 @@ const label: React.CSSProperties = {
   margin: '0 0 0.75rem 0', fontSize: '0.7rem', fontWeight: 800, color: '#7c3aed',
   textTransform: 'uppercase', letterSpacing: '0.05em',
 };
+
+function ComparePanel({ cmp }: { cmp: Comparison }) {
+  const { agency: a, nonAgency: n } = cmp;
+
+  if (!cmp.prefixesConfigured) {
+    return (
+      <div style={{ ...card, borderColor: '#fde68a', backgroundColor: '#fffbeb' }}>
+        <p style={{ ...label, color: '#b45309' }}>Agency vs Non-agency</p>
+        <p style={{ margin: 0, fontSize: '0.8rem', color: '#92400e' }}>
+          Add at least one campaign prefix above first — without one, every campaign counts as the agency's, so there's nothing to compare against.
+        </p>
+      </div>
+    );
+  }
+
+  const totalSpend = a.spend + n.spend;
+  const share = (v: number) => (totalSpend > 0 ? (v / totalSpend) * 100 : 0);
+
+  // Only ROAS and CPA have a "better" direction; spend/revenue/counts are just context.
+  const rows: { k: string; a: string; n: string; winner?: 'a' | 'n' | null }[] = [
+    { k: 'Campaigns', a: fmt(a.campaigns), n: fmt(n.campaigns) },
+    { k: 'Ad spend', a: `₹${fmt(a.spend)}`, n: `₹${fmt(n.spend)}` },
+    { k: 'Share of spend', a: `${share(a.spend).toFixed(1)}%`, n: `${share(n.spend).toFixed(1)}%` },
+    { k: 'Revenue (Meta)', a: `₹${fmt(a.revenue)}`, n: `₹${fmt(n.revenue)}` },
+    {
+      k: 'ROAS', a: a.roas.toFixed(2), n: n.roas.toFixed(2),
+      winner: a.roas === n.roas ? null : a.roas > n.roas ? 'a' : 'n',
+    },
+    { k: 'Purchases', a: fmt(a.purchases), n: fmt(n.purchases) },
+    {
+      k: 'Cost per purchase',
+      a: a.cpa ? `₹${fmt(a.cpa)}` : '—',
+      n: n.cpa ? `₹${fmt(n.cpa)}` : '—',
+      // Lower CPA wins, but only when both sides actually have purchases.
+      winner: !a.cpa || !n.cpa ? null : a.cpa === n.cpa ? null : a.cpa < n.cpa ? 'a' : 'n',
+    },
+  ];
+
+  const roasGap = a.roas - n.roas;
+  const verdict = a.roas === 0 && n.roas === 0
+    ? 'No spend recorded on either side yet.'
+    : roasGap > 0
+      ? `The agency is ahead on ROAS by ${roasGap.toFixed(2)} (${a.roas.toFixed(2)} vs ${n.roas.toFixed(2)}).`
+      : roasGap < 0
+        ? `The agency is behind on ROAS by ${Math.abs(roasGap).toFixed(2)} (${a.roas.toFixed(2)} vs ${n.roas.toFixed(2)}).`
+        : 'Both sides are returning the same ROAS.';
+
+  const cell = (win: boolean): React.CSSProperties => ({
+    padding: '0.6rem 0.75rem', fontSize: '0.85rem', textAlign: 'right',
+    fontWeight: win ? 800 : 600,
+    color: win ? '#16a34a' : '#334155',
+  });
+
+  return (
+    <div style={{ ...card, padding: 0 }}>
+      <div style={{ padding: '1rem 1rem 0.5rem 1rem' }}>
+        <p style={{ ...label, marginBottom: '0.35rem' }}>Agency vs Non-agency</p>
+        <p style={{ margin: 0, fontSize: '0.78rem', color: '#64748b' }}>{verdict}</p>
+      </div>
+
+      {/* Share-of-spend bar */}
+      {totalSpend > 0 && (
+        <div style={{ padding: '0.35rem 1rem 0.85rem 1rem' }}>
+          <div style={{ display: 'flex', height: '8px', borderRadius: '999px', overflow: 'hidden', backgroundColor: '#f1f5f9' }}>
+            <div style={{ width: `${share(a.spend)}%`, backgroundColor: '#7c3aed' }} title={`Agency ₹${fmt(a.spend)}`} />
+            <div style={{ width: `${share(n.spend)}%`, backgroundColor: '#cbd5e1' }} title={`Non-agency ₹${fmt(n.spend)}`} />
+          </div>
+          <div style={{ display: 'flex', gap: '1rem', marginTop: '0.4rem', fontSize: '0.72rem', color: '#94a3b8' }}>
+            <span><span style={{ color: '#7c3aed', fontWeight: 800 }}>■</span> Agency</span>
+            <span><span style={{ color: '#cbd5e1', fontWeight: 800 }}>■</span> Non-agency</span>
+          </div>
+        </div>
+      )}
+
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr style={{ backgroundColor: '#f8fafc', borderTop: '1px solid #f1f5f9', borderBottom: '1px solid #f1f5f9' }}>
+              <th style={{ padding: '0.6rem 0.75rem', fontSize: '0.72rem', color: '#94a3b8', fontWeight: 600, textAlign: 'left' }}>Metric</th>
+              <th style={{ padding: '0.6rem 0.75rem', fontSize: '0.72rem', color: '#7c3aed', fontWeight: 800, textAlign: 'right' }}>Agency</th>
+              <th style={{ padding: '0.6rem 0.75rem', fontSize: '0.72rem', color: '#94a3b8', fontWeight: 800, textAlign: 'right' }}>Non-agency</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.k} style={{ borderBottom: '1px solid #f8fafc' }}>
+                <td style={{ padding: '0.6rem 0.75rem', fontSize: '0.82rem', color: '#64748b' }}>{r.k}</td>
+                <td style={cell(r.winner === 'a')}>{r.a}</td>
+                <td style={cell(r.winner === 'n')}>{r.n}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 
 function CampaignCard({ c }: { c: Campaign }) {
   const [open, setOpen] = useState(false);
@@ -161,6 +269,8 @@ function CampaignCard({ c }: { c: Campaign }) {
 export function Agency() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [totals, setTotals] = useState<Totals | null>(null);
+  const [comparison, setComparison] = useState<Comparison | null>(null);
+  const [showCompare, setShowCompare] = useState(false);
   const [prefixes, setPrefixes] = useState<string[]>([]);
   const [prefixInput, setPrefixInput] = useState('');
   const [isLoading, setIsLoading] = useState(true);
@@ -174,6 +284,7 @@ export function Agency() {
       if (res.success) {
         setCampaigns(res.campaigns || []);
         setTotals(res.totals || null);
+        setComparison(res.comparison || null);
         setPrefixes(res.namePrefixes || []);
       }
     } catch (err) {
@@ -219,11 +330,26 @@ export function Agency() {
 
   return (
     <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-      <div>
-        <h1 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 600, color: '#1e293b' }}>Agency</h1>
-        <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.8rem', color: '#94a3b8' }}>
-          Every campaign the agency runs, with its full daily history. Data comes from the campaign CSVs you sync on the <strong>Ads Analysis</strong> page.
-        </p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', flexWrap: 'wrap' }}>
+        <div>
+          <h1 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 600, color: '#1e293b' }}>Agency</h1>
+          <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.8rem', color: '#94a3b8' }}>
+            Every campaign the agency runs, with its full daily history. Data comes from the campaign CSVs you sync on the <strong>Ads Analysis</strong> page.
+          </p>
+        </div>
+        <button
+          onClick={() => setShowCompare((v) => !v)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: '0.4rem',
+            backgroundColor: showCompare ? '#7c3aed' : '#fff',
+            color: showCompare ? '#fff' : '#1e293b',
+            border: `1px solid ${showCompare ? '#7c3aed' : '#e2e8f0'}`,
+            padding: '0.5rem 1rem', borderRadius: '8px',
+            fontSize: '0.825rem', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
+          }}
+        >
+          <GitCompareArrows size={14} /> Compare
+        </button>
       </div>
 
       {/* Agency campaign prefixes */}
@@ -276,6 +402,9 @@ export function Agency() {
           </button>
         </div>
       </div>
+
+      {/* Agency vs non-agency comparison */}
+      {showCompare && comparison && <ComparePanel cmp={comparison} />}
 
       {/* Overall KPI tiles */}
       {totals && (
