@@ -151,6 +151,16 @@ router.get('/', requireAdmin, async (_req: AuthenticatedRequest, res: Response) 
     const rows = deduped.filter((r) => matchesPrefix(r.name, namePrefixes));
     const nonAgencyRows = deduped.filter((r) => !matchesPrefix(r.name, namePrefixes));
 
+    // Apples-to-apples compare: only score non-agency campaigns over the same days the
+    // agency actually has data for. Otherwise a week-old agency gets measured against
+    // months of accumulated in-house history.
+    const agencyDates = rows.map((r: any) => r.date).sort();
+    const windowStart = agencyDates[0];
+    const windowEnd = agencyDates[agencyDates.length - 1];
+    const nonAgencyInWindow = agencyDates.length
+      ? nonAgencyRows.filter((r: any) => r.date >= windowStart && r.date <= windowEnd)
+      : [];
+
     // Latest day we have any agency data for — a campaign still reporting on it is live.
     const latestDate = rows.reduce((m: string, r: any) => (!m || r.date > m ? r.date : m), '');
 
@@ -230,12 +240,13 @@ router.get('/', requireAdmin, async (_req: AuthenticatedRequest, res: Response) 
         deliveryFailureRatePct: Number((failureRate * 100).toFixed(1)),
         available: breakevenROAS > 0,
       },
-      // Agency vs everything else in the account. Meaningless until prefixes exist,
-      // since without them every campaign counts as the agency's.
+      // Agency vs everything else, over the agency's own date window. Meaningless until
+      // prefixes exist, since without them every campaign counts as the agency's.
       comparison: {
         prefixesConfigured: namePrefixes.length > 0,
+        window: agencyDates.length ? { start: windowStart, end: windowEnd } : null,
         agency: bucketTotals(rows),
-        nonAgency: bucketTotals(nonAgencyRows),
+        nonAgency: bucketTotals(nonAgencyInWindow),
       },
       totals: {
         campaigns: campaigns.length,
