@@ -1042,8 +1042,10 @@ class ApiService {
     });
   }
 
-  // ─── Agency (campaigns the agency created, joined to Meta performance) ──────
-  async getAgencyData(): Promise<{ success: boolean; campaigns?: any[]; namePrefixes?: string[]; error?: string }> {
+  // ─── Agency (day-by-day performance of the agency's campaigns) ──────────────
+  async getAgencyData(): Promise<{
+    success: boolean; days?: any[]; namePrefixes?: string[]; totals?: any; error?: string;
+  }> {
     return this.request('/api/admin/agency');
   }
 
@@ -1054,17 +1056,9 @@ class ApiService {
     });
   }
 
-  async pruneAgencyCampaigns(): Promise<{ success: boolean; removed?: number; error?: string }> {
-    return this.request('/api/admin/agency/prune', { method: 'POST' });
-  }
-
-  async deleteAgencyCampaign(id: string): Promise<{ success: boolean; error?: string }> {
-    return this.request(`/api/admin/agency/campaigns/${encodeURIComponent(id)}`, { method: 'DELETE' });
-  }
-
   async importAgencyCampaigns(campaigns: any[]): Promise<{
-    success: boolean; imported?: number; skipped?: number;
-    rows?: number; discarded?: number; error?: string;
+    success: boolean; rows?: number; campaigns?: number; newCampaigns?: number;
+    discarded?: number; dates?: string[]; error?: string;
   }> {
     return this.request('/api/admin/agency/import', {
       method: 'POST',
