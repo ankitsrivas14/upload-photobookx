@@ -54,7 +54,7 @@ class AIService {
         `;
 
         const response = await this.openai.chat.completions.create({
-            model: 'gpt-4o',
+            model: 'gpt-5.6',
             messages: [
                 { role: 'system', content: 'You write extremely short, bulleted logistics complaints in plain casual English without any greetings, always ending with "- PhotobookX team", and using only dates.' },
                 { role: 'user', content: prompt }
@@ -130,7 +130,7 @@ class AIService {
 
         try {
             const response = await this.openai.chat.completions.create({
-                model: 'gpt-5.4',
+                model: 'gpt-5.6',
                 messages: [
                     { role: 'system', content: 'You are a data-driven e-commerce strategist. You output precise projections in JSON.' },
                     { role: 'user', content: prompt }
@@ -187,7 +187,7 @@ class AIService {
 
         try {
             const response = await this.openai.chat.completions.create({
-                model: 'gpt-5.4',
+                model: 'gpt-5.6',
                 messages: [
                     { role: 'system', content: 'You are an inventory planning expert. You output precise stock requirements in JSON.' },
                     { role: 'user', content: prompt }
@@ -232,7 +232,7 @@ class AIService {
 
         try {
             const response = await this.openai.chat.completions.create({
-                model: 'gpt-5.4',
+                model: 'gpt-5.6',
                 messages: [
                     { role: 'system', content: 'You are a professional customer support assistant for PhotoBookX.' },
                     { role: 'user', content: prompt }
@@ -275,7 +275,7 @@ class AIService {
 
         try {
             const response = await this.openai.chat.completions.create({
-                model: 'gpt-5.4',
+                model: 'gpt-5.6',
                 messages: [
                     { role: 'system', content: 'You are a professional customer support assistant for PhotoBookX.' },
                     { role: 'user', content: prompt }
@@ -440,7 +440,7 @@ class AIService {
 
         try {
             const response = await this.openai.chat.completions.create({
-                model: 'gpt-5.4',
+                model: 'gpt-5.6',
                 messages: [
                     { role: 'system', content: 'You are an elite performance marketer who prioritizes historical trends over single-day fluctuations.' },
                     { role: 'user', content: prompt }
@@ -518,7 +518,7 @@ async chatWithAdsStrategist(userQuestion: string, adData: any[], historicalData:
 
         try {
             const response = await this.openai.chat.completions.create({
-                model: 'gpt-5.4',
+                model: 'gpt-5.6',
                 messages: [
                     { role: 'system', content: 'You are a high-level performance marketing architect.' },
                     { role: 'user', content: prompt }

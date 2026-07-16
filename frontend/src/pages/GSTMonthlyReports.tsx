@@ -85,9 +85,9 @@ export function GSTMonthlyReports() {
         return false; // Only include delivered orders
       }
 
-      // Use the actual delivery date if available, otherwise fall back to creation date
-      const dateToUse = order.deliveredAt || order.createdAt;
-      const orderDate = new Date(dateToUse);
+      // Only match orders whose delivery date falls in the selected month
+      if (!order.deliveredAt) return false;
+      const orderDate = new Date(order.deliveredAt);
       const orderMonth = (orderDate.getMonth() + 1).toString().padStart(2, '0');
       const orderYear = orderDate.getFullYear().toString();
       return orderMonth === month && orderYear === year;
