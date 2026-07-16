@@ -12,7 +12,6 @@ interface Campaign {
   _id: string;
   name: string;
   createdDate: string;
-  notes: string;
   matched: boolean;
   matchesPrefix: boolean;
   spend: number;
@@ -28,14 +27,9 @@ const dayLabel = (d: string) =>
 
 export function Agency() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [availableCampaigns, setAvailableCampaigns] = useState<string[]>([]);
   const [prefixes, setPrefixes] = useState<string[]>([]);
   const [prefixInput, setPrefixInput] = useState('');
   const [isLoading, setIsLoading] = useState(true);
-
-  const [name, setName] = useState('');
-  const [createdDate, setCreatedDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [saving, setSaving] = useState(false);
 
   useEffect(() => { loadData(); }, []);
 
@@ -45,7 +39,6 @@ export function Agency() {
       const res = await api.getAgencyData();
       if (res.success) {
         setCampaigns(res.campaigns || []);
-        setAvailableCampaigns(res.availableCampaigns || []);
         setPrefixes(res.namePrefixes || []);
       }
     } catch (err) {
@@ -53,28 +46,6 @@ export function Agency() {
       toast.error('Failed to load agency data');
     } finally {
       setIsLoading(false);
-    }
-  };
-
-  const handleAdd = async () => {
-    if (!name.trim() || !createdDate) {
-      toast.error('Campaign name and created date are required');
-      return;
-    }
-    setSaving(true);
-    try {
-      const res = await api.logAgencyCampaign(name.trim(), createdDate);
-      if (res.success) {
-        setName('');
-        await loadData(); // reload so Meta spend/ROAS gets joined in
-        toast.success('Campaign logged');
-      } else {
-        toast.error(res.error || 'Failed to log campaign');
-      }
-    } catch {
-      toast.error('Failed to log campaign');
-    } finally {
-      setSaving(false);
     }
   };
 
@@ -177,7 +148,6 @@ export function Agency() {
             const bits = [`${res.imported} new campaign${res.imported === 1 ? '' : 's'} logged`];
             if (res.skipped) bits.push(`${res.skipped} already logged`);
             if (res.discarded) bits.push(`${res.discarded} not the agency's`);
-            if (res.datedFromFirstSeen) bits.push(`${res.datedFromFirstSeen} dated from first-seen`);
             toast.success(bits.join(' · '), { id: toastId });
             await loadData();
           } else {
@@ -379,38 +349,6 @@ export function Agency() {
           </span>
         </div>
       )}
-
-      {/* Add campaign (manual fallback / corrections) */}
-      <div style={card}>
-        <p style={label}>Add a campaign manually</p>
-        <p style={{ margin: '-0.4rem 0 0.75rem 0', fontSize: '0.75rem', color: '#94a3b8' }}>
-          Only needed for campaigns missing from the CSV, or to fix a launch date (delete and re-add).
-        </p>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
-          <input
-            style={{ ...inputStyle, flex: '2 1 280px' }}
-            placeholder="Campaign name (must match Meta)"
-            list="agency-campaign-names"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-          <datalist id="agency-campaign-names">
-            {availableCampaigns.map((n) => <option key={n} value={n} />)}
-          </datalist>
-          <input style={{ ...inputStyle, flex: '0 1 160px' }} type="date" value={createdDate} onChange={(e) => setCreatedDate(e.target.value)} />
-          <button
-            onClick={handleAdd}
-            disabled={saving}
-            style={{
-              display: 'flex', alignItems: 'center', gap: '0.4rem', backgroundColor: '#0f172a',
-              color: '#fff', border: 'none', padding: '0.5rem 1rem', borderRadius: '8px',
-              fontSize: '0.825rem', fontWeight: 600, cursor: 'pointer', opacity: saving ? 0.6 : 1,
-            }}
-          >
-            <Plus size={14} /> Log
-          </button>
-        </div>
-      </div>
 
       {chartData.length > 0 && (
         <>
