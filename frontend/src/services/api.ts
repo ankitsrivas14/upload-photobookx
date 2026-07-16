@@ -1058,6 +1058,16 @@ class ApiService {
     return this.request(`/api/admin/agency/campaigns/${encodeURIComponent(id)}`, { method: 'DELETE' });
   }
 
+  async importAgencyCampaigns(campaigns: any[]): Promise<{
+    success: boolean; imported?: number; skipped?: number; datedFromName?: number;
+    datedFromFirstSeen?: number; rows?: number; error?: string;
+  }> {
+    return this.request('/api/admin/agency/import', {
+      method: 'POST',
+      body: JSON.stringify({ campaigns }),
+    });
+  }
+
   async getTickets(): Promise<{ success: boolean; tickets?: any[]; error?: string }> {
     return this.request('/api/admin/magic-links/tickets');
   }

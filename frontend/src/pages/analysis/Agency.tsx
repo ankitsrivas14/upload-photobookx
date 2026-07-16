@@ -3,9 +3,10 @@ import {
   ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
   CartesianGrid, Legend,
 } from 'recharts';
+import Papa from 'papaparse';
 import { api } from '../../services/api';
 import { toast } from 'react-hot-toast';
-import { Plus, Trash2, AlertTriangle } from 'lucide-react';
+import { Plus, Trash2, AlertTriangle, FileUp } from 'lucide-react';
 
 interface Campaign {
   _id: string;
@@ -71,6 +72,86 @@ export function Agency() {
     } finally {
       setSaving(false);
     }
+  };
+
+  // Upload a Meta "Campaigns" CSV export: logs any new campaigns and stores their
+  // spend/ROAS. Re-uploading the same file is safe (rows upsert, logged campaigns skip).
+  const handleCsvUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const toastId = toast.loading('Reading campaigns CSV…');
+
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: async (results) => {
+        try {
+          // Tolerant header matching — Meta's column labels drift between exports.
+          const pick = (row: any, aliases: string[]): any => {
+            const keys = Object.keys(row);
+            for (const a of aliases) {
+              const exact = keys.find((k) => k.trim().toLowerCase() === a);
+              if (exact && String(row[exact]).trim() !== '') return row[exact];
+            }
+            for (const a of aliases) {
+              const partial = keys.find((k) => k.trim().toLowerCase().includes(a));
+              if (partial && String(row[partial]).trim() !== '') return row[partial];
+            }
+            return undefined;
+          };
+          const num = (v: any) => {
+            if (v === undefined || v === null) return 0;
+            return parseFloat(String(v).replace(/[₹,]/g, '').trim()) || 0;
+          };
+
+          const rows = (results.data as any[])
+            .map((row) => {
+              const name = pick(row, ['campaign name']);
+              const rawDate = pick(row, ['reporting starts', 'reporting ends', 'day', 'date']);
+              if (!name || !rawDate) return null;
+              const d = new Date(String(rawDate).split(/ [-–to] /)[0].trim());
+              if (isNaN(d.getTime())) return null;
+              return {
+                name: String(name).trim(),
+                date: d.toISOString().slice(0, 10),
+                status: pick(row, ['campaign delivery', 'delivery', 'status']) || 'active',
+                spend: num(pick(row, ['amount spent', 'spend', 'cost'])),
+                roas: num(pick(row, ['purchase roas', 'roas', 'return on ad spend'])),
+                purchases: num(pick(row, ['purchases', 'results'])),
+                impressions: num(pick(row, ['impressions'])),
+                clicks: num(pick(row, ['clicks (all)', 'clicks'])),
+                ctr: num(pick(row, ['ctr (all)', 'ctr'])),
+                cpc: num(pick(row, ['cpc (all)', 'cpc'])),
+                frequency: num(pick(row, ['frequency'])),
+                addsToCart: num(pick(row, ['adds to cart'])),
+              };
+            })
+            .filter(Boolean);
+
+          if (rows.length === 0) {
+            toast.error('No campaign rows found — is this a Meta "Campaigns" export?', { id: toastId });
+            return;
+          }
+
+          const res = await api.importAgencyCampaigns(rows as any[]);
+          if (res.success) {
+            const bits = [`${res.imported} new campaign${res.imported === 1 ? '' : 's'} logged`];
+            if (res.skipped) bits.push(`${res.skipped} already logged`);
+            if (res.datedFromFirstSeen) bits.push(`${res.datedFromFirstSeen} dated from first-seen`);
+            toast.success(bits.join(' · '), { id: toastId });
+            await loadData();
+          } else {
+            toast.error(res.error || 'Import failed', { id: toastId });
+          }
+        } catch (err) {
+          console.error('Agency CSV import error:', err);
+          toast.error('Import failed', { id: toastId });
+        }
+      },
+      error: () => toast.error('Could not read that CSV', { id: toastId }),
+    });
+
+    event.target.value = ''; // allow re-uploading the same file
   };
 
   const handleDelete = async (id: string) => {
@@ -139,11 +220,21 @@ export function Agency() {
 
   return (
     <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-      <div>
-        <h1 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 600, color: '#1e293b' }}>Agency</h1>
-        <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.8rem', color: '#94a3b8' }}>
-          Campaigns the agency created, grouped by launch day. Spend and ROAS are pulled from your uploaded Meta campaign data.
-        </p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', flexWrap: 'wrap' }}>
+        <div>
+          <h1 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 600, color: '#1e293b' }}>Agency</h1>
+          <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.8rem', color: '#94a3b8' }}>
+            Campaigns the agency created, grouped by launch day. Upload a Meta <strong>Campaigns</strong> CSV — spend, ROAS and launch dates are picked up from it automatically.
+          </p>
+        </div>
+        <label style={{
+          cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem',
+          backgroundColor: '#0f172a', color: '#fff', border: 'none', padding: '0.5rem 1rem',
+          borderRadius: '8px', fontSize: '0.825rem', fontWeight: 600, whiteSpace: 'nowrap',
+        }}>
+          <FileUp size={14} /> Upload Campaigns CSV
+          <input type="file" accept=".csv" onChange={handleCsvUpload} style={{ display: 'none' }} />
+        </label>
       </div>
 
       {/* KPI tiles */}
@@ -171,9 +262,12 @@ export function Agency() {
         </div>
       )}
 
-      {/* Add campaign */}
+      {/* Add campaign (manual fallback / corrections) */}
       <div style={card}>
-        <p style={label}>Log a campaign the agency created</p>
+        <p style={label}>Add a campaign manually</p>
+        <p style={{ margin: '-0.4rem 0 0.75rem 0', fontSize: '0.75rem', color: '#94a3b8' }}>
+          Only needed for campaigns missing from the CSV, or to fix a launch date (delete and re-add).
+        </p>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
           <input
             style={{ ...inputStyle, flex: '2 1 280px' }}
