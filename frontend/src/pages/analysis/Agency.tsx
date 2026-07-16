@@ -15,6 +15,15 @@ interface DailyPoint {
   purchases: number;
 }
 
+type Grade = 'Excellent' | 'Good' | 'Bad' | 'Worst' | null;
+
+const GRADE_STYLE: Record<Exclude<Grade, null>, { bg: string; fg: string }> = {
+  Excellent: { bg: '#dcfce7', fg: '#166534' },
+  Good: { bg: '#dbeafe', fg: '#1e40af' },
+  Bad: { bg: '#fef3c7', fg: '#92400e' },
+  Worst: { bg: '#fee2e2', fg: '#991b1b' },
+};
+
 interface Campaign {
   name: string;
   startDate: string;
@@ -26,6 +35,9 @@ interface Campaign {
   revenue: number;
   roas: number;
   purchases: number;
+  grade: Grade;
+  realizedRoas: number;
+  gradeReason: string;
   daily: DailyPoint[];
 }
 
@@ -37,6 +49,12 @@ interface Totals {
 interface Bucket {
   campaigns: number; days: number; spend: number;
   revenue: number; roas: number; purchases: number; cpa: number;
+}
+
+interface Grading {
+  breakevenROAS: number;
+  deliveryFailureRatePct: number;
+  available: boolean;
 }
 
 interface Comparison {
@@ -181,6 +199,18 @@ function CampaignCard({ c }: { c: Campaign }) {
           }}>
             {c.isRunning ? 'Running' : 'Ended'}
           </span>
+          {c.grade && (
+            <span
+              title={c.gradeReason}
+              style={{
+                fontSize: '0.65rem', fontWeight: 800, borderRadius: '999px', padding: '0.1rem 0.5rem',
+                textTransform: 'uppercase', letterSpacing: '0.03em', cursor: 'help',
+                color: GRADE_STYLE[c.grade].fg, backgroundColor: GRADE_STYLE[c.grade].bg,
+              }}
+            >
+              {c.grade}
+            </span>
+          )}
         </div>
         <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
           {fullDay(c.startDate)} → {c.isRunning ? 'now' : fullDay(c.endDate)}
@@ -191,10 +221,16 @@ function CampaignCard({ c }: { c: Campaign }) {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: '0.75rem', marginTop: '0.85rem' }}>
           {stat('Ad spend', `₹${fmt(c.spend)}`)}
           {stat('Revenue', `₹${fmt(c.revenue)}`)}
-          {stat('ROAS', c.roas.toFixed(2), c.roas >= 1 ? '#16a34a' : '#dc2626')}
+          {stat('ROAS (Meta)', c.roas.toFixed(2))}
+          {stat('Realized ROAS', c.realizedRoas ? c.realizedRoas.toFixed(2) : '—',
+            c.grade ? GRADE_STYLE[c.grade].fg : undefined)}
           {stat('Purchases', fmt(c.purchases))}
           {stat('Avg spend/day', `₹${fmt(Math.round(c.spend / Math.max(1, c.activeDays)))}`)}
         </div>
+
+        {c.gradeReason && (
+          <p style={{ margin: '0.7rem 0 0 0', fontSize: '0.73rem', color: '#94a3b8' }}>{c.gradeReason}</p>
+        )}
       </div>
 
       {/* Daily chart across the campaign's own lifespan */}
@@ -270,6 +306,7 @@ export function Agency() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [totals, setTotals] = useState<Totals | null>(null);
   const [comparison, setComparison] = useState<Comparison | null>(null);
+  const [grading, setGrading] = useState<Grading | null>(null);
   const [showCompare, setShowCompare] = useState(false);
   const [prefixes, setPrefixes] = useState<string[]>([]);
   const [prefixInput, setPrefixInput] = useState('');
@@ -285,6 +322,7 @@ export function Agency() {
         setCampaigns(res.campaigns || []);
         setTotals(res.totals || null);
         setComparison(res.comparison || null);
+        setGrading(res.grading || null);
         setPrefixes(res.namePrefixes || []);
       }
     } catch (err) {
@@ -336,6 +374,13 @@ export function Agency() {
           <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.8rem', color: '#94a3b8' }}>
             Every campaign the agency runs, with its full daily history. Data comes from the campaign CSVs you sync on the <strong>Ads Analysis</strong> page.
           </p>
+          {grading && (
+            <p style={{ margin: '0.3rem 0 0 0', fontSize: '0.75rem', color: '#94a3b8' }}>
+              {grading.available
+                ? <>Graded against your breakeven ROAS of <strong>{grading.breakevenROAS.toFixed(2)}</strong>, after discounting Meta's ROAS by the <strong>~{grading.deliveryFailureRatePct}%</strong> delivery-failure rate.</>
+                : <>Campaigns are ungraded — breakeven ROAS needs delivered-order history first.</>}
+            </p>
+          )}
         </div>
         <button
           onClick={() => setShowCompare((v) => !v)}

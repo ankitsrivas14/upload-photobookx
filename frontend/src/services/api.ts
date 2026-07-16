@@ -1045,7 +1045,7 @@ class ApiService {
   // ─── Agency (campaign-by-campaign, derived from Ads Analysis campaign data) ─
   async getAgencyData(): Promise<{
     success: boolean; campaigns?: any[]; namePrefixes?: string[];
-    totals?: any; comparison?: any; latestDate?: string; error?: string;
+    totals?: any; comparison?: any; grading?: any; latestDate?: string; error?: string;
   }> {
     return this.request('/api/admin/agency');
   }

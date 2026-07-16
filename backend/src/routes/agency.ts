@@ -2,9 +2,52 @@ import { Router, Response } from 'express';
 import { requireAdmin } from './adminAuth';
 import { AgencySettings } from '../models/AgencySettings';
 import { MetaAdPerformance } from '../models/MetaAdPerformance';
+import { computeBreakevenMetrics } from '../services/breakevenService';
 import type { AuthenticatedRequest } from '../types';
 
 const router = Router();
+
+export type Grade = 'Excellent' | 'Good' | 'Bad' | 'Worst' | null;
+
+/**
+ * Grade a campaign on profitability against the store's real breakeven.
+ *
+ * Meta's ROAS overstates what actually banks, because a slice of COD orders are
+ * returned (RTO/NDR) and never complete. So we discount it by the store's measured
+ * delivery-failure rate, then score the result against breakeven ROAS (AOV divided by
+ * contribution margin) — the point where an order stops losing money.
+ */
+export function gradeCampaign(
+  roas: number, spend: number, purchases: number,
+  breakevenROAS: number, failureRate: number
+): { grade: Grade; realizedRoas: number; gradeReason: string } {
+  if (spend <= 0) {
+    return { grade: null, realizedRoas: 0, gradeReason: 'No spend recorded — nothing to judge yet.' };
+  }
+  if (!(breakevenROAS > 0)) {
+    return {
+      grade: null, realizedRoas: 0,
+      gradeReason: 'Breakeven ROAS unavailable — needs delivered-order history before campaigns can be graded.',
+    };
+  }
+
+  const realizedRoas = roas * (1 - failureRate);
+  const ratio = realizedRoas / breakevenROAS;
+
+  let grade: Grade;
+  if (ratio >= 1.5) grade = 'Excellent';        // comfortably clearing breakeven
+  else if (ratio >= 1.0) grade = 'Good';        // profitable
+  else if (ratio >= 0.6) grade = 'Bad';         // losing, but within reach
+  else grade = 'Worst';                         // burning money
+
+  const discount = `${Math.round(failureRate * 100)}% delivery-failure discount`;
+  const gradeReason = purchases === 0
+    ? `₹${Math.round(spend).toLocaleString('en-IN')} spent with zero purchases — nothing recovered.`
+    : `Realized ROAS ${realizedRoas.toFixed(2)} vs breakeven ${breakevenROAS.toFixed(2)} `
+      + `(${ratio.toFixed(2)}x) after the ~${discount}. Meta reports ${roas.toFixed(2)}.`;
+
+  return { grade, realizedRoas: Number(realizedRoas.toFixed(2)), gradeReason };
+}
 
 /** Tolerant name key so names group despite case/spacing drift. */
 const norm = (n: any) => (typeof n === 'string' ? n.trim().toLowerCase().replace(/\s+/g, ' ') : '');
@@ -83,6 +126,18 @@ router.get('/', requireAdmin, async (_req: AuthenticatedRequest, res: Response) 
       getNamePrefixes(),
     ]);
 
+    // Real unit economics for grading (best-effort — the page still renders without it)
+    let breakevenROAS = 0;
+    let failureRate = 0;
+    try {
+      const be = await computeBreakevenMetrics();
+      breakevenROAS = be.breakevenROAS || 0;
+      const settled = (be.deliveredCount || 0) + (be.failedCount || 0);
+      failureRate = settled > 0 ? (be.failedCount || 0) / settled : 0;
+    } catch (err) {
+      console.error('agency: breakeven metrics unavailable, campaigns will be ungraded', err);
+    }
+
     // One row per (campaign, day) — the Ads Analysis upload inserts rather than
     // upserts, so the same day can appear more than once.
     const deduped = Array.from(
@@ -137,6 +192,8 @@ router.get('/', requireAdmin, async (_req: AuthenticatedRequest, res: Response) 
 
       const spend = daily.reduce((s, d) => s + d.spend, 0);
       const revenue = daily.reduce((s, d) => s + d.revenue, 0);
+      const roas = spend > 0 ? Number((revenue / spend).toFixed(2)) : 0;
+      const purchases = daily.reduce((s, d) => s + d.purchases, 0);
 
       return {
         name: c.name,
@@ -147,11 +204,17 @@ router.get('/', requireAdmin, async (_req: AuthenticatedRequest, res: Response) 
         spanDays: daily.length,            // calendar days start → end
         spend,
         revenue,
-        roas: spend > 0 ? Number((revenue / spend).toFixed(2)) : 0,
-        purchases: daily.reduce((s, d) => s + d.purchases, 0),
+        roas,
+        purchases,
+        ...gradeCampaign(roas, spend, purchases, breakevenROAS, failureRate),
         daily,
       };
-    }).sort((a, b) => (a.startDate < b.startDate ? 1 : a.startDate > b.startDate ? -1 : b.spend - a.spend));
+    }).sort((a, b) => {
+      // Running campaigns first, then most recently launched, then biggest spender.
+      if (a.isRunning !== b.isRunning) return a.isRunning ? -1 : 1;
+      if (a.startDate !== b.startDate) return a.startDate < b.startDate ? 1 : -1;
+      return b.spend - a.spend;
+    });
 
     const totalSpend = campaigns.reduce((s, c) => s + c.spend, 0);
     const totalRevenue = campaigns.reduce((s, c) => s + c.revenue, 0);
@@ -161,6 +224,12 @@ router.get('/', requireAdmin, async (_req: AuthenticatedRequest, res: Response) 
       namePrefixes,
       latestDate,
       campaigns,
+      // What the grades are measured against
+      grading: {
+        breakevenROAS: Number(breakevenROAS.toFixed(2)),
+        deliveryFailureRatePct: Number((failureRate * 100).toFixed(1)),
+        available: breakevenROAS > 0,
+      },
       // Agency vs everything else in the account. Meaningless until prefixes exist,
       // since without them every campaign counts as the agency's.
       comparison: {
