@@ -9,6 +9,7 @@ import { TicketsAnalysis } from './analysis/TicketsAnalysis';
 import { CreateTicketForm } from './analysis/CreateTicketForm';
 import { AdsAnalysis } from './analysis/AdsAnalysis';
 import { Reels } from './analysis/Reels';
+import { Agency } from './analysis/Agency';
 import styles from './AnalysisPage.module.css';
 
 export function AnalysisPage() {
@@ -24,6 +25,7 @@ export function AnalysisPage() {
     const isTickets = currentPath.includes('/admin/analysis/tickets');
     const isAds = currentPath.includes('/admin/analysis/ads');
     const isReels = currentPath.includes('/admin/analysis/reels');
+    const isAgency = currentPath.includes('/admin/analysis/agency');
 
     useEffect(() => {
         loadUser();
@@ -129,6 +131,12 @@ export function AnalysisPage() {
                     >
                         Reels
                     </Link>
+                    <Link
+                        to="/admin/analysis/agency"
+                        className={`${styles['analysis-nav-item']} ${isAgency ? styles.active : ''}`}
+                    >
+                        Agency
+                    </Link>
                 </div>
 
                 <Routes>
@@ -139,6 +147,7 @@ export function AnalysisPage() {
                     <Route path="tickets" element={<TicketsAnalysis />} />
                     <Route path="tickets/new" element={<CreateTicketForm />} />
                     <Route path="reels" element={<Reels />} />
+                    <Route path="agency" element={<Agency />} />
                     <Route path="*" element={<Navigate to="ads" replace />} />
                 </Routes>
             </main>

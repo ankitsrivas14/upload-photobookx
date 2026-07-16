@@ -1042,6 +1042,22 @@ class ApiService {
     });
   }
 
+  // ─── Agency (campaigns the agency created, joined to Meta performance) ──────
+  async getAgencyData(): Promise<{ success: boolean; campaigns?: any[]; availableCampaigns?: string[]; error?: string }> {
+    return this.request('/api/admin/agency');
+  }
+
+  async logAgencyCampaign(name: string, createdDate: string, notes?: string): Promise<{ success: boolean; campaign?: any; error?: string }> {
+    return this.request('/api/admin/agency/campaigns', {
+      method: 'POST',
+      body: JSON.stringify({ name, createdDate, notes }),
+    });
+  }
+
+  async deleteAgencyCampaign(id: string): Promise<{ success: boolean; error?: string }> {
+    return this.request(`/api/admin/agency/campaigns/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  }
+
   async getTickets(): Promise<{ success: boolean; tickets?: any[]; error?: string }> {
     return this.request('/api/admin/magic-links/tickets');
   }
