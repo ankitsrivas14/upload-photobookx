@@ -1,43 +1,165 @@
-import { useState, useEffect, useMemo, Fragment } from 'react';
+import { useState, useEffect } from 'react';
 import {
   ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
   CartesianGrid, Legend,
 } from 'recharts';
-import Papa from 'papaparse';
 import { api } from '../../services/api';
 import { toast } from 'react-hot-toast';
-import { Plus, FileUp, X, Filter } from 'lucide-react';
+import { Plus, X, Filter, ChevronDown, ChevronRight } from 'lucide-react';
 
-interface DayCampaign {
-  name: string;
-  spend: number;
-  revenue: number;
-  roas: number;
-  purchases: number;
-  isNew: boolean;
-}
-
-interface Day {
+interface DailyPoint {
   dateKey: string;
   spend: number;
   revenue: number;
   roas: number;
   purchases: number;
-  launched: number;
-  campaigns: DayCampaign[];
+}
+
+interface Campaign {
+  name: string;
+  startDate: string;
+  endDate: string;
+  isRunning: boolean;
+  activeDays: number;
+  spanDays: number;
+  spend: number;
+  revenue: number;
+  roas: number;
+  purchases: number;
+  daily: DailyPoint[];
 }
 
 interface Totals {
-  spend: number; revenue: number; roas: number;
-  purchases: number; campaigns: number; days: number;
+  campaigns: number; running: number; spend: number;
+  revenue: number; roas: number; purchases: number;
 }
 
 const fmt = (n: number) => n.toLocaleString('en-IN');
 const dayLabel = (d: string) =>
   new Date(`${d}T12:00:00Z`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+const fullDay = (d: string) =>
+  new Date(`${d}T12:00:00Z`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+
+const card: React.CSSProperties = {
+  backgroundColor: '#fff', border: '1px solid #f1f5f9', borderRadius: '10px', padding: '1rem',
+};
+const label: React.CSSProperties = {
+  margin: '0 0 0.75rem 0', fontSize: '0.7rem', fontWeight: 800, color: '#7c3aed',
+  textTransform: 'uppercase', letterSpacing: '0.05em',
+};
+
+function CampaignCard({ c }: { c: Campaign }) {
+  const [open, setOpen] = useState(false);
+  const chartData = c.daily.map((d) => ({ ...d, date: dayLabel(d.dateKey) }));
+
+  const stat = (k: string, v: string, color?: string) => (
+    <div>
+      <div style={{ fontSize: '0.65rem', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{k}</div>
+      <div style={{ fontSize: '1rem', fontWeight: 700, color: color || '#0f172a', marginTop: '0.1rem' }}>{v}</div>
+    </div>
+  );
+
+  return (
+    <div style={{ ...card, padding: 0 }}>
+      {/* Header */}
+      <div style={{ padding: '1rem', borderBottom: '1px solid #f8fafc' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.15rem' }}>
+          <span style={{ fontSize: '0.9rem', fontWeight: 700, color: '#1e293b' }}>{c.name}</span>
+          <span style={{
+            fontSize: '0.65rem', fontWeight: 800, borderRadius: '999px', padding: '0.1rem 0.45rem',
+            textTransform: 'uppercase', letterSpacing: '0.03em',
+            color: c.isRunning ? '#166534' : '#475569',
+            backgroundColor: c.isRunning ? '#dcfce7' : '#f1f5f9',
+          }}>
+            {c.isRunning ? 'Running' : 'Ended'}
+          </span>
+        </div>
+        <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+          {fullDay(c.startDate)} → {c.isRunning ? 'now' : fullDay(c.endDate)}
+          {' · '}{c.activeDays} day{c.activeDays === 1 ? '' : 's'} with data
+          {c.spanDays !== c.activeDays && ` of ${c.spanDays}`}
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: '0.75rem', marginTop: '0.85rem' }}>
+          {stat('Ad spend', `₹${fmt(c.spend)}`)}
+          {stat('Revenue', `₹${fmt(c.revenue)}`)}
+          {stat('ROAS', c.roas.toFixed(2), c.roas >= 1 ? '#16a34a' : '#dc2626')}
+          {stat('Purchases', fmt(c.purchases))}
+          {stat('Avg spend/day', `₹${fmt(Math.round(c.spend / Math.max(1, c.activeDays)))}`)}
+        </div>
+      </div>
+
+      {/* Daily chart across the campaign's own lifespan */}
+      <div style={{ padding: '0.85rem 0.5rem 0.25rem 0' }}>
+        <ResponsiveContainer width="100%" height={200}>
+          <ComposedChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+            <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94a3b8' }} interval="preserveStartEnd" />
+            <YAxis yAxisId="left" tick={{ fontSize: 10, fill: '#94a3b8' }} tickFormatter={(v) => `₹${v >= 1000 ? `${Math.round(v / 1000)}k` : v}`} />
+            <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: '#94a3b8' }} />
+            <Tooltip
+              formatter={(value: any, n?: string) =>
+                (n === 'Ad spend' ? [`₹${fmt(Number(value))}`, n] : [Number(value).toFixed(2), n ?? ''])}
+              contentStyle={{ fontSize: '0.8rem', borderRadius: '8px', border: '1px solid #f1f5f9' }}
+            />
+            <Legend wrapperStyle={{ fontSize: '0.72rem' }} />
+            <Bar yAxisId="left" dataKey="spend" name="Ad spend" fill="#c4b5fd" radius={[3, 3, 0, 0]} />
+            <Line yAxisId="right" type="monotone" dataKey="roas" name="ROAS" stroke="#7c3aed" strokeWidth={2} dot={{ r: 2 }} />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* Day-by-day numbers */}
+      <button
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          width: '100%', display: 'flex', alignItems: 'center', gap: '0.4rem', background: 'none',
+          border: 'none', borderTop: '1px solid #f8fafc', padding: '0.6rem 1rem', cursor: 'pointer',
+          fontSize: '0.78rem', fontWeight: 600, color: '#64748b',
+        }}
+      >
+        {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        {open ? 'Hide' : 'Show'} day-by-day numbers ({c.daily.length} days)
+      </button>
+
+      {open && (
+        <div style={{ overflowX: 'auto', borderTop: '1px solid #f8fafc' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ backgroundColor: '#f8fafc' }}>
+                {['Day', 'Ad spend', 'Revenue', 'ROAS', 'Purchases'].map((h, i) => (
+                  <th key={h} style={{ padding: '0.5rem 0.75rem', fontSize: '0.7rem', color: '#94a3b8', fontWeight: 600, textAlign: i === 0 ? 'left' : 'right' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {[...c.daily].reverse().map((d) => {
+                const idle = d.spend === 0;
+                return (
+                  <tr key={d.dateKey} style={{ borderTop: '1px solid #f8fafc' }}>
+                    <td style={{ padding: '0.45rem 0.75rem', fontSize: '0.8rem', color: idle ? '#cbd5e1' : '#475569' }}>
+                      {dayLabel(d.dateKey)}
+                      {idle && <span style={{ marginLeft: '0.4rem', fontSize: '0.68rem' }}>no delivery</span>}
+                    </td>
+                    <td style={{ padding: '0.45rem 0.75rem', fontSize: '0.8rem', textAlign: 'right', color: idle ? '#cbd5e1' : '#475569' }}>₹{fmt(d.spend)}</td>
+                    <td style={{ padding: '0.45rem 0.75rem', fontSize: '0.8rem', textAlign: 'right', color: idle ? '#cbd5e1' : '#475569' }}>₹{fmt(d.revenue)}</td>
+                    <td style={{ padding: '0.45rem 0.75rem', fontSize: '0.8rem', textAlign: 'right', fontWeight: 700, color: idle ? '#cbd5e1' : d.roas >= 1 ? '#16a34a' : '#dc2626' }}>
+                      {idle ? '—' : d.roas.toFixed(2)}
+                    </td>
+                    <td style={{ padding: '0.45rem 0.75rem', fontSize: '0.8rem', textAlign: 'right', color: idle ? '#cbd5e1' : '#475569' }}>{fmt(d.purchases)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function Agency() {
-  const [days, setDays] = useState<Day[]>([]);
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [totals, setTotals] = useState<Totals | null>(null);
   const [prefixes, setPrefixes] = useState<string[]>([]);
   const [prefixInput, setPrefixInput] = useState('');
@@ -50,7 +172,7 @@ export function Agency() {
     try {
       const res = await api.getAgencyData();
       if (res.success) {
-        setDays(res.days || []);
+        setCampaigns(res.campaigns || []);
         setTotals(res.totals || null);
         setPrefixes(res.namePrefixes || []);
       }
@@ -86,107 +208,9 @@ export function Agency() {
     savePrefixes([...prefixes, p]);
   };
 
-  // Upload one day's Meta "Campaigns" CSV. Re-uploading the same file is safe.
-  const handleCsvUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    const toastId = toast.loading('Reading campaigns CSV…');
-
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: async (results) => {
-        try {
-          // Tolerant header matching — Meta's column labels drift between exports.
-          const pick = (row: any, aliases: string[]): any => {
-            const keys = Object.keys(row);
-            for (const a of aliases) {
-              const exact = keys.find((k) => k.trim().toLowerCase() === a);
-              if (exact && String(row[exact]).trim() !== '') return row[exact];
-            }
-            for (const a of aliases) {
-              const partial = keys.find((k) => k.trim().toLowerCase().includes(a));
-              if (partial && String(row[partial]).trim() !== '') return row[partial];
-            }
-            return undefined;
-          };
-          const num = (v: any) => {
-            if (v === undefined || v === null) return 0;
-            return parseFloat(String(v).replace(/[₹,]/g, '').trim()) || 0;
-          };
-
-          const rows = (results.data as any[])
-            .map((row) => {
-              const name = pick(row, ['campaign name']);
-              const rawDate = pick(row, ['reporting starts', 'reporting ends', 'day', 'date']);
-              if (!name || !rawDate) return null;
-              const d = new Date(String(rawDate).split(/ [-–to] /)[0].trim());
-              if (isNaN(d.getTime())) return null;
-              return {
-                name: String(name).trim(),
-                date: d.toISOString().slice(0, 10),
-                status: pick(row, ['campaign delivery', 'delivery', 'status']) || 'active',
-                spend: num(pick(row, ['amount spent', 'spend', 'cost'])),
-                roas: num(pick(row, ['purchase roas', 'roas', 'return on ad spend'])),
-                purchases: num(pick(row, ['purchases', 'results'])),
-                impressions: num(pick(row, ['impressions'])),
-                clicks: num(pick(row, ['clicks (all)', 'clicks'])),
-                ctr: num(pick(row, ['ctr (all)', 'ctr'])),
-                cpc: num(pick(row, ['cpc (all)', 'cpc'])),
-                frequency: num(pick(row, ['frequency'])),
-                addsToCart: num(pick(row, ['adds to cart'])),
-              };
-            })
-            .filter(Boolean);
-
-          if (rows.length === 0) {
-            toast.error('No campaign rows found — is this a Meta "Campaigns" export?', { id: toastId });
-            return;
-          }
-
-          const res = await api.importAgencyCampaigns(rows as any[]);
-          if (res.success) {
-            const when = res.dates?.length === 1 ? dayLabel(res.dates[0]) : `${res.dates?.length} days`;
-            const bits = [`${when}: ${res.campaigns} agency campaign${res.campaigns === 1 ? '' : 's'}`];
-            if (res.newCampaigns) bits.push(`${res.newCampaigns} newly launched`);
-            if (res.discarded) bits.push(`${res.discarded} not the agency's`);
-            toast.success(bits.join(' · '), { id: toastId });
-            await loadData();
-          } else {
-            toast.error(res.error || 'Import failed', { id: toastId });
-          }
-        } catch (err) {
-          console.error('Agency CSV import error:', err);
-          toast.error('Import failed', { id: toastId });
-        }
-      },
-      error: () => toast.error('Could not read that CSV', { id: toastId }),
-    });
-
-    event.target.value = ''; // allow re-uploading the same file
-  };
-
-  // Charts read oldest → newest
-  const chartData = useMemo(
-    () => [...days].reverse().map((d) => ({
-      date: dayLabel(d.dateKey),
-      spend: d.spend,
-      roas: d.roas,
-      launched: d.launched,
-    })),
-    [days]
-  );
-
   const inputStyle: React.CSSProperties = {
     border: '1px solid #e2e8f0', borderRadius: '8px', padding: '0.5rem 0.75rem',
     fontSize: '0.85rem', color: '#1e293b', outline: 'none',
-  };
-  const card: React.CSSProperties = {
-    backgroundColor: '#fff', border: '1px solid #f1f5f9', borderRadius: '10px', padding: '1rem',
-  };
-  const label: React.CSSProperties = {
-    margin: '0 0 0.75rem 0', fontSize: '0.7rem', fontWeight: 800, color: '#7c3aed',
-    textTransform: 'uppercase', letterSpacing: '0.05em',
   };
 
   if (isLoading) {
@@ -195,21 +219,11 @@ export function Agency() {
 
   return (
     <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', flexWrap: 'wrap' }}>
-        <div>
-          <h1 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 600, color: '#1e293b' }}>Agency</h1>
-          <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.8rem', color: '#94a3b8' }}>
-            Day-by-day performance of the agency's campaigns, straight from your daily Meta <strong>Campaigns</strong> exports.
-          </p>
-        </div>
-        <label style={{
-          cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem',
-          backgroundColor: '#0f172a', color: '#fff', border: 'none', padding: '0.5rem 1rem',
-          borderRadius: '8px', fontSize: '0.825rem', fontWeight: 600, whiteSpace: 'nowrap',
-        }}>
-          <FileUp size={14} /> Upload day's CSV
-          <input type="file" accept=".csv" onChange={handleCsvUpload} style={{ display: 'none' }} />
-        </label>
+      <div>
+        <h1 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 600, color: '#1e293b' }}>Agency</h1>
+        <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.8rem', color: '#94a3b8' }}>
+          Every campaign the agency runs, with its full daily history. Data comes from the campaign CSVs you sync on the <strong>Ads Analysis</strong> page.
+        </p>
       </div>
 
       {/* Agency campaign prefixes */}
@@ -218,7 +232,7 @@ export function Agency() {
           <Filter size={12} /> Agency campaign prefixes
         </p>
         <p style={{ margin: '-0.4rem 0 0.75rem 0', fontSize: '0.75rem', color: '#94a3b8' }}>
-          Your Meta export covers the whole account. Only campaigns whose name <strong>starts with</strong> one of these
+          Your Meta data covers the whole account. Only campaigns whose name <strong>starts with</strong> one of these
           strings count as the agency's — everything else is ignored.
           {prefixes.length === 0 && ' No prefixes set yet, so every campaign is currently counted.'}
         </p>
@@ -263,12 +277,11 @@ export function Agency() {
         </div>
       </div>
 
-      {/* KPI tiles */}
+      {/* Overall KPI tiles */}
       {totals && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '0.75rem' }}>
           {[
-            { k: 'Days tracked', v: fmt(totals.days) },
-            { k: 'Campaigns', v: fmt(totals.campaigns) },
+            { k: 'Campaigns', v: `${fmt(totals.campaigns)}${totals.running ? ` · ${totals.running} live` : ''}` },
             { k: 'Total ad spend', v: `₹${fmt(totals.spend)}` },
             { k: 'Revenue (Meta)', v: `₹${fmt(totals.revenue)}` },
             { k: 'Blended ROAS', v: totals.roas.toFixed(2) },
@@ -282,101 +295,14 @@ export function Agency() {
         </div>
       )}
 
-      {chartData.length > 0 && (
-        <>
-          <div style={card}>
-            <p style={label}>Daily spend & ROAS</p>
-            <p style={{ margin: '-0.4rem 0 0.75rem 0', fontSize: '0.75rem', color: '#94a3b8' }}>
-              What the agency's campaigns spent each day, and the ROAS they returned that day.
-            </p>
-            <ResponsiveContainer width="100%" height={280}>
-              <ComposedChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-                <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#94a3b8' }} />
-                <YAxis yAxisId="left" tick={{ fontSize: 11, fill: '#94a3b8' }} tickFormatter={(v) => `₹${v >= 1000 ? `${Math.round(v / 1000)}k` : v}`} />
-                <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11, fill: '#94a3b8' }} />
-                <Tooltip
-                  formatter={(value: any, n?: string) =>
-                    (n === 'Ad spend' ? [`₹${fmt(Number(value))}`, n] : [Number(value).toFixed(2), n ?? ''])}
-                  contentStyle={{ fontSize: '0.8rem', borderRadius: '8px', border: '1px solid #f1f5f9' }}
-                />
-                <Legend wrapperStyle={{ fontSize: '0.75rem' }} />
-                <Bar yAxisId="left" dataKey="spend" name="Ad spend" fill="#c4b5fd" radius={[4, 4, 0, 0]} />
-                <Line yAxisId="right" type="monotone" dataKey="roas" name="ROAS" stroke="#7c3aed" strokeWidth={2} dot={{ r: 3 }} />
-              </ComposedChart>
-            </ResponsiveContainer>
-          </div>
-
-          <div style={card}>
-            <p style={label}>Campaigns launched per day</p>
-            <ResponsiveContainer width="100%" height={200}>
-              <ComposedChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-                <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#94a3b8' }} />
-                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#94a3b8' }} />
-                <Tooltip contentStyle={{ fontSize: '0.8rem', borderRadius: '8px', border: '1px solid #f1f5f9' }} />
-                <Bar dataKey="launched" name="Launched" fill="#6366f1" radius={[4, 4, 0, 0]} />
-              </ComposedChart>
-            </ResponsiveContainer>
-          </div>
-        </>
+      {/* One card per campaign, newest launch first */}
+      {campaigns.length === 0 ? (
+        <div style={{ ...card, padding: '2.5rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.85rem' }}>
+          No agency campaigns found. Sync a campaigns CSV on the Ads Analysis page, and check your prefixes above.
+        </div>
+      ) : (
+        campaigns.map((c) => <CampaignCard key={c.name} c={c} />)
       )}
-
-      {/* Day-by-day table */}
-      <div style={{ ...card, padding: 0, overflowX: 'auto' }}>
-        {days.length === 0 ? (
-          <div style={{ padding: '2.5rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.85rem' }}>
-            No data yet — upload a day's Campaigns CSV above.
-          </div>
-        ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ backgroundColor: '#f8fafc', borderBottom: '1px solid #f1f5f9', textAlign: 'left' }}>
-                {['Day / Campaign', 'Ad spend', 'Revenue', 'ROAS', 'Purchases'].map((h, i) => (
-                  <th key={h} style={{ padding: '0.75rem', fontSize: '0.75rem', color: '#94a3b8', fontWeight: 600, textAlign: i === 0 ? 'left' : 'right' }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {days.map((d) => (
-                <Fragment key={d.dateKey}>
-                  <tr style={{ backgroundColor: '#f8fafc', borderBottom: '1px solid #f1f5f9' }}>
-                    <td style={{ padding: '0.5rem 0.75rem', fontSize: '0.8rem', fontWeight: 700, color: '#1e293b' }}>
-                      {dayLabel(d.dateKey)}
-                      <span style={{ fontWeight: 500, color: '#94a3b8' }}>
-                        {' '}— {d.campaigns.length} campaign{d.campaigns.length === 1 ? '' : 's'}
-                        {d.launched > 0 && `, ${d.launched} launched`}
-                      </span>
-                    </td>
-                    <td style={{ padding: '0.5rem 0.75rem', fontSize: '0.8rem', fontWeight: 700, textAlign: 'right', color: '#1e293b' }}>₹{fmt(d.spend)}</td>
-                    <td style={{ padding: '0.5rem 0.75rem', fontSize: '0.8rem', fontWeight: 700, textAlign: 'right', color: '#1e293b' }}>₹{fmt(d.revenue)}</td>
-                    <td style={{ padding: '0.5rem 0.75rem', fontSize: '0.8rem', fontWeight: 800, textAlign: 'right', color: d.roas >= 1 ? '#16a34a' : '#dc2626' }}>{d.roas.toFixed(2)}</td>
-                    <td style={{ padding: '0.5rem 0.75rem', fontSize: '0.8rem', fontWeight: 700, textAlign: 'right', color: '#1e293b' }}>{fmt(d.purchases)}</td>
-                  </tr>
-                  {d.campaigns.map((c) => (
-                    <tr key={`${d.dateKey}|${c.name}`} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                      <td style={{ padding: '0.6rem 0.75rem 0.6rem 1.75rem', fontSize: '0.825rem', color: '#475569' }}>
-                        {c.name}
-                        {c.isNew && (
-                          <span title="First day this campaign appears in your data" style={{
-                            marginLeft: '0.45rem', fontSize: '0.65rem', fontWeight: 800, color: '#4338ca',
-                            backgroundColor: '#e0e7ff', borderRadius: '999px', padding: '0.1rem 0.4rem',
-                            textTransform: 'uppercase', letterSpacing: '0.03em',
-                          }}>launched</span>
-                        )}
-                      </td>
-                      <td style={{ padding: '0.6rem 0.75rem', fontSize: '0.825rem', textAlign: 'right', color: '#475569' }}>₹{fmt(c.spend)}</td>
-                      <td style={{ padding: '0.6rem 0.75rem', fontSize: '0.825rem', textAlign: 'right', color: '#475569' }}>₹{fmt(c.revenue)}</td>
-                      <td style={{ padding: '0.6rem 0.75rem', fontSize: '0.825rem', textAlign: 'right', fontWeight: 700, color: c.spend === 0 ? '#cbd5e1' : c.roas >= 1 ? '#16a34a' : '#dc2626' }}>{c.spend === 0 ? '—' : c.roas.toFixed(2)}</td>
-                      <td style={{ padding: '0.6rem 0.75rem', fontSize: '0.825rem', textAlign: 'right', color: '#475569' }}>{fmt(c.purchases)}</td>
-                    </tr>
-                  ))}
-                </Fragment>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
     </div>
   );
 }

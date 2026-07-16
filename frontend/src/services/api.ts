@@ -1042,9 +1042,10 @@ class ApiService {
     });
   }
 
-  // ─── Agency (day-by-day performance of the agency's campaigns) ──────────────
+  // ─── Agency (campaign-by-campaign, derived from Ads Analysis campaign data) ─
   async getAgencyData(): Promise<{
-    success: boolean; days?: any[]; namePrefixes?: string[]; totals?: any; error?: string;
+    success: boolean; campaigns?: any[]; namePrefixes?: string[];
+    totals?: any; latestDate?: string; error?: string;
   }> {
     return this.request('/api/admin/agency');
   }
@@ -1053,16 +1054,6 @@ class ApiService {
     return this.request('/api/admin/agency/settings', {
       method: 'PUT',
       body: JSON.stringify({ namePrefixes }),
-    });
-  }
-
-  async importAgencyCampaigns(campaigns: any[]): Promise<{
-    success: boolean; rows?: number; campaigns?: number; newCampaigns?: number;
-    discarded?: number; dates?: string[]; error?: string;
-  }> {
-    return this.request('/api/admin/agency/import', {
-      method: 'POST',
-      body: JSON.stringify({ campaigns }),
     });
   }
 
