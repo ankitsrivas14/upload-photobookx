@@ -59,6 +59,7 @@ interface Grading {
 
 interface Comparison {
   prefixesConfigured: boolean;
+  window: { start: string; end: string } | null;
   agency: Bucket;
   nonAgency: Bucket;
 }
@@ -134,6 +135,13 @@ function ComparePanel({ cmp }: { cmp: Comparison }) {
       <div style={{ padding: '1rem 1rem 0.5rem 1rem' }}>
         <p style={{ ...label, marginBottom: '0.35rem' }}>Agency vs Non-agency</p>
         <p style={{ margin: 0, fontSize: '0.78rem', color: '#64748b' }}>{verdict}</p>
+        {cmp.window && (
+          <p style={{ margin: '0.3rem 0 0 0', fontSize: '0.73rem', color: '#94a3b8' }}>
+            Like-for-like over {fullDay(cmp.window.start)}
+            {cmp.window.start !== cmp.window.end && ` – ${fullDay(cmp.window.end)}`}
+            {' '}— the days the agency has data for. Non-agency campaigns outside this window are excluded.
+          </p>
+        )}
       </div>
 
       {/* Share-of-spend bar */}
