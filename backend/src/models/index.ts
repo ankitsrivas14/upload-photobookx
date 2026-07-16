@@ -35,3 +35,4 @@ export { FixedMonthlyExpense, IFixedMonthlyExpense } from './FixedMonthlyExpense
 export { Reel, IReel } from './Reel';
 export { ReelStrategy, IReelStrategy } from './ReelStrategy';
 export { AgencyCampaign, IAgencyCampaign } from './AgencyCampaign';
+export { AgencySettings, IAgencySettings } from './AgencySettings';

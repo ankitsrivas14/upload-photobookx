@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import { requireAdmin } from './adminAuth';
 import { AgencyCampaign } from '../models/AgencyCampaign';
+import { AgencySettings } from '../models/AgencySettings';
 import { MetaAdPerformance } from '../models/MetaAdPerformance';
 import type { AuthenticatedRequest } from '../types';
 
@@ -8,6 +9,22 @@ const router = Router();
 
 /** Tolerant name key so logged names join to Meta names despite case/spacing drift. */
 const norm = (n: any) => (typeof n === 'string' ? n.trim().toLowerCase().replace(/\s+/g, ' ') : '');
+
+/** The configured agency name prefixes ([] when unset = no filtering). */
+async function getNamePrefixes(): Promise<string[]> {
+  const s = await AgencySettings.findOne({ key: 'default' }).lean();
+  return ((s as any)?.namePrefixes ?? []).filter((p: string) => !!p && p.trim());
+}
+
+/**
+ * A campaign belongs to the agency when its name starts with any configured prefix.
+ * With no prefixes configured we keep everything, so the page still works before setup.
+ */
+function matchesPrefix(name: string, prefixes: string[]): boolean {
+  if (prefixes.length === 0) return true;
+  const n = norm(name);
+  return prefixes.some((p) => n.startsWith(norm(p)));
+}
 
 const MONTHS: Record<string, number> = {
   jan: 0, january: 0, feb: 1, february: 1, mar: 2, march: 2, apr: 3, april: 3,
@@ -51,11 +68,12 @@ export function parseLaunchDateFromName(name: string, reference: Date): Date | n
  */
 router.get('/', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
   try {
-    const [logged, metaRows] = await Promise.all([
+    const [logged, metaRows, namePrefixes] = await Promise.all([
       AgencyCampaign.find().sort({ createdDate: -1, createdAt: -1 }).lean(),
       MetaAdPerformance.find({ level: 'campaign' }, {
         name: 1, date: 1, spend: 1, roas: 1, purchases: 1,
       }).lean(),
+      getNamePrefixes(),
     ]);
 
     // One row per (campaign, day). The same campaign CSV can be uploaded from both the
@@ -91,6 +109,8 @@ router.get('/', requireAdmin, async (_req: AuthenticatedRequest, res: Response) 
         createdDate: c.createdDate,
         notes: c.notes || '',
         matched: !!agg,
+        // Logged before the prefixes were configured / prefixes changed since
+        matchesPrefix: matchesPrefix(c.name, namePrefixes),
         spend: Math.round(spend),
         revenue: Math.round(revenue),
         roas: spend > 0 ? Number((revenue / spend).toFixed(2)) : 0,
@@ -104,10 +124,67 @@ router.get('/', requireAdmin, async (_req: AuthenticatedRequest, res: Response) 
       new Map((metaRows as any[]).map((r) => [norm(r.name), r.name])).values()
     ).filter(Boolean).sort();
 
-    res.json({ success: true, campaigns, availableCampaigns });
+    res.json({ success: true, campaigns, availableCampaigns, namePrefixes });
   } catch (error) {
     console.error('Error fetching agency data:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch agency data' });
+  }
+});
+
+/**
+ * PUT /api/admin/agency/settings — replace the agency's campaign name prefixes
+ * Body: { namePrefixes: string[] }
+ */
+router.put('/settings', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { namePrefixes } = req.body as { namePrefixes?: unknown };
+    if (!Array.isArray(namePrefixes) || namePrefixes.some((p) => typeof p !== 'string')) {
+      return res.status(400).json({ success: false, error: 'namePrefixes must be an array of strings' });
+    }
+    // Trim, drop blanks, de-dupe case-insensitively while keeping the entered casing
+    const cleaned = Array.from(
+      new Map(
+        (namePrefixes as string[])
+          .map((p) => p.trim())
+          .filter(Boolean)
+          .map((p) => [p.toLowerCase(), p])
+      ).values()
+    );
+
+    const settings = await AgencySettings.findOneAndUpdate(
+      { key: 'default' },
+      { $set: { key: 'default', namePrefixes: cleaned } },
+      { upsert: true, new: true }
+    ).lean();
+
+    res.json({ success: true, namePrefixes: (settings as any).namePrefixes });
+  } catch (error) {
+    console.error('Error saving agency settings:', error);
+    res.status(500).json({ success: false, error: 'Failed to save settings' });
+  }
+});
+
+/**
+ * POST /api/admin/agency/prune
+ * Remove logged campaigns whose name doesn't start with any configured prefix —
+ * for cleaning up campaigns imported before the prefixes were set.
+ */
+router.post('/prune', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const prefixes = await getNamePrefixes();
+    if (prefixes.length === 0) {
+      return res.status(400).json({ success: false, error: 'Add at least one campaign name prefix first' });
+    }
+    const logged = await AgencyCampaign.find({}, { name: 1 }).lean();
+    const strayIds = (logged as any[])
+      .filter((c) => !matchesPrefix(c.name, prefixes))
+      .map((c) => c._id);
+
+    if (strayIds.length > 0) await AgencyCampaign.deleteMany({ _id: { $in: strayIds } });
+    res.json({ success: true, removed: strayIds.length });
+  } catch (error) {
+    console.error('Error pruning agency campaigns:', error);
+    res.status(500).json({ success: false, error: 'Failed to remove non-matching campaigns' });
   }
 });
 
@@ -151,9 +228,24 @@ router.post('/import', requireAdmin, async (req: AuthenticatedRequest, res: Resp
       return res.status(400).json({ success: false, error: 'No campaign rows found in the CSV' });
     }
 
-    const rows = campaigns.filter((r) => r && typeof r.name === 'string' && r.name.trim() && r.date);
-    if (rows.length === 0) {
+    const allRows = campaigns.filter((r) => r && typeof r.name === 'string' && r.name.trim() && r.date);
+    if (allRows.length === 0) {
       return res.status(400).json({ success: false, error: 'CSV had no rows with a campaign name and date' });
+    }
+
+    // The export covers the whole account — keep only the agency's campaigns.
+    const prefixes = await getNamePrefixes();
+    const rows = allRows.filter((r) => matchesPrefix(r.name, prefixes));
+    const discardedNames = new Set(
+      allRows.filter((r) => !matchesPrefix(r.name, prefixes)).map((r) => r.name.trim())
+    );
+    if (rows.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: prefixes.length
+          ? `No campaign in this CSV starts with any of your agency prefixes (${prefixes.join(', ')})`
+          : 'CSV had no usable campaign rows',
+      });
     }
 
     // 1. Upsert this file's performance rows (idempotent per campaign+day).
@@ -230,6 +322,7 @@ router.post('/import', requireAdmin, async (req: AuthenticatedRequest, res: Resp
       datedFromName,
       datedFromFirstSeen: imported - datedFromName,
       rows: rows.length,
+      discarded: discardedNames.size,
     });
   } catch (error) {
     console.error('Error importing agency campaigns:', error);
