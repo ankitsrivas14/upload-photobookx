@@ -6,7 +6,7 @@ import {
 import Papa from 'papaparse';
 import { api } from '../../services/api';
 import { toast } from 'react-hot-toast';
-import { Plus, Trash2, AlertTriangle, FileUp } from 'lucide-react';
+import { Plus, Trash2, AlertTriangle, FileUp, X, Filter } from 'lucide-react';
 
 interface Campaign {
   _id: string;
@@ -14,6 +14,7 @@ interface Campaign {
   createdDate: string;
   notes: string;
   matched: boolean;
+  matchesPrefix: boolean;
   spend: number;
   revenue: number;
   roas: number;
@@ -28,6 +29,8 @@ const dayLabel = (d: string) =>
 export function Agency() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [availableCampaigns, setAvailableCampaigns] = useState<string[]>([]);
+  const [prefixes, setPrefixes] = useState<string[]>([]);
+  const [prefixInput, setPrefixInput] = useState('');
   const [isLoading, setIsLoading] = useState(true);
 
   const [name, setName] = useState('');
@@ -43,6 +46,7 @@ export function Agency() {
       if (res.success) {
         setCampaigns(res.campaigns || []);
         setAvailableCampaigns(res.availableCampaigns || []);
+        setPrefixes(res.namePrefixes || []);
       }
     } catch (err) {
       console.error('Failed to load agency data:', err);
@@ -71,6 +75,41 @@ export function Agency() {
       toast.error('Failed to log campaign');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const savePrefixes = async (next: string[]) => {
+    const prev = prefixes;
+    setPrefixes(next); // optimistic
+    const res = await api.saveAgencyPrefixes(next);
+    if (res.success) {
+      setPrefixes(res.namePrefixes || next);
+      await loadData(); // re-evaluates which logged campaigns still match
+    } else {
+      setPrefixes(prev);
+      toast.error(res.error || 'Failed to save prefixes');
+    }
+  };
+
+  const handleAddPrefix = () => {
+    const p = prefixInput.trim();
+    if (!p) return;
+    if (prefixes.some((x) => x.toLowerCase() === p.toLowerCase())) {
+      toast.error('That prefix is already added');
+      return;
+    }
+    setPrefixInput('');
+    savePrefixes([...prefixes, p]);
+  };
+
+  const handlePrune = async () => {
+    if (!window.confirm(`Remove ${strays.length} logged campaign(s) that don't start with your agency prefixes?`)) return;
+    const res = await api.pruneAgencyCampaigns();
+    if (res.success) {
+      toast.success(`Removed ${res.removed} non-matching campaign${res.removed === 1 ? '' : 's'}`);
+      await loadData();
+    } else {
+      toast.error(res.error || 'Failed to remove');
     }
   };
 
@@ -137,6 +176,7 @@ export function Agency() {
           if (res.success) {
             const bits = [`${res.imported} new campaign${res.imported === 1 ? '' : 's'} logged`];
             if (res.skipped) bits.push(`${res.skipped} already logged`);
+            if (res.discarded) bits.push(`${res.discarded} not the agency's`);
             if (res.datedFromFirstSeen) bits.push(`${res.datedFromFirstSeen} dated from first-seen`);
             toast.success(bits.join(' · '), { id: toastId });
             await loadData();
@@ -190,6 +230,12 @@ export function Agency() {
       launched: g.campaigns.length,
     })), [cohorts]);
 
+  // Logged campaigns that no longer start with any configured prefix
+  const strays = useMemo(
+    () => (prefixes.length ? campaigns.filter((c) => !c.matchesPrefix) : []),
+    [campaigns, prefixes]
+  );
+
   const totals = useMemo(() => {
     const spend = campaigns.reduce((s, c) => s + c.spend, 0);
     const revenue = campaigns.reduce((s, c) => s + c.revenue, 0);
@@ -236,6 +282,78 @@ export function Agency() {
           <input type="file" accept=".csv" onChange={handleCsvUpload} style={{ display: 'none' }} />
         </label>
       </div>
+
+      {/* Agency campaign prefixes */}
+      <div style={card}>
+        <p style={{ ...label, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+          <Filter size={12} /> Agency campaign prefixes
+        </p>
+        <p style={{ margin: '-0.4rem 0 0.75rem 0', fontSize: '0.75rem', color: '#94a3b8' }}>
+          Your Meta export covers the whole account. Only campaigns whose name <strong>starts with</strong> one of these
+          strings are treated as the agency's — everything else in the CSV is discarded on import.
+          {prefixes.length === 0 && ' No prefixes set yet, so every campaign in the CSV is currently kept.'}
+        </p>
+
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', alignItems: 'center', marginBottom: '0.6rem' }}>
+          {prefixes.map((p) => (
+            <span key={p} style={{
+              display: 'inline-flex', alignItems: 'center', gap: '0.35rem', backgroundColor: '#ede9fe',
+              color: '#5b21b6', borderRadius: '999px', padding: '0.25rem 0.6rem', fontSize: '0.78rem', fontWeight: 600,
+            }}>
+              {p}
+              <button
+                onClick={() => savePrefixes(prefixes.filter((x) => x !== p))}
+                title="Remove prefix"
+                style={{ background: 'none', border: 'none', color: '#7c3aed', cursor: 'pointer', padding: 0, display: 'flex' }}
+              >
+                <X size={12} />
+              </button>
+            </span>
+          ))}
+          {prefixes.length === 0 && (
+            <span style={{ fontSize: '0.78rem', color: '#cbd5e1' }}>No prefixes yet</span>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <input
+            style={{ ...inputStyle, flex: '1 1 260px' }}
+            placeholder='e.g. "S | " or "23 April"'
+            value={prefixInput}
+            onChange={(e) => setPrefixInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleAddPrefix(); }}
+          />
+          <button
+            onClick={handleAddPrefix}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '0.4rem', backgroundColor: '#0f172a',
+              color: '#fff', border: 'none', padding: '0.5rem 1rem', borderRadius: '8px',
+              fontSize: '0.825rem', fontWeight: 600, cursor: 'pointer',
+            }}
+          >
+            <Plus size={14} /> Add prefix
+          </button>
+        </div>
+      </div>
+
+      {strays.length > 0 && (
+        <div style={{ ...card, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', borderColor: '#fecaca', backgroundColor: '#fef2f2' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.8rem', color: '#991b1b' }}>
+            <AlertTriangle size={16} color="#dc2626" />
+            {strays.length} logged campaign{strays.length === 1 ? '' : 's'} no longer match your prefixes (imported before they were set).
+          </span>
+          <button
+            onClick={handlePrune}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '0.4rem', backgroundColor: '#dc2626',
+              color: '#fff', border: 'none', padding: '0.4rem 0.85rem', borderRadius: '8px',
+              fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
+            }}
+          >
+            <Trash2 size={13} /> Remove them
+          </button>
+        </div>
+      )}
 
       {/* KPI tiles */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '0.75rem' }}>
@@ -372,6 +490,9 @@ export function Agency() {
                           {c.name}
                           {!c.matched && (
                             <span title="No matching campaign found in uploaded Meta data" style={{ marginLeft: '0.4rem', fontSize: '0.68rem', color: '#d97706', fontWeight: 700 }}>· no data</span>
+                          )}
+                          {prefixes.length > 0 && !c.matchesPrefix && (
+                            <span title="Doesn't start with any configured agency prefix" style={{ marginLeft: '0.4rem', fontSize: '0.68rem', color: '#dc2626', fontWeight: 700 }}>· not agency</span>
                           )}
                         </td>
                         <td style={{ padding: '0.6rem 0.75rem', fontSize: '0.825rem', textAlign: 'right', color: '#475569' }}>₹{fmt(c.spend)}</td>

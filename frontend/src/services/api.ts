@@ -1043,8 +1043,19 @@ class ApiService {
   }
 
   // ─── Agency (campaigns the agency created, joined to Meta performance) ──────
-  async getAgencyData(): Promise<{ success: boolean; campaigns?: any[]; availableCampaigns?: string[]; error?: string }> {
+  async getAgencyData(): Promise<{ success: boolean; campaigns?: any[]; availableCampaigns?: string[]; namePrefixes?: string[]; error?: string }> {
     return this.request('/api/admin/agency');
+  }
+
+  async saveAgencyPrefixes(namePrefixes: string[]): Promise<{ success: boolean; namePrefixes?: string[]; error?: string }> {
+    return this.request('/api/admin/agency/settings', {
+      method: 'PUT',
+      body: JSON.stringify({ namePrefixes }),
+    });
+  }
+
+  async pruneAgencyCampaigns(): Promise<{ success: boolean; removed?: number; error?: string }> {
+    return this.request('/api/admin/agency/prune', { method: 'POST' });
   }
 
   async logAgencyCampaign(name: string, createdDate: string, notes?: string): Promise<{ success: boolean; campaign?: any; error?: string }> {
@@ -1060,7 +1071,7 @@ class ApiService {
 
   async importAgencyCampaigns(campaigns: any[]): Promise<{
     success: boolean; imported?: number; skipped?: number; datedFromName?: number;
-    datedFromFirstSeen?: number; rows?: number; error?: string;
+    datedFromFirstSeen?: number; rows?: number; discarded?: number; error?: string;
   }> {
     return this.request('/api/admin/agency/import', {
       method: 'POST',
