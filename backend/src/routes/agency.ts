@@ -117,8 +117,12 @@ function eachDay(start: string, end: string): string[] {
  * data uploaded on the Ads Analysis page. Each campaign carries a daily series running
  * from its first day to its last (or to the latest data we have, if it's still running).
  */
-router.get('/', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
+router.get('/', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    // Optional ?month=YYYY-MM narrows every number on the page to that calendar month.
+    const monthParam = typeof req.query.month === 'string' ? req.query.month.trim() : '';
+    const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(monthParam) ? monthParam : '';
+
     const [allRows, namePrefixes] = await Promise.all([
       MetaAdPerformance.find({ level: 'campaign' }, {
         name: 1, date: 1, spend: 1, roas: 1, purchases: 1,
@@ -148,8 +152,36 @@ router.get('/', requireAdmin, async (_req: AuthenticatedRequest, res: Response) 
       ).values()
     ) as any[];
 
-    const rows = deduped.filter((r) => matchesPrefix(r.name, namePrefixes));
-    const nonAgencyRows = deduped.filter((r) => !matchesPrefix(r.name, namePrefixes));
+    const allAgencyRows = deduped.filter((r) => matchesPrefix(r.name, namePrefixes));
+    const allNonAgencyRows = deduped.filter((r) => !matchesPrefix(r.name, namePrefixes));
+
+    // Months the agency has any data for, newest first — drives the month picker.
+    const availableMonths = Array.from(
+      new Set(allAgencyRows.map((r: any) => String(r.date).slice(0, 7)))
+    ).sort().reverse();
+
+    const inMonth = (r: any) => !month || String(r.date).startsWith(month);
+    const rows = allAgencyRows.filter(inMonth);
+    const nonAgencyRows = allNonAgencyRows.filter(inMonth);
+
+    // "Running" always means live as of the newest data we hold, not merely the newest
+    // day inside the selected month — otherwise every past month looks like it's still on.
+    const globalLatestDate = allAgencyRows.reduce(
+      (m: string, r: any) => (!m || r.date > m ? r.date : m), ''
+    );
+
+    // A campaign's true lifespan, independent of the selected month, so the card can
+    // still say when it actually launched.
+    const lifespan = new Map<string, { first: string; last: string }>();
+    for (const r of allAgencyRows) {
+      const key = norm(r.name);
+      const cur = lifespan.get(key);
+      if (!cur) lifespan.set(key, { first: r.date, last: r.date });
+      else {
+        if (r.date < cur.first) cur.first = r.date;
+        if (r.date > cur.last) cur.last = r.date;
+      }
+    }
 
     // Apples-to-apples compare: only score non-agency campaigns over the same days the
     // agency actually has data for. Otherwise a week-old agency gets measured against
@@ -161,7 +193,7 @@ router.get('/', requireAdmin, async (_req: AuthenticatedRequest, res: Response) 
       ? nonAgencyRows.filter((r: any) => r.date >= windowStart && r.date <= windowEnd)
       : [];
 
-    // Latest day we have any agency data for — a campaign still reporting on it is live.
+    // Latest day inside the current view.
     const latestDate = rows.reduce((m: string, r: any) => (!m || r.date > m ? r.date : m), '');
 
     type Point = { spend: number; revenue: number; purchases: number };
@@ -184,6 +216,7 @@ router.get('/', requireAdmin, async (_req: AuthenticatedRequest, res: Response) 
       const dates = Array.from(c.days.keys()).sort();
       const startDate = dates[0];
       const endDate = dates[dates.length - 1];
+      const life = lifespan.get(norm(c.name)) ?? { first: startDate, last: endDate };
 
       // Continuous timeline start → end so paused days show as gaps rather than
       // collapsing the chart into a misleading straight line.
@@ -209,7 +242,10 @@ router.get('/', requireAdmin, async (_req: AuthenticatedRequest, res: Response) 
         name: c.name,
         startDate,
         endDate,
-        isRunning: endDate === latestDate,
+        // Full lifespan across all data, so a month view can still show when it launched.
+        firstSeen: life.first,
+        lastSeen: life.last,
+        isRunning: life.last === globalLatestDate,
         activeDays: dates.length,          // days it actually reported
         spanDays: daily.length,            // calendar days start → end
         spend,
@@ -232,6 +268,8 @@ router.get('/', requireAdmin, async (_req: AuthenticatedRequest, res: Response) 
     res.json({
       success: true,
       namePrefixes,
+      month: month || null,
+      availableMonths,
       latestDate,
       campaigns,
       // What the grades are measured against

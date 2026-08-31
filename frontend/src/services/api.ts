@@ -1043,11 +1043,13 @@ class ApiService {
   }
 
   // ─── Agency (campaign-by-campaign, derived from Ads Analysis campaign data) ─
-  async getAgencyData(): Promise<{
+  async getAgencyData(month?: string): Promise<{
     success: boolean; campaigns?: any[]; namePrefixes?: string[];
-    totals?: any; comparison?: any; grading?: any; latestDate?: string; error?: string;
+    totals?: any; comparison?: any; grading?: any; latestDate?: string;
+    month?: string | null; availableMonths?: string[]; error?: string;
   }> {
-    return this.request('/api/admin/agency');
+    const qs = month ? `?month=${encodeURIComponent(month)}` : '';
+    return this.request(`/api/admin/agency${qs}`);
   }
 
   async saveAgencyPrefixes(namePrefixes: string[]): Promise<{ success: boolean; namePrefixes?: string[]; error?: string }> {

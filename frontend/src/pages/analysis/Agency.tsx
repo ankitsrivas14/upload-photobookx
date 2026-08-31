@@ -5,7 +5,7 @@ import {
 } from 'recharts';
 import { api } from '../../services/api';
 import { toast } from 'react-hot-toast';
-import { Plus, X, Filter, ChevronDown, ChevronRight, GitCompareArrows } from 'lucide-react';
+import { Plus, X, Filter, ChevronDown, ChevronRight, GitCompareArrows, CalendarRange } from 'lucide-react';
 
 interface DailyPoint {
   dateKey: string;
@@ -28,6 +28,8 @@ interface Campaign {
   name: string;
   startDate: string;
   endDate: string;
+  firstSeen: string;
+  lastSeen: string;
   isRunning: boolean;
   activeDays: number;
   spanDays: number;
@@ -69,6 +71,8 @@ const dayLabel = (d: string) =>
   new Date(`${d}T12:00:00Z`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 const fullDay = (d: string) =>
   new Date(`${d}T12:00:00Z`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+const monthLabel = (m: string) =>
+  new Date(`${m}-01T12:00:00Z`).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
 
 const card: React.CSSProperties = {
   backgroundColor: '#fff', border: '1px solid #f1f5f9', borderRadius: '10px', padding: '1rem',
@@ -182,7 +186,7 @@ function ComparePanel({ cmp }: { cmp: Comparison }) {
   );
 }
 
-function CampaignCard({ c }: { c: Campaign }) {
+function CampaignCard({ c, month }: { c: Campaign; month: string }) {
   const [open, setOpen] = useState(false);
   const chartData = c.daily.map((d) => ({ ...d, date: dayLabel(d.dateKey) }));
 
@@ -221,10 +225,16 @@ function CampaignCard({ c }: { c: Campaign }) {
           )}
         </div>
         <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
-          {fullDay(c.startDate)} → {c.isRunning ? 'now' : fullDay(c.endDate)}
+          {fullDay(c.startDate)} → {!month && c.isRunning ? 'now' : fullDay(c.endDate)}
           {' · '}{c.activeDays} day{c.activeDays === 1 ? '' : 's'} with data
           {c.spanDays !== c.activeDays && ` of ${c.spanDays}`}
         </div>
+        {month && (c.firstSeen < c.startDate || c.lastSeen > c.endDate) && (
+          <div style={{ fontSize: '0.72rem', color: '#cbd5e1', marginTop: '0.1rem' }}>
+            Showing {monthLabel(month)} only — the campaign itself ran {fullDay(c.firstSeen)} →{' '}
+            {c.isRunning ? 'now' : fullDay(c.lastSeen)}.
+          </div>
+        )}
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: '0.75rem', marginTop: '0.85rem' }}>
           {stat('Ad spend', `₹${fmt(c.spend)}`)}
@@ -319,19 +329,24 @@ export function Agency() {
   const [prefixes, setPrefixes] = useState<string[]>([]);
   const [prefixInput, setPrefixInput] = useState('');
   const [isLoading, setIsLoading] = useState(true);
+  // '' = all time; otherwise YYYY-MM
+  const [month, setMonth] = useState('');
+  const [availableMonths, setAvailableMonths] = useState<string[]>([]);
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => { loadData(month); }, [month]);
 
-  const loadData = async () => {
+  const loadData = async (m = month) => {
     setIsLoading(true);
     try {
-      const res = await api.getAgencyData();
+      const res = await api.getAgencyData(m || undefined);
       if (res.success) {
         setCampaigns(res.campaigns || []);
         setTotals(res.totals || null);
         setComparison(res.comparison || null);
         setGrading(res.grading || null);
         setPrefixes(res.namePrefixes || []);
+        // The month list spans all data, so it stays stable whichever month is picked.
+        setAvailableMonths(res.availableMonths || []);
       }
     } catch (err) {
       console.error('Failed to load agency data:', err);
@@ -347,7 +362,7 @@ export function Agency() {
     const res = await api.saveAgencyPrefixes(next);
     if (res.success) {
       setPrefixes(res.namePrefixes || next);
-      await loadData(); // re-filters which campaigns count as the agency's
+      await loadData(month); // re-filters which campaigns count as the agency's
     } else {
       setPrefixes(prev);
       toast.error(res.error || 'Failed to save prefixes');
@@ -370,7 +385,7 @@ export function Agency() {
     fontSize: '0.85rem', color: '#1e293b', outline: 'none',
   };
 
-  if (isLoading) {
+  if (isLoading && !totals) {
     return <div style={{ padding: '2rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.85rem' }}>Loading Agency…</div>;
   }
 
@@ -380,7 +395,10 @@ export function Agency() {
         <div>
           <h1 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 600, color: '#1e293b' }}>Agency</h1>
           <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.8rem', color: '#94a3b8' }}>
-            Every campaign the agency runs, with its full daily history. Data comes from the campaign CSVs you sync on the <strong>Ads Analysis</strong> page.
+            Every campaign the agency runs, with its daily history. Data comes from the campaign CSVs you sync on the <strong>Ads Analysis</strong> page.
+            {month
+              ? <> Showing <strong>{monthLabel(month)}</strong> — every number below counts that month only.</>
+              : <> Showing <strong>all time</strong>.</>}
           </p>
           {grading && (
             <p style={{ margin: '0.3rem 0 0 0', fontSize: '0.75rem', color: '#94a3b8' }}>
@@ -390,6 +408,27 @@ export function Agency() {
             </p>
           )}
         </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: '0.4rem', backgroundColor: '#fff',
+            border: '1px solid #e2e8f0', borderRadius: '8px', padding: '0.35rem 0.6rem',
+          }}>
+            <CalendarRange size={14} color="#7c3aed" />
+            <select
+              value={month}
+              onChange={(e) => setMonth(e.target.value)}
+              disabled={isLoading}
+              style={{
+                border: 'none', outline: 'none', background: 'none', cursor: 'pointer',
+                fontSize: '0.825rem', fontWeight: 600, color: '#1e293b',
+              }}
+            >
+              <option value="">All time</option>
+              {availableMonths.map((m) => (
+                <option key={m} value={m}>{monthLabel(m)}</option>
+              ))}
+            </select>
+          </div>
         <button
           onClick={() => setShowCompare((v) => !v)}
           style={{
@@ -403,6 +442,7 @@ export function Agency() {
         >
           <GitCompareArrows size={14} /> Compare
         </button>
+        </div>
       </div>
 
       {/* Agency campaign prefixes */}
@@ -456,35 +496,43 @@ export function Agency() {
         </div>
       </div>
 
-      {/* Agency vs non-agency comparison */}
-      {showCompare && comparison && <ComparePanel cmp={comparison} />}
+      {/* Everything below reflects the selected month */}
+      <div style={{
+        display: 'flex', flexDirection: 'column', gap: '1.25rem',
+        opacity: isLoading ? 0.5 : 1, transition: 'opacity 0.15s',
+      }}>
+        {/* Agency vs non-agency comparison */}
+        {showCompare && comparison && <ComparePanel cmp={comparison} />}
 
-      {/* Overall KPI tiles */}
-      {totals && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '0.75rem' }}>
-          {[
-            { k: 'Campaigns', v: `${fmt(totals.campaigns)}${totals.running ? ` · ${totals.running} live` : ''}` },
-            { k: 'Total ad spend', v: `₹${fmt(totals.spend)}` },
-            { k: 'Revenue (Meta)', v: `₹${fmt(totals.revenue)}` },
-            { k: 'Blended ROAS', v: totals.roas.toFixed(2) },
-            { k: 'Purchases', v: fmt(totals.purchases) },
-          ].map((t) => (
-            <div key={t.k} style={card}>
-              <div style={{ fontSize: '0.7rem', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{t.k}</div>
-              <div style={{ fontSize: '1.35rem', fontWeight: 700, color: '#0f172a', marginTop: '0.25rem' }}>{t.v}</div>
-            </div>
-          ))}
-        </div>
-      )}
+        {/* Overall KPI tiles */}
+        {totals && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '0.75rem' }}>
+            {[
+              { k: 'Campaigns', v: `${fmt(totals.campaigns)}${totals.running ? ` · ${totals.running} live` : ''}` },
+              { k: 'Total ad spend', v: `₹${fmt(totals.spend)}` },
+              { k: 'Revenue (Meta)', v: `₹${fmt(totals.revenue)}` },
+              { k: 'Blended ROAS', v: totals.roas.toFixed(2) },
+              { k: 'Purchases', v: fmt(totals.purchases) },
+            ].map((t) => (
+              <div key={t.k} style={card}>
+                <div style={{ fontSize: '0.7rem', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{t.k}</div>
+                <div style={{ fontSize: '1.35rem', fontWeight: 700, color: '#0f172a', marginTop: '0.25rem' }}>{t.v}</div>
+              </div>
+            ))}
+          </div>
+        )}
 
-      {/* One card per campaign, newest launch first */}
-      {campaigns.length === 0 ? (
-        <div style={{ ...card, padding: '2.5rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.85rem' }}>
-          No agency campaigns found. Sync a campaigns CSV on the Ads Analysis page, and check your prefixes above.
-        </div>
-      ) : (
-        campaigns.map((c) => <CampaignCard key={c.name} c={c} />)
-      )}
+        {/* One card per campaign, newest launch first */}
+        {campaigns.length === 0 ? (
+          <div style={{ ...card, padding: '2.5rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.85rem' }}>
+            {month
+              ? `No agency campaigns ran in ${monthLabel(month)}.`
+              : 'No agency campaigns found. Sync a campaigns CSV on the Ads Analysis page, and check your prefixes above.'}
+          </div>
+        ) : (
+          campaigns.map((c) => <CampaignCard key={c.name} c={c} month={month} />)
+        )}
+      </div>
     </div>
   );
 }
