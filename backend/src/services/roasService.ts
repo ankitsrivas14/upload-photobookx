@@ -97,8 +97,15 @@ let roasRecomputeQueued = false;
  * Fire-and-forget full recompute, coalesced: if one is already running, remember
  * to run once more when it finishes (the re-run sees the newest data) instead of
  * stacking parallel recomputes.
+ *
+ * On Cloud Functions (Cloud Run sets `K_SERVICE`) this is a no-op: background work
+ * kicked off after the HTTP response isn't guaranteed to finish, so freshness there is
+ * owned by the scheduled `roasRecompute` function (see scheduled.ts), which runs the same
+ * `backfillAllDates()` on a fixed interval. On the local/Render server (`K_SERVICE` unset)
+ * this in-process fast path still runs and keeps ROAS near-instant.
  */
 export function scheduleRoasRecompute(reason: string): void {
+  if (process.env.K_SERVICE) return; // handled by the scheduled function on Cloud Functions
   if (roasRecomputeInFlight) {
     roasRecomputeQueued = true;
     return;

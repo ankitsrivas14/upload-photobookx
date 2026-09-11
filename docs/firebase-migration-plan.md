@@ -180,6 +180,19 @@ Work split —
 remain. **Risk**: medium (data copy + key-scheme parity). **Rollback**: flip the storage
 client back; objects still in S3 during the window.
 
+## Implementation status (branch `main-firebase`)
+- **Phase 1 code: done.** `app.ts` (listen-free app), `db.ts` (cached lazy Mongo), thin
+  `index.ts`, `functions.ts` (`api` gen2 function), `services/s3.ts` (explicit-key S3, IMDS
+  removed), `firebase.json`/`.firebaserc`. Local `node dist/index.js` still boots unchanged.
+- **Phase 3 code: done.** `scheduled.ts` exports a `roasRecompute` `onSchedule` function
+  (every 15 min, `maxInstances: 1`, MONGO_URI only). `scheduleRoasRecompute` now no-ops when
+  `K_SERVICE` is set (Cloud Functions), deferring freshness to the scheduled function; on
+  Render/local the in-process fast path is unchanged. Requires `firebase-admin` (peer of
+  `firebase-functions`) — installed.
+- **Remaining: the account-side deploy steps** (create project, secrets, Atlas allowlist,
+  `firebase deploy`, flip `VITE_API_URL`). Deploying enables Cloud Scheduler + Pub/Sub APIs
+  for the scheduled function automatically.
+
 ## Phase 3 — Background & scheduled work
 **Scope**: make ROAS recompute (and any future jobs) durable on Functions.
 - Replace in-process `scheduleRoasRecompute` with a real trigger: enqueue to **Cloud Tasks**
