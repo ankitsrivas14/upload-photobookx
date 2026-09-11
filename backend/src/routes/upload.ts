@@ -26,7 +26,6 @@ const upload = multer({
   },
 });
 
-const s3Client = getS3Client();
 
 /**
  * GET /api/upload/:token
@@ -115,7 +114,7 @@ router.post('/:token/upload', upload.single('photo'), async (req: Request, res: 
 
     // Upload to S3
     try {
-      await s3Client.send(new PutObjectCommand({
+      await getS3Client().send(new PutObjectCommand({
         Bucket: config.aws.s3Bucket,
         Key: s3Key,
         Body: req.file.buffer,
@@ -244,7 +243,7 @@ router.get('/:token/images/:imageId/proxy', async (req: Request, res: Response) 
     }
 
     // Fetch from S3
-    const s3Response = await s3Client.send(new GetObjectCommand({
+    const s3Response = await getS3Client().send(new GetObjectCommand({
       Bucket: config.aws.s3Bucket,
       Key: image.s3Key,
     }));
@@ -296,7 +295,7 @@ router.delete('/:token/images/:imageId', async (req: Request, res: Response) => 
 
     // Delete from S3
     try {
-      await s3Client.send(new DeleteObjectCommand({
+      await getS3Client().send(new DeleteObjectCommand({
         Bucket: config.aws.s3Bucket,
         Key: image.s3Key,
       }));
@@ -353,7 +352,7 @@ router.put('/:token/images/:imageId', upload.single('photo'), async (req: Reques
 
     // Delete old image from S3
     try {
-      await s3Client.send(new DeleteObjectCommand({
+      await getS3Client().send(new DeleteObjectCommand({
         Bucket: config.aws.s3Bucket,
         Key: existingImage.s3Key,
       }));
@@ -369,7 +368,7 @@ router.put('/:token/images/:imageId', upload.single('photo'), async (req: Reques
 
     // Upload new image to S3
     try {
-      await s3Client.send(new PutObjectCommand({
+      await getS3Client().send(new PutObjectCommand({
         Bucket: config.aws.s3Bucket,
         Key: s3Key,
         Body: req.file.buffer,
