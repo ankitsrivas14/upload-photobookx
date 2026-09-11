@@ -9,8 +9,8 @@ import config from '../config';
 import { UploadedImage } from '../models';
 import OrderDeliveryDate from '../models/OrderDeliveryDate';
 import ShippingCharge from '../models/ShippingCharge';
-import { S3Client, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
-import { fromInstanceMetadata } from '@aws-sdk/credential-provider-imds';
+import { GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { getS3Client } from '../services/s3';
 import { Ticket } from '../models';
 import archiver from 'archiver';
 import { recomputeShippingForDate, getOrderDateKey as getShippingOrderDateKey, backfillShippingStats } from '../services/shippingStatsService';
@@ -874,15 +874,7 @@ router.get('/:token/download-images', requireAdmin, async (req: AuthenticatedReq
       return;
     }
 
-    // Configure S3 client - use environment credentials for local dev, instance metadata for production
-    const s3Client = new S3Client({
-      region: config.aws.region,
-      credentials: config.aws.accessKeyId && config.aws.secretAccessKey ? {
-        accessKeyId: config.aws.accessKeyId,
-        secretAccessKey: config.aws.secretAccessKey,
-      } : fromInstanceMetadata(),
-      forcePathStyle: false,
-    });
+    const s3Client = getS3Client();
 
     // Set response headers for zip download
     const zipFileName = `${magicLink.orderNumber.replace(/[^a-zA-Z0-9]/g, '_')}.zip`;
@@ -984,15 +976,7 @@ router.delete('/:token/delete-images', requireAdmin, async (req: AuthenticatedRe
 
     console.log(`Deleting ${images.length} images for order ${magicLink.orderNumber}`);
 
-    // Configure S3 client
-    const s3Client = new S3Client({
-      region: config.aws.region,
-      credentials: config.aws.accessKeyId && config.aws.secretAccessKey ? {
-        accessKeyId: config.aws.accessKeyId,
-        secretAccessKey: config.aws.secretAccessKey,
-      } : fromInstanceMetadata(),
-      forcePathStyle: false,
-    });
+    const s3Client = getS3Client();
 
     let deletedCount = 0;
     let failedCount = 0;
