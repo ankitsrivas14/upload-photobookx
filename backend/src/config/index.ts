@@ -1,4 +1,11 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
+
+// Local dev loads its env from `.env.local` (resolves to backend/.env.local from both
+// src/ and dist/). It is deliberately NOT named `.env`: Firebase Functions auto-ingests a
+// `.env` in the functions source dir and rejects reserved keys such as PORT, which broke
+// deploys. On Cloud Functions the values come from Secret Manager, and on Render from the
+// dashboard, so in those environments this simply finds no file and does nothing.
+dotenv.config({ path: `${__dirname}/../../.env.local` });
 
 interface Config {
   port: number;

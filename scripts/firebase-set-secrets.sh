@@ -5,7 +5,7 @@
 # Prereqs (do these first):
 #   1. firebase login
 #   2. a Firebase project on the Blaze plan, with its id in .firebaserc (replace the placeholder)
-#   3. run this from the REPO ROOT, with backend/.env present on this machine
+#   3. run this from the REPO ROOT, with backend/.env.local present on this machine
 #
 # Values are read from backend/.env on YOUR machine and piped straight into Firebase — they
 # are never printed to the terminal. The secret NAMES below must stay in sync with the
@@ -13,7 +13,7 @@
 #
 set -euo pipefail
 
-ENV_FILE="backend/.env"
+ENV_FILE="backend/.env.local"
 
 SECRETS=(
   MONGO_URI
