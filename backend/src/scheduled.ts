@@ -1,6 +1,7 @@
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { connectMongo } from './db';
 import { backfillAllDates } from './services/roasService';
+import { runScheduledRefresh } from './services/refreshService';
 
 /**
  * Durable ROAS recompute for the Cloud Functions runtime.
@@ -29,5 +30,40 @@ export const roasRecompute = onSchedule(
     await connectMongo();
     const { upserted } = await backfillAllDates();
     console.log(`Scheduled ROAS recompute: ${upserted} dates refreshed`);
+  }
+);
+
+/**
+ * Keeps order + shipping data fresh without anyone pressing "Refresh" in the UI.
+ *
+ * Runs the same flow as the SalesPage refresh (Shopify sync → figure out which
+ * orders need a Shiprocket shipping sync → one bulk fetch → recompute the daily
+ * aggregates). Steady-state runs do little external work because only terminal
+ * orders missing a charge are synced. `maxInstances: 1` prevents overlapping runs.
+ * Needs Shopify + Shiprocket credentials in addition to MongoDB.
+ */
+export const scheduledRefresh = onSchedule(
+  {
+    schedule: 'every 30 minutes',
+    region: 'asia-south1',
+    timeoutSeconds: 540,
+    memory: '1GiB',
+    maxInstances: 1,
+    secrets: [
+      'MONGO_URI',
+      'SHOPIFY_STORE_DOMAIN',
+      'SHOPIFY_ACCESS_TOKEN',
+      'PRINTED_PHOTOS_PRODUCT_ID',
+      'SHIPROCKET_API_EMAIL',
+      'SHIPROCKET_API_PASSWORD',
+    ],
+  },
+  async () => {
+    await connectMongo();
+    const result = await runScheduledRefresh();
+    console.log(
+      `Scheduled refresh done: synced=${result.synced}, toSync=${result.toSync}, ` +
+        `fetched=${result.fetched}, skipped=${result.skipped}`
+    );
   }
 );

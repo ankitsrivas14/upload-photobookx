@@ -2,7 +2,7 @@ import { onRequest } from 'firebase-functions/v2/https';
 import { app } from './app';
 
 // Scheduled ROAS recompute (deployed as its own function alongside `api`).
-export { roasRecompute } from './scheduled';
+export { roasRecompute, scheduledRefresh } from './scheduled';
 
 /**
  * Cloud Functions (gen2) entry — the whole Express app behind one HTTPS function.
