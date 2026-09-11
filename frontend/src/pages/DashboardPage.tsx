@@ -291,17 +291,18 @@ export function DashboardPage() {
   const profitChartData = (() => {
     const now = new Date();
     const todayKey = now.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
-    const startDate = new Date(selectedYear, selectedMonth, 1);
-    const endDate = new Date(selectedYear, selectedMonth + 1, 0);
+    // Number of days in the selected month (day 0 of next month = last day of this one).
+    const daysInMonth = new Date(selectedYear, selectedMonth + 1, 0).getDate();
 
     // Build a quick lookup from DB records
     const dbMap = new Map(pnlChartRecords.map((r) => [r.dateKey, r]));
 
     const data: Array<{ date: string; dateKey: string; bookedProfit: number | null; unrealizedProfit: number | null; displayProfit: number | null; yetToBookProfit: number }> = [];
-    const currentDate = new Date(startDate);
 
-    while (currentDate <= endDate) {
-      const dateKey = currentDate.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+    for (let day = 1; day <= daysInMonth; day++) {
+      // Build the dateKey straight from the calendar numbers so it never shifts
+      // with the machine timezone (dateKeys are store-local calendar days).
+      const dateKey = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
       const rec = dbMap.get(dateKey);
       const isFuture = dateKey > todayKey;
 
@@ -315,15 +316,13 @@ export function DashboardPage() {
       }
 
       data.push({
-        date: currentDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: STORE_TIMEZONE }),
+        date: new Date(selectedYear, selectedMonth, day).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }),
         dateKey,
         bookedProfit,
         unrealizedProfit,
         displayProfit: bookedProfit ?? unrealizedProfit,
         yetToBookProfit: 0,
       });
-
-      currentDate.setDate(currentDate.getDate() + 1);
     }
 
     return data;
