@@ -23,14 +23,22 @@ import agencyRoutes from './routes/agency';
  */
 const app = express();
 
-// CORS — allow the configured frontend origin plus the production upload domain.
-// FRONTEND_URL should be set to the Vercel/Firebase Hosting origin in each environment.
-const allowedOrigins = [config.frontendUrl, 'https://upload.photobookx.com'].filter(Boolean) as string[];
+// CORS — allow the production upload domain plus whatever FRONTEND_URL holds.
+// FRONTEND_URL may be a single origin or a comma-separated list (so multiple
+// deploy targets — Vercel prod, previews, a custom admin domain — can be allowed
+// without a code change). Trailing slashes are ignored on both sides.
+const normalizeOrigin = (o: string) => o.trim().replace(/\/+$/, '');
+const allowedOrigins = [
+  ...String(config.frontendUrl || '').split(','),
+  'https://upload.photobookx.com',
+]
+  .map(normalizeOrigin)
+  .filter(Boolean);
 
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin) return callback(null, true); // allow non-browser requests
-    if (allowedOrigins.includes(origin)) return callback(null, true);
+    if (allowedOrigins.includes(normalizeOrigin(origin))) return callback(null, true);
     return callback(new Error('Not allowed by CORS'));
   },
   credentials: true,
