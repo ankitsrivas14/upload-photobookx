@@ -82,6 +82,11 @@ class ShiprocketService {
   // Cache for bulk order map (last 5 minutes)
   private cachedOrderMap: Map<string, ShiprocketOrder> | null = null;
   private orderMapFetchedAt: Date | null = null;
+  // Full (unfiltered) recent wallet-transaction list, cached like the order map so a
+  // chunked refresh doesn't re-paginate Shiprocket once per chunk. Date filtering is
+  // applied on top of this cache per call.
+  private cachedWalletTxns: WalletTransaction[] | null = null;
+  private walletTxnsFetchedAt: Date | null = null;
 
   constructor() {
     this.email = config.shiprocket.email;
@@ -163,36 +168,49 @@ class ShiprocketService {
    */
   async getAllWalletTransactions(startDate?: string, endDate?: string): Promise<WalletTransaction[]> {
     try {
-      const allTransactions: WalletTransaction[] = [];
-      let page = 1;
-      const perPage = 100;
-      const maxPages = 20; // Max 2000 transactions (recent ones)
+      let allTransactions: WalletTransaction[];
 
-      console.log(`[Shiprocket] Fetching recent wallet transactions (no date filter - endpoint limitation)`);
+      // Reuse the recent list within a 5-minute window (same policy as the order map).
+      // A chunked refresh makes one call per chunk; without this each re-paginated up
+      // to 20 Shiprocket pages, dominating the refresh time.
+      if (this.cachedWalletTxns && this.walletTxnsFetchedAt &&
+          (Date.now() - this.walletTxnsFetchedAt.getTime() < 5 * 60 * 1000)) {
+        console.log(`[Shiprocket] Using cached wallet transactions (${this.cachedWalletTxns.length})`);
+        allTransactions = this.cachedWalletTxns;
+      } else {
+        allTransactions = [];
+        let page = 1;
+        const perPage = 100;
+        const maxPages = 20; // Max 2000 transactions (recent ones)
 
-      while (page <= maxPages) {
-        // Try without date filters as the endpoint might not support them
-        const queryParams = `page=${page}&per_page=${perPage}`;
+        console.log(`[Shiprocket] Fetching recent wallet transactions (no date filter - endpoint limitation)`);
 
-        const response = await this.makeRequest<WalletTransactionResponse>(
-          `/wallet/transactions?${queryParams}`
-        );
+        while (page <= maxPages) {
+          // Try without date filters as the endpoint might not support them
+          const queryParams = `page=${page}&per_page=${perPage}`;
 
-        if (!response.data || response.data.length === 0) {
-          break;
+          const response = await this.makeRequest<WalletTransactionResponse>(
+            `/wallet/transactions?${queryParams}`
+          );
+
+          if (!response.data || response.data.length === 0) {
+            break;
+          }
+
+          allTransactions.push(...response.data);
+
+          // If we got less than perPage, we've reached the end
+          if (response.data.length < perPage) {
+            break;
+          }
+
+          page++;
         }
 
-        allTransactions.push(...response.data);
-
-        // If we got less than perPage, we've reached the end
-        if (response.data.length < perPage) {
-          break;
-        }
-
-        page++;
+        console.log(`[Shiprocket] Fetched ${allTransactions.length} wallet transactions`);
+        this.cachedWalletTxns = allTransactions;
+        this.walletTxnsFetchedAt = new Date();
       }
-
-      console.log(`[Shiprocket] Fetched ${allTransactions.length} wallet transactions`);
 
       // Filter by date range on the client side if dates provided
       if (startDate || endDate) {
