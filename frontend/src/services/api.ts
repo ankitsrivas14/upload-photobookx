@@ -328,6 +328,31 @@ class ApiService {
     return this.request<OrdersResponse>(`/api/admin/magic-links/shopify/orders?limit=${limit}${allParam}${dateParam}${monthParam}`);
   }
 
+  async getGSTSummary(month: string, year: string): Promise<{
+    success: boolean;
+    orders: Array<{
+      id: number | string;
+      name: string;
+      createdAt: string;
+      deliveredAt: string | null;
+      customerState: string | null;
+      totalPrice: number;
+      lineItems: Array<{ title: string; quantity: number }>;
+    }>;
+    summary: {
+      totalOrders: number;
+      totalTaxableValue: number;
+      totalCGST: number;
+      totalSGST: number;
+      totalIGST: number;
+      totalGST: number;
+      totalInvoiceValue: number;
+    };
+    error?: string;
+  }> {
+    return this.request(`/api/admin/magic-links/shopify/gst-summary?month=${encodeURIComponent(month)}&year=${encodeURIComponent(year)}`);
+  }
+
   async getBacklogOrders(): Promise<{ success: boolean; orders?: BacklogOrder[]; error?: string }> {
     return this.request('/api/admin/sales/backlog-orders');
   }

@@ -1,10 +1,19 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../services/api';
-import type { ShopifyOrder } from '../services/api';
 import styles from './GSTMonthlyReports.module.css';
 
+interface GSTOrder {
+  id: number | string;
+  name: string;
+  createdAt: string;
+  deliveredAt: string | null;
+  customerState: string | null;
+  totalPrice: number;
+  lineItems: Array<{ title: string; quantity: number }>;
+}
+
 interface GSTReportData {
-  orders: ShopifyOrder[];
+  orders: GSTOrder[];
   summary: {
     totalOrders: number;
     totalTaxableValue: number;
@@ -34,26 +43,11 @@ export function GSTMonthlyReports() {
   const loadReportData = useCallback(async () => {
     setIsLoading(true);
     try {
-      // Fetch ALL orders (not just printed photos) with a higher limit for GST reporting
-      const response = await api.getOrders(10000, true); // Fetch ALL orders
-      if (response.success && response.orders) {
-        console.log('Total orders loaded:', response.orders.length);
-
-        // Debug: Check delivery statuses
-        const deliveryStatuses = response.orders.map(o => ({
-          id: o.id,
-          name: o.name,
-          deliveryStatus: o.deliveryStatus,
-          deliveredAt: o.deliveredAt,
-          createdAt: o.createdAt
-        }));
-        console.log('Order statuses sample:', deliveryStatuses.slice(0, 5));
-
-        const filteredOrders = filterOrdersByMonth(response.orders, selectedMonth, selectedYear);
-        console.log('Filtered delivered orders:', filteredOrders.length);
-
-        const summary = calculateGSTSummary(filteredOrders);
-        setReportData({ orders: filteredOrders, summary });
+      // Filtering + GST aggregation happen server-side now; we only receive the
+      // delivered-in-month orders (slimmed) and the totals.
+      const response = await api.getGSTSummary(selectedMonth, selectedYear);
+      if (response.success) {
+        setReportData({ orders: response.orders, summary: response.summary });
       }
     } catch (error) {
       console.error('Failed to load GST report data:', error);
@@ -68,69 +62,6 @@ export function GSTMonthlyReports() {
       loadReportData();
     }
   }, [selectedMonth, selectedYear, loadReportData]);
-
-  const filterOrdersByMonth = (orders: ShopifyOrder[], month: string, year: string): ShopifyOrder[] => {
-    // Filter orders that were delivered in the selected month
-    return orders.filter(order => {
-      // Check if order was delivered - check multiple possible values
-      const deliveryStatus = order.deliveryStatus?.toLowerCase() || '';
-
-      // Consider an order delivered if:
-      // 1. deliveryStatus explicitly says "delivered"
-      // 2. OR if delivery status includes "delivered"
-      const isDelivered = deliveryStatus === 'delivered' ||
-        deliveryStatus.includes('delivered');
-
-      if (!isDelivered) {
-        return false; // Only include delivered orders
-      }
-
-      // Only match orders whose delivery date falls in the selected month
-      if (!order.deliveredAt) return false;
-      const orderDate = new Date(order.deliveredAt);
-      const orderMonth = (orderDate.getMonth() + 1).toString().padStart(2, '0');
-      const orderYear = orderDate.getFullYear().toString();
-      return orderMonth === month && orderYear === year;
-    });
-  };
-
-  const calculateGSTSummary = (orders: ShopifyOrder[]) => {
-    let totalTaxableValue = 0;
-    let totalCGST = 0;
-    let totalSGST = 0;
-    const totalIGST = 0;
-    let totalGST = 0;
-    let totalInvoiceValue = 0;
-
-    orders.forEach(order => {
-      const amount = order.totalPrice ? parseFloat(order.totalPrice.toString()) : 0;
-      // Assuming 12% GST (6% CGST + 6% SGST for intra-state)
-      // For inter-state, it would be 12% IGST
-      const taxableValue = amount / 1.12; // Remove GST to get taxable value
-      const gstAmount = amount - taxableValue;
-
-      // For simplicity, assuming all orders are intra-state (CGST + SGST)
-      // In real scenario, you'd check shipping address to determine state
-      const cgst = gstAmount / 2;
-      const sgst = gstAmount / 2;
-
-      totalTaxableValue += taxableValue;
-      totalCGST += cgst;
-      totalSGST += sgst;
-      totalGST += gstAmount;
-      totalInvoiceValue += amount;
-    });
-
-    return {
-      totalOrders: orders.length,
-      totalTaxableValue,
-      totalCGST,
-      totalSGST,
-      totalIGST,
-      totalGST,
-      totalInvoiceValue,
-    };
-  };
 
   // Generate month options
   const months = [

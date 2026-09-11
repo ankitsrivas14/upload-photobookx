@@ -505,6 +505,103 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
 });
 
 /**
+ * GET /api/admin/shopify/gst-summary?month=MM&year=YYYY
+ *
+ * Server-side GST report. Previously the frontend pulled every order (up to 10k)
+ * and did the delivered-in-month filter + GST maths in the browser; this does that
+ * work here and returns only the delivered-in-month orders (slimmed) plus the totals.
+ * GST model matches the old client: flat 12% (6% CGST + 6% SGST), intra-state.
+ */
+router.get('/shopify/gst-summary', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const month = typeof req.query.month === 'string' ? req.query.month.padStart(2, '0') : '';
+    const year = typeof req.query.year === 'string' ? req.query.year : '';
+    if (!/^\d{2}$/.test(month) || !/^\d{4}$/.test(year)) {
+      return res.status(400).json({ success: false, error: 'month (MM) and year (YYYY) are required' });
+    }
+
+    const allOrders = await shopifyService.getAllOrders(10000);
+
+    // Delivery dates from DB (CSV-imported), keyed with and without the leading '#'.
+    const orderNumbers = allOrders.map((o: any) => o.name);
+    const variants = [...new Set(orderNumbers.flatMap((n: string) => [n, n.startsWith('#') ? n.substring(1) : `#${n}`]))];
+    const deliveryDates = await OrderDeliveryDate.find({ orderNumber: { $in: variants } });
+    const deliveryDateMap = new Map<string, any>();
+    deliveryDates.forEach((dd) => {
+      deliveryDateMap.set(dd.orderNumber, dd);
+      deliveryDateMap.set(dd.orderNumber.startsWith('#') ? dd.orderNumber.substring(1) : `#${dd.orderNumber}`, dd);
+    });
+
+    // Derive delivered-in-month orders using the same rules as GET /shopify/orders.
+    const filtered = allOrders.filter((order: any) => {
+      let deliveryStatus: string | null = null;
+      let deliveredAt: string | null = null;
+      if (order.fulfillments?.length) {
+        const latest = order.fulfillments[order.fulfillments.length - 1];
+        deliveryStatus = latest.shipment_status;
+        if (latest.shipment_status?.toLowerCase() === 'delivered') deliveredAt = latest.updated_at || null;
+      }
+      if (!deliveryStatus && order.fulfillment_status) deliveryStatus = order.fulfillment_status;
+      const dbDelivery = deliveryDateMap.get(order.name);
+      if (dbDelivery && !deliveredAt) deliveredAt = dbDelivery.deliveredAt.toISOString();
+
+      if (!(deliveryStatus?.toLowerCase().includes('delivered'))) return false;
+      if (!deliveredAt) return false;
+      const d = new Date(deliveredAt);
+      return String(d.getMonth() + 1).padStart(2, '0') === month && String(d.getFullYear()) === year;
+    });
+
+    // Slim per-order rows + running totals (GST derived per order, then summed).
+    let totalTaxableValue = 0, totalCGST = 0, totalSGST = 0, totalGST = 0, totalInvoiceValue = 0;
+    const orders = filtered.map((order: any) => {
+      const dbDelivery = deliveryDateMap.get(order.name);
+      let deliveredAt: string | null = null;
+      if (order.fulfillments?.length) {
+        const latest = order.fulfillments[order.fulfillments.length - 1];
+        if (latest.shipment_status?.toLowerCase() === 'delivered') deliveredAt = latest.updated_at || null;
+      }
+      if (dbDelivery && !deliveredAt) deliveredAt = dbDelivery.deliveredAt.toISOString();
+
+      const amount = order.current_total_price ? parseFloat(order.current_total_price) : 0;
+      const taxableValue = amount / 1.12;
+      const gstAmount = amount - taxableValue;
+      totalTaxableValue += taxableValue;
+      totalCGST += gstAmount / 2;
+      totalSGST += gstAmount / 2;
+      totalGST += gstAmount;
+      totalInvoiceValue += amount;
+
+      return {
+        id: order.id,
+        name: order.name,
+        createdAt: order.created_at,
+        deliveredAt,
+        customerState: dbDelivery?.addressState || null,
+        totalPrice: amount,
+        lineItems: order.line_items?.map((item: any) => ({ title: item.title, quantity: item.quantity })) || [],
+      };
+    });
+
+    return res.json({
+      success: true,
+      orders,
+      summary: {
+        totalOrders: orders.length,
+        totalTaxableValue,
+        totalCGST,
+        totalSGST,
+        totalIGST: 0,
+        totalGST,
+        totalInvoiceValue,
+      },
+    });
+  } catch (error) {
+    console.error('Error building GST summary:', error);
+    return res.status(500).json({ success: false, error: 'Failed to build GST summary' });
+  }
+});
+
+/**
  * POST /api/admin/shopify/customers/:customerId/tags
  * Add a tag to a customer
  */
