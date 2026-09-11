@@ -189,9 +189,16 @@ client back; objects still in S3 during the window.
   `K_SERVICE` is set (Cloud Functions), deferring freshness to the scheduled function; on
   Render/local the in-process fast path is unchanged. Requires `firebase-admin` (peer of
   `firebase-functions`) — installed.
-- **Remaining: the account-side deploy steps** (create project, secrets, Atlas allowlist,
-  `firebase deploy`, flip `VITE_API_URL`). Deploying enables Cloud Scheduler + Pub/Sub APIs
-  for the scheduled function automatically.
+- **Deployed & verified (2026-09-11).** Both functions are live in `photobookx-management`
+  (asia-south1, nodejs22): `api` (HTTPS) and `roasRecompute` (scheduled, every 15 min). All
+  19 secrets are in Secret Manager. `GET /api/api/health` → 200; `POST /api/api/admin/auth/login`
+  with bogus creds → 401 in ~0.24s, proving Mongo connectivity from the function. api base URL:
+  `https://asia-south1-photobookx-management.cloudfunctions.net/api` (the app mounts under
+  `/api`, so paths read `…/api/api/...`).
+- **Remaining to retire Render:** set the frontend `VITE_API_URL` to the api base URL and
+  redeploy the frontend; confirm CORS `FRONTEND_URL` matches the real frontend origin; verify
+  the app in-browser; then decommission Render. Also rotate the Atlas password exposed during
+  setup and update the `MONGO_URI` secret + `.env.local`.
 
 ## Phase 3 — Background & scheduled work
 **Scope**: make ROAS recompute (and any future jobs) durable on Functions.
