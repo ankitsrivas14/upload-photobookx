@@ -200,6 +200,13 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
   const [isPredicting, setIsPredicting] = useState(false);
 
   // Derived: ad cost per order per day — depends on orders + adSpendByDate, no fetch needed
+  // id → order lookup, so bulk handlers don't linearly scan `orders` per selected id.
+  const ordersById = useMemo(() => {
+    const map = new Map<number, ShopifyOrder>();
+    orders.forEach((o) => map.set(o.id, o));
+    return map;
+  }, [orders]);
+
   const adCostPerOrderByDate = useMemo(() => {
     const orderCountByDate: Record<string, number> = {};
     orders.forEach((o) => {
@@ -1000,9 +1007,9 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       return isDelivered || isFailed || (o.paymentMethod?.toLowerCase() === 'prepaid');
     });
 
-    let currentPL = Array.from(orderProfitLoss.entries())
-      .filter(([orderId]) => ordersCountedInPnl.some(o => o.id === orderId))
-      .reduce((sum, [, pl]) => sum + pl, 0);
+    // Sum P/L by looking each order's id up in the map (O(N)), instead of
+    // scanning the counted-orders array for every map entry (O(N²)).
+    let currentPL = ordersCountedInPnl.reduce((sum, o) => sum + (orderProfitLoss.get(o.id) ?? 0), 0);
 
     // Add ad spend for dates in the selected month
     const datesWithOrders = new Set(ordersForStats.map(o => getOrderDateKey(o.createdAt)));
@@ -1052,9 +1059,8 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       });
     }
 
-    const totalHistoricalPL = Array.from(orderProfitLoss.entries())
-      .filter(([orderId]) => historicalDeliveredOrders.some(o => o.id === orderId))
-      .reduce((sum, [, pl]) => sum + pl, 0);
+    const totalHistoricalPL = historicalDeliveredOrders
+      .reduce((sum, o) => sum + (orderProfitLoss.get(o.id) ?? 0), 0);
 
     const avgPLPerDeliveredOrder = historicalDeliveredOrders.length > 0
       ? totalHistoricalPL / historicalDeliveredOrders.length
@@ -1079,9 +1085,8 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       });
     }
 
-    const totalHistoricalLoss = Array.from(orderProfitLoss.entries())
-      .filter(([orderId]) => historicalFailedOrders.some(o => o.id === orderId))
-      .reduce((sum, [, pl]) => sum + Math.abs(pl), 0); // Sum absolute losses
+    const totalHistoricalLoss = historicalFailedOrders
+      .reduce((sum, o) => sum + Math.abs(orderProfitLoss.get(o.id) ?? 0), 0); // Sum absolute losses
 
     const avgLossPerFailedOrder = historicalFailedOrders.length > 0
       ? totalHistoricalLoss / historicalFailedOrders.length
@@ -1136,7 +1141,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
     try {
       const orderIds = Array.from(selectedOrders);
       const orderNames = orderIds.map(id => {
-        const order = orders.find(o => o.id === id);
+        const order = ordersById.get(id);
         return order?.name || '';
       });
 
@@ -1163,7 +1168,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
     try {
       const orderIds = Array.from(selectedOrders);
       const orderNames = orderIds.map(id => {
-        const order = orders.find(o => o.id === id);
+        const order = ordersById.get(id);
         return order?.name || '';
       });
 
@@ -1550,7 +1555,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
     const selectedOrderIds = Array.from(selectedOrders);
     const customerIds = Array.from(new Set(
       selectedOrderIds
-        .map(id => orders.find(o => o.id === id)?.customerId)
+        .map(id => ordersById.get(id)?.customerId)
         .filter((id): id is number => !!id)
     ));
 
@@ -1591,7 +1596,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
 
     const selectedOrderIds = Array.from(selectedOrders);
     const selectedOrdersData = selectedOrderIds
-      .map(id => orders.find(o => o.id === id))
+      .map(id => ordersById.get(id))
       .filter((o): o is ShopifyOrder => !!o);
       
     const orderNames = selectedOrdersData.map(o => o.name);
@@ -1939,9 +1944,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
                   deliveryStatus.includes('rto');
                 return isDelivered || isFailed || (o.paymentMethod?.toLowerCase() === 'prepaid');
               });
-              let totalPL = Array.from(orderProfitLoss.entries())
-                .filter(([orderId]) => ordersCountedInPnl.some(o => o.id === orderId))
-                .reduce((sum, [, pl]) => sum + pl, 0);
+              let totalPL = ordersCountedInPnl.reduce((sum, o) => sum + (orderProfitLoss.get(o.id) ?? 0), 0);
               const datesWithOrders = new Set(ordersForStats.map(o => getOrderDateKey(o.createdAt)));
               Object.entries(adSpendByDate).forEach(([dateKey, amount]) => {
                 if (!isDateInSelectedMonth(dateKey)) return;
