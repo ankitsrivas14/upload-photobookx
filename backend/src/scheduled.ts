@@ -17,7 +17,11 @@ export const roasRecompute = onSchedule(
     schedule: 'every 15 minutes',
     region: 'asia-south1',
     timeoutSeconds: 300,
-    memory: '512MiB',
+    // 1 GiB (not 512 MiB): the container loads the whole backend module graph at
+    // cold start (shared entry with `api`), and on Cloud Run memory is coupled to CPU —
+    // 512 MiB starved startup and the health check failed. It also gives the recompute
+    // headroom when it loads the order cache into memory.
+    memory: '1GiB',
     maxInstances: 1,
     secrets: ['MONGO_URI'],
   },
