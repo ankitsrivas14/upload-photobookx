@@ -50,7 +50,18 @@ Atlas, and `GET /api/health` returns ok. Frontend dev defaults to `http://localh
 
 ---
 
+## Decision (2026-09-11): keep Mongo, just replace Render
+
+Confirmed scope: **retire the Render Express backend by moving it to Cloud Functions, and
+keep MongoDB Atlas.** Firestore migration (Phase 5) and Firebase Auth (Phase 4) are **out of
+scope** for now. Firebase Storage (Phase 2) is **not required** to leave Render, but a small
+S3-credentials fix **is** mandatory (see Phase 1) because the current EC2/IMDS credential path
+does not work on Cloud Functions — S3 stays as the bucket, only how we authenticate to it changes.
+
+Active phases: **0 → 1 → 3.** Everything else deferred.
+
 ## 2. The one big decision: Firestore vs. keep MongoDB Atlas
+> **Resolved:** keep Atlas (option A). Section retained for background.
 
 This dominates cost, risk, and timeline, so decide it early.
 
@@ -124,7 +135,39 @@ instant rollback for a week).
 **Risk**: medium — connection reuse, timeouts, and the fire-and-forget change are the traps.
 **Rollback**: repoint DNS/`VITE_API_URL` back to Render.
 
-## Phase 2 — S3 → Firebase Storage (GCS)
+### Phase 1 execution checklist (keep-Mongo scope)
+
+Two sub-options for where the frontend lives:
+- **1a (minimal, recommended first):** leave the frontend on Vercel, point `VITE_API_URL` at
+  the new Functions URL. Cross-origin, so CORS must allow the Vercel domain. Nothing else moves.
+- **1b (nicer, later):** also move the SPA to Firebase Hosting with `/api/**` rewrites so the
+  API is same-origin (no CORS). Do this only after 1a is proven.
+
+Work split —
+
+**In-repo, no Firebase account needed (I can do these now):**
+1. Export the Express `app` without `listen()`; add a `functions/` entry that wraps it in a v2
+   `onRequest` (region, `timeoutSeconds: 540`, `memory: '1GiB'`, declared `secrets`).
+2. Replace top-level `mongoose.connect` + `process.exit` with a cached lazy connector
+   (connect once per warm instance, `await` before handling, low `serverSelectionTimeoutMS`,
+   never exit). Keep `dist/index.js` working for local `node` runs too.
+3. Force explicit-key S3 credentials (drop the `fromInstanceMetadata()` fallback) in
+   `routes/upload.ts` + `routes/magicLinks.ts`; keys come from Secret Manager env.
+4. Make `scheduleRoasRecompute` awaited inline on its trigger request (interim; Phase 3
+   replaces it). Nothing else relies on post-response execution.
+5. Add `firebase.json` (functions + optional hosting rewrites) and `.firebaserc`; wire a build
+   so `backend/` compiles into the functions package.
+6. CORS: add the Functions/Hosting origins alongside `upload.photobookx.com`.
+
+**Needs your Firebase account / hands:**
+7. Create the Firebase project on the **Blaze** plan; `firebase login`; set `.firebaserc`.
+8. Put every `.env` secret into Secret Manager (skip dead `ANTHROPIC_API_KEY`, `CRON_SECRET`).
+9. Atlas: allow Cloud Functions egress in the IP allowlist.
+10. `firebase deploy --only functions`; smoke-test `/api/health` + a few real endpoints.
+11. Point `VITE_API_URL` at the Functions URL; redeploy the frontend.
+12. Keep Render running for ~a week as instant rollback, then decommission.
+
+## Phase 2 — S3 → Firebase Storage (GCS)  *(deferred — not needed to leave Render)*
 **Scope**: replace S3 in the 3 files that use it; migrate existing objects.
 - Swap `@aws-sdk/client-s3` calls for the Firebase Admin Storage SDK:
   `PutObject`→`file.save()`, `GetObject`+pipe→`file.createReadStream()`, `DeleteObject`→
