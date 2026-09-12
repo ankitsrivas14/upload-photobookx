@@ -1417,6 +1417,33 @@ router.post('/daily-order-stats/backfill', requireAdmin, async (_req: Authentica
 });
 
 /**
+ * GET /api/admin/sales/monthly-order-counts
+ * Total orders (prepaid + COD) grouped by month, oldest first — for the
+ * dashboard's "Orders per month" bar chart. Aggregated in the DB.
+ */
+router.get('/monthly-order-counts', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const rows = await DailyOrderStats.aggregate([
+      {
+        $group: {
+          _id: { $substrBytes: ['$dateKey', 0, 7] }, // 'YYYY-MM'
+          orders: { $sum: { $add: ['$prepaidCount', '$codCount'] } },
+        },
+      },
+      { $sort: { _id: 1 } },
+    ]);
+
+    res.json({
+      success: true,
+      months: rows.map((r: any) => ({ month: r._id as string, orders: r.orders as number })),
+    });
+  } catch (error) {
+    console.error('Error fetching monthly order counts:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch monthly order counts' });
+  }
+});
+
+/**
  * GET /api/admin/sales/daily-pnl
  * Returns per-day P&L records.
  * Query params:
