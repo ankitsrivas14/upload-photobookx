@@ -42,6 +42,13 @@ export function DashboardPage() {
   const [roasDbRecords, setRoasDbRecords] = useState<Array<{ dateKey: string; revenue: number; adSpend: number; roas: number | null }>>([]);
   const [roasLoading, setRoasLoading] = useState(false);
 
+  // Right drawer listing the pending orders that keep a P&L day grey (incomplete)
+  const [pnlDrawer, setPnlDrawer] = useState<{
+    open: boolean;
+    date: string;
+    loading: boolean;
+    orders: Array<{ orderNumber: string; amount: number; deliveryStatus: string; trackingUrl: string | null }>;
+  }>({ open: false, date: '', loading: false, orders: [] });
   // Orders per month (prepaid + COD), oldest first — for the bar chart
   const [monthlyOrderCounts, setMonthlyOrderCounts] = useState<Array<{ month: string; orders: number }>>([]);
   // Avg orders accumulated by today's day-of-month across past months (pace benchmark)
@@ -288,6 +295,24 @@ export function DashboardPage() {
 
   const weekLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S']; // Monday to Sunday
   const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+  // A grey bar = incomplete day (has orders not yet delivered/failed). Clicking one
+  // opens the drawer with the pending orders responsible.
+  const isGreyDay = (entry: any): boolean =>
+    !!entry && entry.unrealizedProfit !== null && entry.bookedProfit === null;
+
+  const openIncompleteDrawer = async (entry: any) => {
+    const e = entry?.payload ?? entry;
+    if (!isGreyDay(e) || !e.dateKey) return;
+    setPnlDrawer({ open: true, date: e.dateKey, loading: true, orders: [] });
+    try {
+      const res = await api.getIncompleteDayOrders(e.dateKey);
+      setPnlDrawer({ open: true, date: e.dateKey, loading: false, orders: res.success ? res.orders : [] });
+    } catch (err) {
+      console.error('Failed to load incomplete-day orders:', err);
+      setPnlDrawer({ open: true, date: e.dateKey, loading: false, orders: [] });
+    }
+  };
 
   const getPnlForDateKey = (dateKey: string): number | null => {
     const val = heatmapByDate[dateKey];
@@ -1048,15 +1073,13 @@ export function DashboardPage() {
                 name="Profit"
                 maxBarSize={24}
                 radius={[2, 2, 2, 2]}
+                onClick={(data: any) => openIncompleteDrawer(data)}
               >
                 {profitChartData.map((entry, index) => (
                   <Cell
                     key={`cell-${index}`}
-                    fill={
-                      entry.unrealizedProfit !== null && entry.bookedProfit === null
-                        ? '#e2e8f0'
-                        : (entry.bookedProfit ?? 0) >= 0 ? '#10b981' : '#ef4444'
-                    }
+                    cursor={isGreyDay(entry) ? 'pointer' : 'default'}
+                    fill={isGreyDay(entry) ? '#e2e8f0' : (entry.bookedProfit ?? 0) >= 0 ? '#10b981' : '#ef4444'}
                   />
                 ))}
               </Bar>
@@ -1741,6 +1764,80 @@ export function DashboardPage() {
             <div className={styles.modalBody}>
               <SalesPage initialFilter={salesModalFilter} />
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Incomplete-day (grey bar) pending-orders drawer */}
+      {pnlDrawer.open && (
+        <div
+          onClick={() => setPnlDrawer((p) => ({ ...p, open: false }))}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.35)', zIndex: 1000 }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: 'absolute', top: 0, right: 0, height: '100%', width: 'min(440px, 92vw)',
+              background: '#fff', boxShadow: '-8px 0 24px rgba(0,0,0,0.15)',
+              display: 'flex', flexDirection: 'column',
+            }}
+          >
+            <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <div style={{ fontSize: '1rem', fontWeight: 600 }}>Pending orders</div>
+                <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: 2 }}>
+                  {pnlDrawer.date ? new Date(pnlDrawer.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' }) : ''} — not yet delivered/failed, so this day is grey
+                </div>
+              </div>
+              <button
+                onClick={() => setPnlDrawer((p) => ({ ...p, open: false }))}
+                style={{ border: 'none', background: 'transparent', fontSize: '1.25rem', cursor: 'pointer', color: '#64748b', lineHeight: 1 }}
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ padding: '0.5rem 1.25rem 1rem', overflowY: 'auto', flex: 1 }}>
+              {pnlDrawer.loading ? (
+                <div style={{ color: '#64748b', padding: '1rem 0' }}>Loading…</div>
+              ) : pnlDrawer.orders.length === 0 ? (
+                <div style={{ color: '#64748b', padding: '1rem 0' }}>No pending orders found for this day.</div>
+              ) : (
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                  <thead>
+                    <tr style={{ textAlign: 'left', color: '#64748b' }}>
+                      <th style={{ padding: '8px 4px', fontWeight: 500 }}>Order</th>
+                      <th style={{ padding: '8px 4px', fontWeight: 500, textAlign: 'right' }}>Amount</th>
+                      <th style={{ padding: '8px 4px', fontWeight: 500 }}>Status</th>
+                      <th style={{ padding: '8px 4px', fontWeight: 500 }}>Track</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pnlDrawer.orders.map((o) => (
+                      <tr key={o.orderNumber} style={{ borderTop: '1px solid #f1f5f9' }}>
+                        <td style={{ padding: '8px 4px', fontWeight: 500 }}>{o.orderNumber}</td>
+                        <td style={{ padding: '8px 4px', textAlign: 'right' }}>₹{o.amount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                        <td style={{ padding: '8px 4px', color: '#64748b', textTransform: 'capitalize' }}>{o.deliveryStatus.replace(/_/g, ' ')}</td>
+                        <td style={{ padding: '8px 4px' }}>
+                          {o.trackingUrl ? (
+                            <a href={o.trackingUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#4f46e5', fontWeight: 500 }}>Track</a>
+                          ) : (
+                            <span style={{ color: '#cbd5e1' }}>—</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            {!pnlDrawer.loading && pnlDrawer.orders.length > 0 && (
+              <div style={{ padding: '0.75rem 1.25rem', borderTop: '1px solid #e2e8f0', fontSize: '0.8rem', color: '#64748b' }}>
+                {pnlDrawer.orders.length} pending order{pnlDrawer.orders.length > 1 ? 's' : ''} · Total ₹{pnlDrawer.orders.reduce((s, o) => s + o.amount, 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+              </div>
+            )}
           </div>
         </div>
       )}

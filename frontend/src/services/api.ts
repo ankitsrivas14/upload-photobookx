@@ -1340,6 +1340,15 @@ async saveAdsPerformance(adData: any[], level?: string, date?: string): Promise<
     return this.request('/api/admin/sales/monthly-revenue');
   }
 
+  async getIncompleteDayOrders(date: string): Promise<{
+    success: boolean;
+    date: string;
+    orders: Array<{ orderNumber: string; amount: number; deliveryStatus: string; trackingUrl: string | null }>;
+    error?: string;
+  }> {
+    return this.request(`/api/admin/sales/incomplete-day-orders?date=${encodeURIComponent(date)}`);
+  }
+
   async getDailyOrderStats(startDate?: string, endDate?: string): Promise<{
     success: boolean;
     stats?: {

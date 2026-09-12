@@ -1518,6 +1518,59 @@ router.get('/monthly-revenue', requireAdmin, async (_req: AuthenticatedRequest, 
 });
 
 /**
+ * GET /api/admin/sales/incomplete-day-orders?date=YYYY-MM-DD
+ * The orders that keep a P&L day "incomplete" (grey bar): non-cancelled orders on
+ * that day (IST creation) that are NOT yet in a final state (delivered/failed/RTO).
+ * Returns order number, amount and tracking link for the dashboard drawer.
+ */
+router.get('/incomplete-day-orders', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const date = typeof req.query.date === 'string' ? req.query.date : '';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ success: false, error: 'date (YYYY-MM-DD) is required' });
+    }
+
+    const STORE_TIMEZONE = 'Asia/Kolkata';
+    const [orders, rtoRows] = await Promise.all([
+      shopifyService.getAllOrders(10000),
+      RTOOrder.find({}, { shopifyOrderId: 1, _id: 0 }).lean(),
+    ]);
+    const rtoSet = new Set((rtoRows as any[]).map((r) => r.shopifyOrderId as number));
+
+    // Mirrors dailyPnlService: latest fulfillment status, then order-level status.
+    const deliveryStatus = (o: any): string => {
+      let s = '';
+      if (o.fulfillments?.length) s = (o.fulfillments[o.fulfillments.length - 1].shipment_status ?? '').toLowerCase();
+      if (!s && o.fulfillment_status) s = String(o.fulfillment_status).toLowerCase();
+      return s;
+    };
+    const isFinal = (o: any): boolean => {
+      if (rtoSet.has(o.id)) return true;
+      const s = deliveryStatus(o);
+      return s === 'delivered' || s === 'failure' || s.includes('failed') || s.includes('rto');
+    };
+
+    const pending = (orders as any[])
+      .filter((o) => {
+        if (o.cancelled_at || !o.created_at) return false;
+        const dk = new Date(o.created_at).toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+        return dk === date && !isFinal(o);
+      })
+      .map((o) => ({
+        orderNumber: o.name,
+        amount: o.current_total_price ? parseFloat(o.current_total_price) : 0,
+        deliveryStatus: deliveryStatus(o) || 'unfulfilled',
+        trackingUrl: o.fulfillments?.length ? (o.fulfillments[o.fulfillments.length - 1].tracking_url || null) : null,
+      }));
+
+    res.json({ success: true, date, orders: pending });
+  } catch (error) {
+    console.error('Error fetching incomplete-day orders:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch incomplete-day orders' });
+  }
+});
+
+/**
  * GET /api/admin/sales/daily-pnl
  * Returns per-day P&L records.
  * Query params:
