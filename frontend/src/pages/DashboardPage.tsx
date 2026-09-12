@@ -44,6 +44,8 @@ export function DashboardPage() {
 
   // Orders per month (prepaid + COD), oldest first — for the bar chart
   const [monthlyOrderCounts, setMonthlyOrderCounts] = useState<Array<{ month: string; orders: number }>>([]);
+  // Gross revenue per month, oldest first — for the bar chart
+  const [monthlyRevenue, setMonthlyRevenue] = useState<Array<{ month: string; revenue: number }>>([]);
   // Heatmap P&L from DB — keyed by dateKey
   const [heatmapByDate, setHeatmapByDate] = useState<Record<string, number>>({});
   // Full yearly daily records — used for monthly profit aggregation
@@ -221,6 +223,15 @@ export function DashboardPage() {
     }
   }, []);
 
+  const loadMonthlyRevenue = useCallback(async () => {
+    try {
+      const res = await api.getMonthlyRevenue();
+      if (res.success) setMonthlyRevenue(res.months);
+    } catch (err) {
+      console.error('Failed to load monthly revenue:', err);
+    }
+  }, []);
+
   const loadHeatmap = useCallback(async (year: number) => {
     try {
       const res = await api.getDailyPnl({ year: String(year) });
@@ -246,11 +257,12 @@ export function DashboardPage() {
       loadShipping();
       loadOrderStats();
       loadMonthlyOrderCounts();
+      loadMonthlyRevenue();
       loadPnlChart(selectedYear, selectedMonth);
       loadHeatmap(selectedYear);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount
-  }, [user, loadBreakevenMetrics, loadROAS, loadShipping, loadOrderStats, loadMonthlyOrderCounts, loadPnlChart, loadHeatmap]);
+  }, [user, loadBreakevenMetrics, loadROAS, loadShipping, loadOrderStats, loadMonthlyOrderCounts, loadMonthlyRevenue, loadPnlChart, loadHeatmap]);
 
   // Re-fetch bar chart when selected month/year changes
   useEffect(() => {
@@ -290,14 +302,22 @@ export function DashboardPage() {
   };
 
   // Orders-per-month bar chart data (oldest → newest)
-  const monthlyOrderChartData = monthlyOrderCounts.map((m) => {
-    const [y, mo] = m.month.split('-').map(Number);
-    return {
-      label: new Date(y, mo - 1, 1).toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
-      month: m.month,
-      orders: m.orders,
-    };
-  });
+  const monthLabel = (ym: string) => {
+    const [y, mo] = ym.split('-').map(Number);
+    return new Date(y, mo - 1, 1).toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+  };
+  const monthlyOrderChartData = monthlyOrderCounts.map((m) => ({
+    label: monthLabel(m.month),
+    month: m.month,
+    orders: m.orders,
+  }));
+
+  // Revenue-per-month bar chart data (oldest → newest)
+  const monthlyRevenueChartData = monthlyRevenue.map((m) => ({
+    label: monthLabel(m.month),
+    month: m.month,
+    revenue: m.revenue,
+  }));
 
   // ROAS chart data — built from DB records fetched on Go / mount
   const roasChartData = roasDbRecords.map((r) => ({
@@ -822,6 +842,51 @@ export function DashboardPage() {
                 formatter={(value) => [`${Number(value).toLocaleString('en-IN')} orders`, 'Orders']}
               />
               <Bar dataKey="orders" name="Orders" fill="#6366f1" maxBarSize={48} radius={[3, 3, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </section>
+
+      <section className={styles.section}>
+        <div>
+          <h2 className={styles['section-title']}>Revenue per Month</h2>
+          <p className={styles['section-desc']}>
+            Gross order value each month (prepaid + COD, excludes cancelled). Each bar is a month.
+          </p>
+        </div>
+        <div className={styles.chartWrap}>
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart
+              data={monthlyRevenueChartData}
+              margin={{ top: 12, right: 12, left: 0, bottom: 8 }}
+              barCategoryGap="20%"
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
+              <XAxis
+                dataKey="label"
+                tick={{ fontSize: 11, fill: 'var(--chart-muted)' }}
+                tickLine={false}
+                axisLine={{ stroke: 'var(--chart-axis)' }}
+              />
+              <YAxis
+                tick={{ fontSize: 11, fill: 'var(--chart-muted)' }}
+                tickLine={false}
+                axisLine={false}
+                width={52}
+                tickFormatter={(v) => (v >= 1000 ? `₹${(v / 1000).toFixed(0)}k` : `₹${v}`)}
+              />
+              <Tooltip
+                cursor={{ fill: 'var(--chart-grid)', opacity: 0.35 }}
+                contentStyle={{
+                  border: 'none',
+                  borderRadius: 8,
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+                  padding: '10px 14px',
+                }}
+                labelStyle={{ color: 'var(--chart-muted)', fontWeight: 500, marginBottom: 4 }}
+                formatter={(value) => [`₹${Number(value).toLocaleString('en-IN')}`, 'Revenue']}
+              />
+              <Bar dataKey="revenue" name="Revenue" fill="#10b981" maxBarSize={48} radius={[3, 3, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>

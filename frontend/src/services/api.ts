@@ -1328,6 +1328,14 @@ async saveAdsPerformance(adData: any[], level?: string, date?: string): Promise<
     return this.request('/api/admin/sales/monthly-order-counts');
   }
 
+  async getMonthlyRevenue(): Promise<{
+    success: boolean;
+    months: Array<{ month: string; revenue: number }>;
+    error?: string;
+  }> {
+    return this.request('/api/admin/sales/monthly-revenue');
+  }
+
   async getDailyOrderStats(startDate?: string, endDate?: string): Promise<{
     success: boolean;
     stats?: {

@@ -1444,6 +1444,39 @@ router.get('/monthly-order-counts', requireAdmin, async (_req: AuthenticatedRequ
 });
 
 /**
+ * GET /api/admin/sales/monthly-revenue
+ * Gross order value (sum of order totals) grouped by month, oldest first — for the
+ * dashboard's "Revenue per month" bar chart. Uses the same basis as the order-count
+ * chart: non-cancelled orders, by IST creation date, from the data start date.
+ */
+router.get('/monthly-revenue', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const STORE_TIMEZONE = 'Asia/Kolkata';
+    const DATA_START_DATE = '2026-01-28';
+    const orders = await shopifyService.getAllOrders(10000);
+
+    const byMonth = new Map<string, number>();
+    for (const o of orders as any[]) {
+      if (!o.created_at || o.cancelled_at) continue;
+      const dateKey = new Date(o.created_at).toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+      if (dateKey < DATA_START_DATE) continue;
+      const month = dateKey.substring(0, 7); // 'YYYY-MM'
+      const amount = o.current_total_price ? parseFloat(o.current_total_price) : 0;
+      byMonth.set(month, (byMonth.get(month) || 0) + amount);
+    }
+
+    const months = [...byMonth.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([month, revenue]) => ({ month, revenue: Math.round(revenue) }));
+
+    res.json({ success: true, months });
+  } catch (error) {
+    console.error('Error fetching monthly revenue:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch monthly revenue' });
+  }
+});
+
+/**
  * GET /api/admin/sales/daily-pnl
  * Returns per-day P&L records.
  * Query params:
