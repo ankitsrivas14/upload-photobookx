@@ -16,6 +16,7 @@ import {
   PieChart,
   Pie,
 } from 'recharts';
+import toast from 'react-hot-toast';
 import { api } from '../services/api';
 import type { AdminUser } from '../services/api';
 import { SalesPage, type SalesPageProps } from './SalesPage';
@@ -49,6 +50,9 @@ export function DashboardPage() {
     loading: boolean;
     orders: Array<{ orderNumber: string; amount: number; deliveryStatus: string; trackingUrl: string | null }>;
   }>({ open: false, date: '', loading: false, orders: [] });
+  // Which drawer row's 3-dot menu is open, and which order is being updated
+  const [drawerMenuOrder, setDrawerMenuOrder] = useState<string | null>(null);
+  const [markingOrder, setMarkingOrder] = useState<string | null>(null);
   // Orders per month (prepaid + COD), oldest first — for the bar chart
   const [monthlyOrderCounts, setMonthlyOrderCounts] = useState<Array<{ month: string; orders: number }>>([]);
   // Avg orders accumulated by today's day-of-month across past months (pace benchmark)
@@ -304,6 +308,7 @@ export function DashboardPage() {
   const openIncompleteDrawer = async (entry: any) => {
     const e = entry?.payload ?? entry;
     if (!isGreyDay(e) || !e.dateKey) return;
+    setDrawerMenuOrder(null);
     setPnlDrawer({ open: true, date: e.dateKey, loading: true, orders: [] });
     try {
       const res = await api.getIncompleteDayOrders(e.dateKey);
@@ -311,6 +316,32 @@ export function DashboardPage() {
     } catch (err) {
       console.error('Failed to load incomplete-day orders:', err);
       setPnlDrawer({ open: true, date: e.dateKey, loading: false, orders: [] });
+    }
+  };
+
+  const markDrawerOrder = async (orderNumber: string, status: 'Delivered' | 'Failed') => {
+    setDrawerMenuOrder(null);
+    setMarkingOrder(orderNumber);
+    try {
+      const res = await api.updateOrderDeliveryStatus(orderNumber, status);
+      if (res.success) {
+        toast.success(`${orderNumber} marked as ${status}`);
+        // Drop it from the drawer — it's no longer pending.
+        setPnlDrawer((p) => ({ ...p, orders: p.orders.filter((o) => o.orderNumber !== orderNumber) }));
+        // Give the async recompute a moment, then refresh the chart/heatmap.
+        setTimeout(() => {
+          loadPnlChart(selectedYear, selectedMonth);
+          loadHeatmap(selectedYear);
+          loadOrderStats();
+        }, 1200);
+      } else {
+        toast.error(res.error || 'Failed to update status');
+      }
+    } catch (err) {
+      console.error('Failed to mark order status:', err);
+      toast.error('Failed to update status');
+    } finally {
+      setMarkingOrder(null);
     }
   };
 
@@ -1811,6 +1842,7 @@ export function DashboardPage() {
                       <th style={{ padding: '8px 4px', fontWeight: 500, textAlign: 'right' }}>Amount</th>
                       <th style={{ padding: '8px 4px', fontWeight: 500 }}>Status</th>
                       <th style={{ padding: '8px 4px', fontWeight: 500 }}>Track</th>
+                      <th style={{ padding: '8px 4px', fontWeight: 500, width: 28 }} />
                     </tr>
                   </thead>
                   <tbody>
@@ -1824,6 +1856,41 @@ export function DashboardPage() {
                             <a href={o.trackingUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#4f46e5', fontWeight: 500 }}>Track</a>
                           ) : (
                             <span style={{ color: '#cbd5e1' }}>—</span>
+                          )}
+                        </td>
+                        <td style={{ padding: '8px 4px', position: 'relative', textAlign: 'right' }}>
+                          {markingOrder === o.orderNumber ? (
+                            <span style={{ color: '#94a3b8', fontSize: '0.75rem' }}>…</span>
+                          ) : (
+                            <button
+                              onClick={() => setDrawerMenuOrder((cur) => (cur === o.orderNumber ? null : o.orderNumber))}
+                              aria-label="Order actions"
+                              style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#64748b', fontSize: '1.1rem', lineHeight: 1, padding: '0 4px' }}
+                            >
+                              ⋮
+                            </button>
+                          )}
+                          {drawerMenuOrder === o.orderNumber && (
+                            <div
+                              style={{
+                                position: 'absolute', right: 4, top: '100%', zIndex: 10, minWidth: 160,
+                                background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8,
+                                boxShadow: '0 6px 18px rgba(0,0,0,0.12)', overflow: 'hidden',
+                              }}
+                            >
+                              <button
+                                onClick={() => markDrawerOrder(o.orderNumber, 'Delivered')}
+                                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 14px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: '0.85rem', color: '#059669' }}
+                              >
+                                Mark as Delivered
+                              </button>
+                              <button
+                                onClick={() => markDrawerOrder(o.orderNumber, 'Failed')}
+                                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 14px', border: 'none', borderTop: '1px solid #f1f5f9', background: 'transparent', cursor: 'pointer', fontSize: '0.85rem', color: '#dc2626' }}
+                              >
+                                Mark as Failed
+                              </button>
+                            </div>
                           )}
                         </td>
                       </tr>

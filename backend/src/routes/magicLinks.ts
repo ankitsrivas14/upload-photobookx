@@ -15,7 +15,7 @@ import { Ticket } from '../models';
 import archiver from 'archiver';
 import { recomputeShippingForDate, getOrderDateKey as getShippingOrderDateKey, backfillShippingStats } from '../services/shippingStatsService';
 import { recomputeOrderStatsForDate, backfillOrderStats } from '../services/orderStatsService';
-import { backfillDailyPnl } from '../services/dailyPnlService';
+import { backfillDailyPnl, recomputePnlForDate } from '../services/dailyPnlService';
 
 const router = Router();
 
@@ -773,10 +773,14 @@ router.post('/shopify/update-delivery-status', requireAdmin, async (req: Authent
       message: `Order ${orderNumber} marked as ${status}`,
     });
 
-    // Async recompute order stats for the affected date
+    // Async recompute order stats + P&L for the affected date (so the dashboard's
+    // completion state / bar colour reflects the new status).
     getShippingOrderDateKey(orderNumber)
       .then((dateKey) => {
-        if (dateKey) recomputeOrderStatsForDate(dateKey).catch(console.error);
+        if (dateKey) {
+          recomputeOrderStatsForDate(dateKey).catch(console.error);
+          recomputePnlForDate(dateKey).catch(console.error);
+        }
       })
       .catch(console.error);
   } catch (error) {
