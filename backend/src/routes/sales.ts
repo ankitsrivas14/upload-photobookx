@@ -1424,6 +1424,8 @@ router.post('/daily-order-stats/backfill', requireAdmin, async (_req: Authentica
 router.get('/monthly-order-counts', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
   try {
     const rows = await DailyOrderStats.aggregate([
+      // Skip the partial Jan 2026 start month (data began 28 Jan).
+      { $match: { dateKey: { $gte: '2026-02-01' } } },
       {
         $group: {
           _id: { $substrBytes: ['$dateKey', 0, 7] }, // 'YYYY-MM'
@@ -1452,7 +1454,8 @@ router.get('/monthly-order-counts', requireAdmin, async (_req: AuthenticatedRequ
 router.get('/monthly-revenue', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
   try {
     const STORE_TIMEZONE = 'Asia/Kolkata';
-    const DATA_START_DATE = '2026-01-28';
+    // Start at Feb — skip the partial Jan 2026 start month (data began 28 Jan).
+    const DATA_START_DATE = '2026-02-01';
     const orders = await shopifyService.getAllOrders(10000);
 
     const byMonth = new Map<string, number>();

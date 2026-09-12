@@ -319,6 +319,14 @@ export function DashboardPage() {
     revenue: m.revenue,
   }));
 
+  // Averages across the shown months, for the reference lines
+  const avgMonthlyOrders = monthlyOrderChartData.length
+    ? monthlyOrderChartData.reduce((s, d) => s + d.orders, 0) / monthlyOrderChartData.length
+    : 0;
+  const avgMonthlyRevenue = monthlyRevenueChartData.length
+    ? monthlyRevenueChartData.reduce((s, d) => s + d.revenue, 0) / monthlyRevenueChartData.length
+    : 0;
+
   // ROAS chart data — built from DB records fetched on Go / mount
   const roasChartData = roasDbRecords.map((r) => ({
     date: new Date(r.dateKey).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: STORE_TIMEZONE }),
@@ -814,7 +822,7 @@ export function DashboardPage() {
             <BarChart
               data={monthlyOrderChartData}
               margin={{ top: 12, right: 12, left: 0, bottom: 8 }}
-              barCategoryGap="20%"
+              barCategoryGap="6%"
             >
               <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
               <XAxis
@@ -841,7 +849,20 @@ export function DashboardPage() {
                 labelStyle={{ color: 'var(--chart-muted)', fontWeight: 500, marginBottom: 4 }}
                 formatter={(value) => [`${Number(value).toLocaleString('en-IN')} orders`, 'Orders']}
               />
-              <Bar dataKey="orders" name="Orders" fill="#6366f1" maxBarSize={48} radius={[3, 3, 0, 0]} />
+              <Bar dataKey="orders" name="Orders" fill="#6366f1" radius={[3, 3, 0, 0]} />
+              <ReferenceLine
+                y={avgMonthlyOrders}
+                stroke="#4f46e5"
+                strokeDasharray="4 4"
+                strokeWidth={1.5}
+                label={{
+                  value: `Avg ${Math.round(avgMonthlyOrders).toLocaleString('en-IN')}`,
+                  position: 'insideTopRight',
+                  fill: '#4f46e5',
+                  fontSize: 11,
+                  fontWeight: 600,
+                }}
+              />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -859,7 +880,7 @@ export function DashboardPage() {
             <BarChart
               data={monthlyRevenueChartData}
               margin={{ top: 12, right: 12, left: 0, bottom: 8 }}
-              barCategoryGap="20%"
+              barCategoryGap="6%"
             >
               <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
               <XAxis
@@ -886,7 +907,20 @@ export function DashboardPage() {
                 labelStyle={{ color: 'var(--chart-muted)', fontWeight: 500, marginBottom: 4 }}
                 formatter={(value) => [`₹${Number(value).toLocaleString('en-IN')}`, 'Revenue']}
               />
-              <Bar dataKey="revenue" name="Revenue" fill="#10b981" maxBarSize={48} radius={[3, 3, 0, 0]} />
+              <Bar dataKey="revenue" name="Revenue" fill="#10b981" radius={[3, 3, 0, 0]} />
+              <ReferenceLine
+                y={avgMonthlyRevenue}
+                stroke="#059669"
+                strokeDasharray="4 4"
+                strokeWidth={1.5}
+                label={{
+                  value: `Avg ₹${Math.round(avgMonthlyRevenue).toLocaleString('en-IN')}`,
+                  position: 'insideTopRight',
+                  fill: '#059669',
+                  fontSize: 11,
+                  fontWeight: 600,
+                }}
+              />
             </BarChart>
           </ResponsiveContainer>
         </div>
