@@ -338,6 +338,43 @@ class ShopifyService {
   }
 
   /**
+   * Optimistically patch a single order's delivery status inside the cached order
+   * lists, instead of wiping the whole cache. Wiping forced the next read to refetch
+   * every order from Shopify (slow); patching keeps the cache warm and lets the
+   * dashboards reflect the change immediately. The next full sync reconciles with
+   * Shopify's real state. `shipmentStatus` should be 'delivered' or 'failure'.
+   */
+  async patchCachedOrderDeliveryStatus(orderNumber: string, shipmentStatus: string): Promise<void> {
+    try {
+      const bare = orderNumber.replace(/^#/, '');
+      const matches = (name: string) => name === orderNumber || name.replace(/^#/, '') === bare;
+
+      const docs = await ShopifyOrderCache.find({ cacheKey: { $regex: /^all_orders_/ } });
+      for (const doc of docs) {
+        let changed = false;
+        for (const o of (doc.orders as any[])) {
+          if (!o?.name || !matches(o.name)) continue;
+          const now = new Date().toISOString();
+          if (Array.isArray(o.fulfillments) && o.fulfillments.length > 0) {
+            o.fulfillments[o.fulfillments.length - 1].shipment_status = shipmentStatus;
+            o.fulfillments[o.fulfillments.length - 1].updated_at = now;
+          } else {
+            o.fulfillments = [{ shipment_status: shipmentStatus, updated_at: now }];
+          }
+          changed = true;
+        }
+        if (changed) {
+          doc.markModified('orders');
+          await doc.save();
+        }
+      }
+    } catch (error) {
+      console.error('Error patching cached order status:', error);
+      // Non-fatal: the Shopify write already succeeded; a later sync will reconcile.
+    }
+  }
+
+  /**
    * Get orders that contain the printed photos product
    * Fetches more orders and filters to only those with the product
    * Uses caching with 5-minute TTL
@@ -863,8 +900,9 @@ class ShopifyService {
         }
       );
 
-      // Clear orders cache so the change is reflected
-      await this.clearOrdersCache();
+      // Reflect the change in the cache WITHOUT wiping it — wiping forced the next
+      // read to refetch every order from Shopify (slow). Patch the one order instead.
+      await this.patchCachedOrderDeliveryStatus(orderNumber, status === 'Delivered' ? 'delivered' : 'failure');
 
       return { success: true };
     } catch (error: any) {
