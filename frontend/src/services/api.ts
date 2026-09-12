@@ -1323,6 +1323,8 @@ async saveAdsPerformance(adData: any[], level?: string, date?: string): Promise<
   async getMonthlyOrderCounts(): Promise<{
     success: boolean;
     months: Array<{ month: string; orders: number }>;
+    paceAverage: number;
+    paceDay: number;
     error?: string;
   }> {
     return this.request('/api/admin/sales/monthly-order-counts');
@@ -1331,6 +1333,8 @@ async saveAdsPerformance(adData: any[], level?: string, date?: string): Promise<
   async getMonthlyRevenue(): Promise<{
     success: boolean;
     months: Array<{ month: string; revenue: number }>;
+    paceAverage: number;
+    paceDay: number;
     error?: string;
   }> {
     return this.request('/api/admin/sales/monthly-revenue');

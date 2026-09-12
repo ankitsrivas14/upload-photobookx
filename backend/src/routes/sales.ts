@@ -1435,9 +1435,31 @@ router.get('/monthly-order-counts', requireAdmin, async (_req: AuthenticatedRequ
       { $sort: { _id: 1 } },
     ]);
 
+    // "Pace" benchmark: average orders accumulated by today's day-of-month across
+    // past complete months (excludes the current month and the partial Jan).
+    const todayIST = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+    const currentMonth = todayIST.substring(0, 7);
+    const dayOfMonth = todayIST.substring(8, 10); // zero-padded 'DD'
+    const paceRows = await DailyOrderStats.aggregate([
+      { $match: { dateKey: { $gte: '2026-02-01' } } },
+      { $match: { $expr: { $lte: [{ $substrBytes: ['$dateKey', 8, 2] }, dayOfMonth] } } },
+      {
+        $group: {
+          _id: { $substrBytes: ['$dateKey', 0, 7] },
+          orders: { $sum: { $add: ['$prepaidCount', '$codCount'] } },
+        },
+      },
+    ]);
+    const pastPace = (paceRows as any[]).filter((r) => r._id < currentMonth);
+    const paceAverage = pastPace.length
+      ? Math.round(pastPace.reduce((s, r) => s + r.orders, 0) / pastPace.length)
+      : 0;
+
     res.json({
       success: true,
       months: rows.map((r: any) => ({ month: r._id as string, orders: r.orders as number })),
+      paceAverage,
+      paceDay: Number(dayOfMonth),
     });
   } catch (error) {
     console.error('Error fetching monthly order counts:', error);
@@ -1458,7 +1480,14 @@ router.get('/monthly-revenue', requireAdmin, async (_req: AuthenticatedRequest, 
     const DATA_START_DATE = '2026-02-01';
     const orders = await shopifyService.getAllOrders(10000);
 
+    // "Pace" benchmark: average revenue accumulated by today's day-of-month across
+    // past complete months (excludes the current month and the partial Jan).
+    const todayIST = new Date().toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+    const currentMonth = todayIST.substring(0, 7);
+    const dayOfMonth = Number(todayIST.substring(8, 10));
+
     const byMonth = new Map<string, number>();
+    const paceByMonth = new Map<string, number>();
     for (const o of orders as any[]) {
       if (!o.created_at || o.cancelled_at) continue;
       const dateKey = new Date(o.created_at).toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
@@ -1466,13 +1495,22 @@ router.get('/monthly-revenue', requireAdmin, async (_req: AuthenticatedRequest, 
       const month = dateKey.substring(0, 7); // 'YYYY-MM'
       const amount = o.current_total_price ? parseFloat(o.current_total_price) : 0;
       byMonth.set(month, (byMonth.get(month) || 0) + amount);
+      // Accumulate only up to today's day-of-month, for past months (pace benchmark).
+      if (Number(dateKey.substring(8, 10)) <= dayOfMonth && month < currentMonth) {
+        paceByMonth.set(month, (paceByMonth.get(month) || 0) + amount);
+      }
     }
 
     const months = [...byMonth.entries()]
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([month, revenue]) => ({ month, revenue: Math.round(revenue) }));
 
-    res.json({ success: true, months });
+    const paceValues = [...paceByMonth.values()];
+    const paceAverage = paceValues.length
+      ? Math.round(paceValues.reduce((s, v) => s + v, 0) / paceValues.length)
+      : 0;
+
+    res.json({ success: true, months, paceAverage, paceDay: dayOfMonth });
   } catch (error) {
     console.error('Error fetching monthly revenue:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch monthly revenue' });

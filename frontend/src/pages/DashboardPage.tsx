@@ -44,8 +44,12 @@ export function DashboardPage() {
 
   // Orders per month (prepaid + COD), oldest first — for the bar chart
   const [monthlyOrderCounts, setMonthlyOrderCounts] = useState<Array<{ month: string; orders: number }>>([]);
+  // Avg orders accumulated by today's day-of-month across past months (pace benchmark)
+  const [orderPace, setOrderPace] = useState<{ average: number; day: number }>({ average: 0, day: 0 });
   // Gross revenue per month, oldest first — for the bar chart
   const [monthlyRevenue, setMonthlyRevenue] = useState<Array<{ month: string; revenue: number }>>([]);
+  // Avg revenue accumulated by today's day-of-month across past months (pace benchmark)
+  const [revenuePace, setRevenuePace] = useState<{ average: number; day: number }>({ average: 0, day: 0 });
   // Heatmap P&L from DB — keyed by dateKey
   const [heatmapByDate, setHeatmapByDate] = useState<Record<string, number>>({});
   // Full yearly daily records — used for monthly profit aggregation
@@ -217,7 +221,10 @@ export function DashboardPage() {
   const loadMonthlyOrderCounts = useCallback(async () => {
     try {
       const res = await api.getMonthlyOrderCounts();
-      if (res.success) setMonthlyOrderCounts(res.months);
+      if (res.success) {
+        setMonthlyOrderCounts(res.months);
+        setOrderPace({ average: res.paceAverage, day: res.paceDay });
+      }
     } catch (err) {
       console.error('Failed to load monthly order counts:', err);
     }
@@ -226,7 +233,10 @@ export function DashboardPage() {
   const loadMonthlyRevenue = useCallback(async () => {
     try {
       const res = await api.getMonthlyRevenue();
-      if (res.success) setMonthlyRevenue(res.months);
+      if (res.success) {
+        setMonthlyRevenue(res.months);
+        setRevenuePace({ average: res.paceAverage, day: res.paceDay });
+      }
     } catch (err) {
       console.error('Failed to load monthly revenue:', err);
     }
@@ -305,6 +315,11 @@ export function DashboardPage() {
   const monthLabel = (ym: string) => {
     const [y, mo] = ym.split('-').map(Number);
     return new Date(y, mo - 1, 1).toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+  };
+  const ordinal = (n: number) => {
+    const s = ['th', 'st', 'nd', 'rd'];
+    const v = n % 100;
+    return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`;
   };
   const monthlyOrderChartData = monthlyOrderCounts.map((m) => ({
     label: monthLabel(m.month),
@@ -863,6 +878,21 @@ export function DashboardPage() {
                   fontWeight: 600,
                 }}
               />
+              {orderPace.day > 0 && (
+                <ReferenceLine
+                  y={orderPace.average}
+                  stroke="#f59e0b"
+                  strokeDasharray="4 4"
+                  strokeWidth={1.5}
+                  label={{
+                    value: `By ${ordinal(orderPace.day)}: avg ${orderPace.average.toLocaleString('en-IN')}`,
+                    position: 'insideBottomRight',
+                    fill: '#d97706',
+                    fontSize: 11,
+                    fontWeight: 600,
+                  }}
+                />
+              )}
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -921,6 +951,21 @@ export function DashboardPage() {
                   fontWeight: 600,
                 }}
               />
+              {revenuePace.day > 0 && (
+                <ReferenceLine
+                  y={revenuePace.average}
+                  stroke="#f59e0b"
+                  strokeDasharray="4 4"
+                  strokeWidth={1.5}
+                  label={{
+                    value: `By ${ordinal(revenuePace.day)}: avg ₹${revenuePace.average.toLocaleString('en-IN')}`,
+                    position: 'insideBottomRight',
+                    fill: '#d97706',
+                    fontSize: 11,
+                    fontWeight: 600,
+                  }}
+                />
+              )}
             </BarChart>
           </ResponsiveContainer>
         </div>
