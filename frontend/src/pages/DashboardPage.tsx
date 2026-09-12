@@ -1399,20 +1399,13 @@ export function DashboardPage() {
         let shippingData: ChartPoint[];
 
         if (shippingGranularity === 'day') {
-          // 7-day centred rolling average
-          const rollingAvg = (arr: (number | null)[], i: number, half = 3): number | null => {
-            const win = arr.slice(Math.max(0, i - half), i + half + 1).filter((v): v is number => v !== null);
-            return win.length ? win.reduce((s, v) => s + v, 0) / win.length : null;
-          };
-          const allVal   = windowedRecords.map((r) => r.avgShipping);
-          const smallVal = windowedRecords.map((r) => r.avgShippingSmall);
-          const largeVal = windowedRecords.map((r) => r.avgShippingLarge);
-          shippingData = windowedRecords.map((r, i) => ({
+          // Raw daily values — the real per-day average shipping charge, no smoothing.
+          shippingData = windowedRecords.map((r) => ({
             date: toLabel(r.dateKey),
             dateKey: r.dateKey,
-            avgShipping:      rollingAvg(allVal,   i),
-            avgShippingSmall: rollingAvg(smallVal, i),
-            avgShippingLarge: rollingAvg(largeVal, i),
+            avgShipping:      r.avgShipping,
+            avgShippingSmall: r.avgShippingSmall,
+            avgShippingLarge: r.avgShippingLarge,
           }));
         } else if (shippingGranularity === 'week') {
           const weeks: DbRecord[][] = [];
