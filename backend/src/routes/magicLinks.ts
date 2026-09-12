@@ -768,21 +768,22 @@ router.post('/shopify/update-delivery-status', requireAdmin, async (req: Authent
       });
     }
 
+    // Recompute order stats + P&L for the order's CREATION-date day (the day the
+    // dashboard bars are keyed by) and wait for it, so the response only returns
+    // once the dashboards would reflect the new status. Then the client can reload
+    // the chart immediately instead of guessing a delay.
+    const dateKey = await shopifyService.getOrderCreationDateKey(orderNumber);
+    if (dateKey) {
+      await Promise.all([
+        recomputeOrderStatsForDate(dateKey).catch((e) => console.error('order-stats recompute:', e)),
+        recomputePnlForDate(dateKey).catch((e) => console.error('pnl recompute:', e)),
+      ]);
+    }
+
     res.json({
       success: true,
       message: `Order ${orderNumber} marked as ${status}`,
     });
-
-    // Async recompute order stats + P&L for the affected date (so the dashboard's
-    // completion state / bar colour reflects the new status).
-    getShippingOrderDateKey(orderNumber)
-      .then((dateKey) => {
-        if (dateKey) {
-          recomputeOrderStatsForDate(dateKey).catch(console.error);
-          recomputePnlForDate(dateKey).catch(console.error);
-        }
-      })
-      .catch(console.error);
   } catch (error) {
     console.error('Error updating delivery status:', error);
     res.status(500).json({

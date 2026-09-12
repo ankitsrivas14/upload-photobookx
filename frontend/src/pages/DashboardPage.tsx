@@ -322,24 +322,23 @@ export function DashboardPage() {
   const markDrawerOrder = async (orderNumber: string, status: 'Delivered' | 'Failed') => {
     setDrawerMenuOrder(null);
     setMarkingOrder(orderNumber);
+    const toastId = toast.loading(`Marking ${orderNumber} as ${status}…`);
     try {
       const res = await api.updateOrderDeliveryStatus(orderNumber, status);
       if (res.success) {
-        toast.success(`${orderNumber} marked as ${status}`);
+        toast.success(`${orderNumber} marked as ${status}`, { id: toastId });
         // Drop it from the drawer — it's no longer pending.
         setPnlDrawer((p) => ({ ...p, orders: p.orders.filter((o) => o.orderNumber !== orderNumber) }));
-        // Give the async recompute a moment, then refresh the chart/heatmap.
-        setTimeout(() => {
-          loadPnlChart(selectedYear, selectedMonth);
-          loadHeatmap(selectedYear);
-          loadOrderStats();
-        }, 1200);
+        // The endpoint already recomputed the day, so refresh the chart now.
+        loadPnlChart(selectedYear, selectedMonth);
+        loadHeatmap(selectedYear);
+        loadOrderStats();
       } else {
-        toast.error(res.error || 'Failed to update status');
+        toast.error(res.error || 'Failed to update status', { id: toastId });
       }
     } catch (err) {
       console.error('Failed to mark order status:', err);
-      toast.error('Failed to update status');
+      toast.error('Failed to update status', { id: toastId });
     } finally {
       setMarkingOrder(null);
     }
@@ -1847,7 +1846,14 @@ export function DashboardPage() {
                   </thead>
                   <tbody>
                     {pnlDrawer.orders.map((o) => (
-                      <tr key={o.orderNumber} style={{ borderTop: '1px solid #f1f5f9' }}>
+                      <tr
+                        key={o.orderNumber}
+                        style={{
+                          borderTop: '1px solid #f1f5f9',
+                          opacity: markingOrder === o.orderNumber ? 0.5 : 1,
+                          transition: 'opacity 0.15s',
+                        }}
+                      >
                         <td style={{ padding: '8px 4px', fontWeight: 500 }}>{o.orderNumber}</td>
                         <td style={{ padding: '8px 4px', textAlign: 'right' }}>₹{o.amount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
                         <td style={{ padding: '8px 4px', color: '#64748b', textTransform: 'capitalize' }}>{o.deliveryStatus.replace(/_/g, ' ')}</td>
@@ -1860,7 +1866,7 @@ export function DashboardPage() {
                         </td>
                         <td style={{ padding: '8px 4px', position: 'relative', textAlign: 'right' }}>
                           {markingOrder === o.orderNumber ? (
-                            <span style={{ color: '#94a3b8', fontSize: '0.75rem' }}>…</span>
+                            <span style={{ color: '#6366f1', fontSize: '0.75rem', fontWeight: 500, whiteSpace: 'nowrap' }}>Updating…</span>
                           ) : (
                             <button
                               onClick={() => setDrawerMenuOrder((cur) => (cur === o.orderNumber ? null : o.orderNumber))}

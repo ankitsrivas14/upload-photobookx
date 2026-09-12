@@ -338,6 +338,24 @@ class ShopifyService {
   }
 
   /**
+   * The IST creation-date key ('YYYY-MM-DD') of an order, read from the cache.
+   * The dashboards key each P&L day by order creation date, so this is the day to
+   * recompute after a status change. Returns null if the order isn't cached.
+   */
+  async getOrderCreationDateKey(orderNumber: string): Promise<string | null> {
+    const bare = orderNumber.replace(/^#/, '');
+    const docs = await ShopifyOrderCache.find({ cacheKey: { $regex: /^all_orders_/ } }, { orders: 1 }).lean();
+    for (const doc of docs as any[]) {
+      for (const o of (doc.orders as any[])) {
+        if (o?.name && (o.name === orderNumber || o.name.replace(/^#/, '') === bare) && o.created_at) {
+          return new Date(o.created_at).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
    * Optimistically patch a single order's delivery status inside the cached order
    * lists, instead of wiping the whole cache. Wiping forced the next read to refetch
    * every order from Shopify (slow); patching keeps the cache warm and lets the
