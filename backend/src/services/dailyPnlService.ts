@@ -454,6 +454,28 @@ export async function recomputePnlForDate(
   );
 }
 
+/**
+ * Recompute several dates while loading the heavy shared inputs (the full order
+ * cache, RTO set, shipping map, ad spend, COGS) only ONCE. Calling
+ * recomputePnlForDate per date reloaded all of that each time, so the dashboard's
+ * on-read "refresh last 3 days" did ~3 full-cache loads per request (×2 for the
+ * month+year calls) and stalled. Use this for any multi-date recompute on a hot path.
+ */
+export async function recomputePnlForDates(dateKeys: string[]): Promise<void> {
+  if (dateKeys.length === 0) return;
+  const [ordersByDate, rtoSet, shippingMap, adSpendByDate, cogsVersions] = await Promise.all([
+    loadOrdersByDate(),
+    loadRtoSet(),
+    loadShippingMap(),
+    loadAdSpendByDate(),
+    loadCogsVersions(),
+  ]);
+  const rtoRate = computeHistoricalRtoRate(ordersByDate, rtoSet);
+  for (const dk of dateKeys) {
+    await recomputePnlForDate(dk, ordersByDate, rtoSet, shippingMap, adSpendByDate, cogsVersions, rtoRate);
+  }
+}
+
 export async function backfillDailyPnl(): Promise<{ upserted: number }> {
   const [ordersByDate, rtoSet, shippingMap, adSpendByDate, cogsVersions] = await Promise.all([
     loadOrdersByDate(),

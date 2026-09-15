@@ -6,7 +6,7 @@ import aiService from '../services/aiService';
 import { backfillAllDates } from '../services/roasService';
 import { backfillShippingStats } from '../services/shippingStatsService';
 import { backfillOrderStats } from '../services/orderStatsService';
-import { backfillDailyPnl, recomputePnlForDate, getVariantPerformance } from '../services/dailyPnlService';
+import { backfillDailyPnl, recomputePnlForDates, getVariantPerformance } from '../services/dailyPnlService';
 import { computeBreakevenMetrics } from '../services/breakevenService';
 import shopifyService from '../services/shopifyService';
 
@@ -1591,7 +1591,7 @@ router.get('/daily-pnl', requireAdmin, async (req: AuthenticatedRequest, res: Re
       d.setDate(d.getDate() - i);
       recentDates.push(d.toISOString().slice(0, 10));
     }
-    await Promise.all(recentDates.map((dk) => recomputePnlForDate(dk)));
+    await recomputePnlForDates(recentDates);
 
     const filter: Record<string, any> = {};
 

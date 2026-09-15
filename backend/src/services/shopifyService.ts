@@ -13,6 +13,9 @@ class ShopifyService {
   private apiVersion: string;
   private printedPhotosProductId: number;
   // Cache is now infinite - only cleared by explicit refresh button click
+  // Coalesces concurrent cache-miss fetches per cacheKey so a cold cache doesn't
+  // trigger one full Shopify fetch per waiting request (thundering herd).
+  private inFlightOrderFetches: Map<string, Promise<ShopifyOrder[]>> = new Map();
 
   constructor() {
     this.storeDomain = config.shopify.storeDomain;
@@ -448,17 +451,34 @@ class ShopifyService {
    * Uses caching with 5-minute TTL
    */
   async getAllOrders(limit: number = 50, createdAtMin?: string): Promise<ShopifyOrder[]> {
+    const cacheKey = createdAtMin ? `all_orders_${limit}_${createdAtMin}` : `all_orders_${limit}`;
+
+    // Try to get from cache first
+    const cachedOrders = await this.getCachedOrders(cacheKey);
+    if (cachedOrders) {
+      console.log(`Using cached orders: ${cachedOrders.length}`);
+      return cachedOrders;
+    }
+
+    // Cache miss. If another request is already fetching this same set, wait on it
+    // instead of launching a second full Shopify fetch (which would compound rate limits).
+    const existing = this.inFlightOrderFetches.get(cacheKey);
+    if (existing) {
+      console.log(`Reusing in-flight order fetch for ${cacheKey}`);
+      return existing;
+    }
+    const fetchPromise = this.fetchAndCacheAllOrders(cacheKey, limit, createdAtMin);
+    this.inFlightOrderFetches.set(cacheKey, fetchPromise);
     try {
-      const cacheKey = createdAtMin ? `all_orders_${limit}_${createdAtMin}` : `all_orders_${limit}`;
+      return await fetchPromise;
+    } finally {
+      this.inFlightOrderFetches.delete(cacheKey);
+    }
+  }
 
-      // Try to get from cache first
-      const cachedOrders = await this.getCachedOrders(cacheKey);
-      if (cachedOrders) {
-        console.log(`Using cached orders: ${cachedOrders.length}`);
-        return cachedOrders;
-      }
-
-      // Cache miss - fetch from Shopify with pagination using Link header
+  private async fetchAndCacheAllOrders(cacheKey: string, limit: number, createdAtMin?: string): Promise<ShopifyOrder[]> {
+    try {
+      // Fetch from Shopify with pagination using Link header
       console.log(`Fetching up to ${limit} orders from Shopify API${createdAtMin ? ` since ${createdAtMin}` : ''}...`);
 
       const allOrders: ShopifyOrder[] = [];
