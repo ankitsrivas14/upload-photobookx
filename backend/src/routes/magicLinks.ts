@@ -15,6 +15,7 @@ import { Ticket } from '../models';
 import archiver from 'archiver';
 import { recomputeShippingForDate, getOrderDateKey as getShippingOrderDateKey, backfillShippingStats } from '../services/shippingStatsService';
 import { recomputeOrderStatsForDate, backfillOrderStats } from '../services/orderStatsService';
+import { refreshBreakevenSnapshot } from '../services/breakevenService';
 import { backfillDailyPnl, recomputePnlForDate } from '../services/dailyPnlService';
 
 const router = Router();
@@ -313,8 +314,10 @@ router.post('/shopify/orders/clear-cache', requireAdmin, async (_req: Authentica
       syncedCount
     });
 
-    // Async full recompute of order stats and P&L after sync
-    backfillOrderStats().catch(console.error);
+    // Async full recompute of order stats, P&L and the breakeven snapshot after sync.
+    backfillOrderStats()
+      .then(() => refreshBreakevenSnapshot())
+      .catch(console.error);
     backfillDailyPnl().catch(console.error);
   } catch (error) {
     console.error('Error syncing orders:', error);

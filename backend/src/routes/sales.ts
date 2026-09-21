@@ -1637,8 +1637,14 @@ router.get('/breakeven-metrics', requireAdmin, async (_req: AuthenticatedRequest
     if (snap && (snap as any).metrics) {
       return res.json({ success: true, ...(snap as any).metrics });
     }
-    const metrics = await refreshBreakevenSnapshot();
-    res.json({ success: true, ...metrics });
+    // Cold snapshot: seed it in the background (the compute scans the order cache and
+    // is slow) and return zeros now, so this request stays fast. The next load is real.
+    refreshBreakevenSnapshot().catch((e) => console.error('breakeven snapshot seed:', e));
+    res.json({
+      success: true, aov: 0, avgCOGS: 0, avgShipping: 0, avgTotalCost: 0,
+      contributionMargin: 0, breakevenROAS: 0, deliveredCount: 0, failedCount: 0,
+      totalOrders: 0, completedDaysCount: 0, computing: true,
+    });
   } catch (error) {
     console.error('Error computing breakeven metrics:', error);
     res.status(500).json({ success: false, error: 'Failed to compute breakeven metrics' });
