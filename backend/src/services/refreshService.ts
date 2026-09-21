@@ -3,6 +3,7 @@ import shiprocketService from './shiprocketService';
 import { backfillOrderStats } from './orderStatsService';
 import { backfillDailyPnl } from './dailyPnlService';
 import { backfillShippingStats } from './shippingStatsService';
+import { refreshBreakevenSnapshot } from './breakevenService';
 import { RTOOrder } from '../models';
 
 /**
@@ -113,6 +114,8 @@ export async function runScheduledRefresh(): Promise<{
   await backfillOrderStats();
   await backfillShippingStats();
   await backfillDailyPnl();
+  // 5. Refresh the breakeven snapshot the dashboard reads (off the request path).
+  await refreshBreakevenSnapshot();
 
   console.log(
     `Scheduled refresh: synced ${synced} orders, ${toSync.length} needed shipping sync ` +

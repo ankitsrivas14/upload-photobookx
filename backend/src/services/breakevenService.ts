@@ -2,7 +2,7 @@ import ShopifyOrderCache from '../models/ShopifyOrderCache';
 import RTOOrder from '../models/RTOOrder';
 import ShippingCharge from '../models/ShippingCharge';
 import { COGSConfiguration } from '../models/COGSConfiguration';
-import { DailyOrderStats } from '../models';
+import { DailyOrderStats, BreakevenSnapshot } from '../models';
 
 const STORE_TIMEZONE = 'Asia/Kolkata';
 const DATA_START_DATE = '2026-01-28';
@@ -185,4 +185,18 @@ export async function computeBreakevenMetrics(): Promise<BreakevenMetrics> {
   const breakevenROAS = contributionMargin > 0 ? aov / contributionMargin : 0;
 
   return { aov, avgCOGS, avgShipping, avgTotalCost, contributionMargin, breakevenROAS, deliveredCount, failedCount, totalOrders, completedDaysCount };
+}
+
+/**
+ * Compute the breakeven metrics (scans the order cache — off the request path) and
+ * store them in the singleton snapshot the dashboard endpoint reads.
+ */
+export async function refreshBreakevenSnapshot(): Promise<BreakevenMetrics> {
+  const metrics = await computeBreakevenMetrics();
+  await BreakevenSnapshot.findOneAndUpdate(
+    { key: 'latest' },
+    { $set: { metrics } },
+    { upsert: true }
+  );
+  return metrics;
 }

@@ -101,8 +101,10 @@ export async function recomputeOrderStatsForDate(
   let codDeliveredCount = 0;
   let codFailedCount = 0;
   let nonFinalCount = 0; // orders not in a final state (mirrors frontend isOrderFinal logic)
+  let grossRevenue = 0;
 
   for (const order of orders) {
+    grossRevenue += order.current_total_price ? parseFloat(order.current_total_price) : 0;
     const paymentMethod = classifyPaymentMethod(order);
     const deliveryStatus = classifyDeliveryStatus(order, rto);
 
@@ -154,6 +156,7 @@ export async function recomputeOrderStatsForDate(
         confirmedCount,
         codDeliveredCount,
         codFailedCount,
+        grossRevenue,
         isCompleted,
       },
     },

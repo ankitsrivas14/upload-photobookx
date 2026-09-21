@@ -1,13 +1,13 @@
 import express, { Response } from 'express';
-import { DiscardedOrder, RTOOrder, ProfitPrediction, ShippingCharge, OrderDeliveryDate, ShopifyOrderCache, MetaAdPerformance, MetaAdAnalysis, AcknowledgedOrder, TicketRaisedOrder, DailyROAS, DailyShipping, DailyOrderStats, DailyPnl, Reel, ReelStrategy } from '../models';
+import { DiscardedOrder, RTOOrder, ProfitPrediction, ShippingCharge, OrderDeliveryDate, ShopifyOrderCache, MetaAdPerformance, MetaAdAnalysis, AcknowledgedOrder, TicketRaisedOrder, DailyROAS, DailyShipping, DailyOrderStats, DailyPnl, BreakevenSnapshot, Reel, ReelStrategy } from '../models';
 import { requireAdmin } from './adminAuth';
 import { AuthenticatedRequest } from '../types';
 import aiService from '../services/aiService';
 import { backfillAllDates } from '../services/roasService';
 import { backfillShippingStats } from '../services/shippingStatsService';
 import { backfillOrderStats } from '../services/orderStatsService';
-import { backfillDailyPnl, recomputePnlForDates, getVariantPerformance } from '../services/dailyPnlService';
-import { computeBreakevenMetrics } from '../services/breakevenService';
+import { backfillDailyPnl, getVariantPerformance } from '../services/dailyPnlService';
+import { computeBreakevenMetrics, refreshBreakevenSnapshot } from '../services/breakevenService';
 import shopifyService from '../services/shopifyService';
 
 const router = express.Router();
@@ -1475,42 +1475,35 @@ router.get('/monthly-order-counts', requireAdmin, async (_req: AuthenticatedRequ
  */
 router.get('/monthly-revenue', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
   try {
-    const STORE_TIMEZONE = 'Asia/Kolkata';
-    // Start at Feb — skip the partial Jan 2026 start month (data began 28 Jan).
-    const DATA_START_DATE = '2026-02-01';
-    const orders = await shopifyService.getAllOrders(10000);
+    // Aggregated from the pre-computed DailyOrderStats.grossRevenue in the DB, so no
+    // full order-cache scan on the request path. Same basis as the order-count chart.
+    const rows = await DailyOrderStats.aggregate([
+      { $match: { dateKey: { $gte: '2026-02-01' } } }, // skip partial Jan 2026
+      { $group: { _id: { $substrBytes: ['$dateKey', 0, 7] }, revenue: { $sum: '$grossRevenue' } } },
+      { $sort: { _id: 1 } },
+    ]);
 
-    // "Pace" benchmark: average revenue accumulated by today's day-of-month across
-    // past complete months (excludes the current month and the partial Jan).
-    const todayIST = new Date().toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+    // "Pace" benchmark: avg revenue accumulated by today's day-of-month across past
+    // complete months (excludes the current month and the partial Jan).
+    const todayIST = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
     const currentMonth = todayIST.substring(0, 7);
-    const dayOfMonth = Number(todayIST.substring(8, 10));
-
-    const byMonth = new Map<string, number>();
-    const paceByMonth = new Map<string, number>();
-    for (const o of orders as any[]) {
-      if (!o.created_at || o.cancelled_at) continue;
-      const dateKey = new Date(o.created_at).toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
-      if (dateKey < DATA_START_DATE) continue;
-      const month = dateKey.substring(0, 7); // 'YYYY-MM'
-      const amount = o.current_total_price ? parseFloat(o.current_total_price) : 0;
-      byMonth.set(month, (byMonth.get(month) || 0) + amount);
-      // Accumulate only up to today's day-of-month, for past months (pace benchmark).
-      if (Number(dateKey.substring(8, 10)) <= dayOfMonth && month < currentMonth) {
-        paceByMonth.set(month, (paceByMonth.get(month) || 0) + amount);
-      }
-    }
-
-    const months = [...byMonth.entries()]
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([month, revenue]) => ({ month, revenue: Math.round(revenue) }));
-
-    const paceValues = [...paceByMonth.values()];
-    const paceAverage = paceValues.length
-      ? Math.round(paceValues.reduce((s, v) => s + v, 0) / paceValues.length)
+    const dayOfMonth = todayIST.substring(8, 10); // zero-padded 'DD'
+    const paceRows = await DailyOrderStats.aggregate([
+      { $match: { dateKey: { $gte: '2026-02-01' } } },
+      { $match: { $expr: { $lte: [{ $substrBytes: ['$dateKey', 8, 2] }, dayOfMonth] } } },
+      { $group: { _id: { $substrBytes: ['$dateKey', 0, 7] }, revenue: { $sum: '$grossRevenue' } } },
+    ]);
+    const pastPace = (paceRows as any[]).filter((r) => r._id < currentMonth);
+    const paceAverage = pastPace.length
+      ? Math.round(pastPace.reduce((s, r) => s + r.revenue, 0) / pastPace.length)
       : 0;
 
-    res.json({ success: true, months, paceAverage, paceDay: dayOfMonth });
+    res.json({
+      success: true,
+      months: rows.map((r: any) => ({ month: r._id as string, revenue: Math.round(r.revenue) })),
+      paceAverage,
+      paceDay: Number(dayOfMonth),
+    });
   } catch (error) {
     console.error('Error fetching monthly revenue:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch monthly revenue' });
@@ -1582,16 +1575,9 @@ router.get('/daily-pnl', requireAdmin, async (req: AuthenticatedRequest, res: Re
   try {
     const { month, year, startDate, endDate } = req.query as Record<string, string | undefined>;
 
-    // Always recompute the last 3 days so today's figures are never stale
-    const IST_OFFSET = 5.5 * 60 * 60 * 1000;
-    const todayIST = new Date(Date.now() + IST_OFFSET);
-    const recentDates: string[] = [];
-    for (let i = 0; i < 3; i++) {
-      const d = new Date(todayIST);
-      d.setDate(d.getDate() - i);
-      recentDates.push(d.toISOString().slice(0, 10));
-    }
-    await recomputePnlForDates(recentDates);
+    // Read straight from the pre-computed DailyPnl table — no full order-cache scan
+    // on the request path. Freshness is maintained by the scheduled refresh (every
+    // 30 min) and by an immediate recompute whenever an order's status is marked.
 
     const filter: Record<string, any> = {};
 
@@ -1645,7 +1631,13 @@ router.post('/daily-pnl/backfill', requireAdmin, async (_req: AuthenticatedReque
  */
 router.get('/breakeven-metrics', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
   try {
-    const metrics = await computeBreakevenMetrics();
+    // Read the pre-computed snapshot (refreshed by the scheduled job) — no order-cache
+    // scan on the request path. Compute once on a cold snapshot to seed it.
+    const snap = await BreakevenSnapshot.findOne({ key: 'latest' }).lean();
+    if (snap && (snap as any).metrics) {
+      return res.json({ success: true, ...(snap as any).metrics });
+    }
+    const metrics = await refreshBreakevenSnapshot();
     res.json({ success: true, ...metrics });
   } catch (error) {
     console.error('Error computing breakeven metrics:', error);

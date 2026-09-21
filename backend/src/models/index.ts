@@ -30,6 +30,7 @@ export { HourlyLog, IHourlyLog } from './HourlyLog';
 export { DailyROAS, IDailyROAS } from './DailyROAS';
 export { DailyShipping, IDailyShipping } from './DailyShipping';
 export { DailyOrderStats, IDailyOrderStats } from './DailyOrderStats';
+export { BreakevenSnapshot, IBreakevenSnapshot } from './BreakevenSnapshot';
 export { DailyPnl, IDailyPnl } from './DailyPnl';
 export { FixedMonthlyExpense, IFixedMonthlyExpense } from './FixedMonthlyExpense';
 export { Reel, IReel } from './Reel';
