@@ -24,11 +24,13 @@ function bare(name: string): string {
 
 function toDoc(order: any) {
   const name = order.name || '';
+  const custName = `${order.customer?.first_name || ''} ${order.customer?.last_name || ''}`.trim();
   return {
     ...order,
     monthKey: monthKeyOf(order),
     nameBare: bare(name),
     nameLower: bare(name).toLowerCase(),
+    customerNameLower: custName.toLowerCase(),
   };
 }
 
@@ -53,6 +55,13 @@ export async function upsertMany(orders: any[]): Promise<number> {
 export async function getMonth(monthKey: string): Promise<any[]> {
   const db = getFirestore();
   const snap = await db.collection(COLLECTION).where('monthKey', '==', monthKey).get();
+  return snap.docs.map((d) => d.data());
+}
+
+/** Every order (used by the 'all' / 'last30' views — reads the whole collection). */
+export async function getAll(): Promise<any[]> {
+  const db = getFirestore();
+  const snap = await db.collection(COLLECTION).get();
   return snap.docs.map((d) => d.data());
 }
 
@@ -82,13 +91,14 @@ async function addMonths(monthKeys: Set<string>): Promise<void> {
 export async function search(query: string, limit = 50): Promise<any[]> {
   const db = getFirestore();
   const q = bare(query);
-  const end = q + '';
-  const [byName, byNameLower] = await Promise.all([
-    db.collection(COLLECTION).where('nameBare', '>=', q).where('nameBare', '<=', end).limit(limit).get(),
-    db.collection(COLLECTION).where('nameLower', '>=', q.toLowerCase()).where('nameLower', '<=', q.toLowerCase() + '').limit(limit).get(),
+  const ql = q.toLowerCase();
+  const [byName, byNameLower, byCustomer] = await Promise.all([
+    db.collection(COLLECTION).where('nameBare', '>=', q).where('nameBare', '<=', q + '').limit(limit).get(),
+    db.collection(COLLECTION).where('nameLower', '>=', ql).where('nameLower', '<=', ql + '').limit(limit).get(),
+    db.collection(COLLECTION).where('customerNameLower', '>=', ql).where('customerNameLower', '<=', ql + '').limit(limit).get(),
   ]);
   const map = new Map<string, any>();
-  for (const d of [...byName.docs, ...byNameLower.docs]) map.set(d.id, d.data());
+  for (const d of [...byName.docs, ...byNameLower.docs, ...byCustomer.docs]) map.set(d.id, d.data());
   return Array.from(map.values()).slice(0, limit);
 }
 

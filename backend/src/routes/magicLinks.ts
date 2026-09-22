@@ -349,19 +349,18 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
             : monthStr)
         : null;
 
+    const ordersRepo = await import('../db/ordersRepo');
+
     let orders: any[];
     let availableMonths: string[];
 
     if (allOrders && specificMonth) {
-      // Fast path: read only that month's small partition, not the full ~15MB doc.
-      orders = await shopifyService.getOrdersForMonth(specificMonth);
-      availableMonths = await shopifyService.listAvailableMonths();
-    } else {
-      // 'all' / 'last30' / non-all fetch → load everything (slower, used rarely).
-      const allFetchedOrders = allOrders
-        ? await shopifyService.getAllOrders(limit, createdAtMin)
-        : await shopifyService.getRecentOrders(limit);
-
+      // Fast path: one indexed month query from Firestore.
+      orders = await ordersRepo.getMonth(specificMonth);
+      availableMonths = await ordersRepo.listMonths();
+    } else if (allOrders) {
+      // 'all' / 'last30' → whole collection from Firestore (fast small-doc reads).
+      const allFetchedOrders = await ordersRepo.getAll();
       const availableMonthsSet = new Set<string>();
       allFetchedOrders.forEach((o: any) => {
         if (!o.created_at) return;
@@ -377,6 +376,15 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
         thirtyDaysAgo.setHours(0, 0, 0, 0);
         orders = allFetchedOrders.filter((o: any) => new Date(o.created_at) >= thirtyDaysAgo);
       }
+    } else {
+      // Non-'all' fetch (printed-photos flow) — unchanged, still Mongo.
+      orders = await shopifyService.getRecentOrders(limit);
+      const availableMonthsSet = new Set<string>();
+      orders.forEach((o: any) => {
+        if (!o.created_at) return;
+        availableMonthsSet.add(new Date(o.created_at).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }).substring(0, 7));
+      });
+      availableMonths = Array.from(availableMonthsSet).sort().reverse();
     }
     const _perfGetAll = Date.now() - _pt0;
 

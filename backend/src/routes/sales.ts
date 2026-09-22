@@ -519,41 +519,23 @@ router.post('/predict', requireAdmin, async (req: AuthenticatedRequest, res: Res
         });
       });
 
-      // 2. Search in ShopifyOrderCache for unfulfilled or new orders
-      // We look for any "all_orders" cache entry which contains the most orders.
-      // .lean() + projection avoids hydrating the ~16MB doc through Mongoose (slow).
-      const newestCache = await ShopifyOrderCache.findOne(
-        { cacheKey: { $regex: /^all_orders_/ } },
-        { orders: 1, cachedAt: 1 }
-      ).sort({ cachedAt: -1 }).lean();
-
-      if (newestCache && Array.isArray((newestCache as any).orders)) {
-        for (const o of (newestCache as any).orders) {
-          if (ordersMap.size >= 50) break;
-          
-          const name = (o.name || '').toString();
-          const cleanName = name.replace(/^#/, '');
-          
-          const firstName = o.customer?.first_name || '';
-          const lastName = o.customer?.last_name || '';
-          const custName = `${firstName} ${lastName}`.trim() || 'N/A';
-          const email = (o.email || '').toLowerCase();
-          
-          if (
-            cleanName.toLowerCase().includes(cleanNumQuery) || 
-            custName.toLowerCase().includes(lowerQuery) ||
-            email.includes(lowerQuery)
-          ) {
-            const finalName = name.startsWith('#') ? name : `#${name}`;
-            if (!ordersMap.has(finalName)) {
-              ordersMap.set(finalName, {
-                name: finalName,
-                customerName: custName,
-                customerPhone: o.customer?.phone || o.shipping_address?.phone || '',
-                shopifyOrderId: o.id
-              });
-            }
-          }
+      // 2. Search orders in Firestore (prefix on order number / customer name).
+      const { search: searchOrders } = await import('../db/ordersRepo');
+      const matches = await searchOrders(query, 50);
+      for (const o of matches) {
+        if (ordersMap.size >= 50) break;
+        const name = (o.name || '').toString();
+        const firstName = o.customer?.first_name || '';
+        const lastName = o.customer?.last_name || '';
+        const custName = `${firstName} ${lastName}`.trim() || 'N/A';
+        const finalName = name.startsWith('#') ? name : `#${name}`;
+        if (!ordersMap.has(finalName)) {
+          ordersMap.set(finalName, {
+            name: finalName,
+            customerName: custName,
+            customerPhone: o.customer?.phone || o.shipping_address?.phone || '',
+            shopifyOrderId: o.id
+          });
         }
       }
 
@@ -1550,8 +1532,9 @@ router.get('/incomplete-day-orders', requireAdmin, async (req: AuthenticatedRequ
     }
 
     const STORE_TIMEZONE = 'Asia/Kolkata';
+    const { getMonth } = await import('../db/ordersRepo');
     const [orders, rtoRows] = await Promise.all([
-      shopifyService.getAllOrders(10000),
+      getMonth(date.substring(0, 7)), // only that month's orders from Firestore
       RTOOrder.find({}, { shopifyOrderId: 1, _id: 0 }).lean(),
     ]);
     const rtoSet = new Set((rtoRows as any[]).map((r) => r.shopifyOrderId as number));
