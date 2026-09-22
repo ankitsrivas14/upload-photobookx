@@ -10,11 +10,24 @@ import { getFirestore } from './firestore';
 export function keyedStore<T extends Record<string, any>>(collection: string, idField: keyof T) {
   const col = () => getFirestore().collection(collection);
 
-  function strip(item: T): any {
-    const out: any = { ...item };
-    delete out._id;
-    delete out.__v;
-    return out;
+  // Deep-convert Mongo values Firestore can't store: ObjectId → string; drop _id/__v.
+  // Dates are preserved (Firestore stores them as Timestamps).
+  function strip(value: any): any {
+    if (value == null) return value;
+    if (value instanceof Date) return value;
+    if (typeof value === 'object') {
+      if (value._bsontype === 'ObjectId' || value._bsontype === 'ObjectID' || typeof value.toHexString === 'function') {
+        return value.toString();
+      }
+      if (Array.isArray(value)) return value.map(strip);
+      const out: any = {};
+      for (const k of Object.keys(value)) {
+        if (k === '_id' || k === '__v') continue;
+        out[k] = strip(value[k]);
+      }
+      return out;
+    }
+    return value;
   }
 
   return {
