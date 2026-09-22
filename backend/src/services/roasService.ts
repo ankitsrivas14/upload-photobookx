@@ -55,11 +55,8 @@ export async function recomputeForDate(
 
   const roas = adSpend > 0 ? revenue / adSpend : null;
 
-  await DailyROAS.findOneAndUpdate(
-    { dateKey },
-    { $set: { revenue, adSpend, roas } },
-    { upsert: true, new: true }
-  );
+  const { dailyRoasStore } = await import('../db/dailyStores');
+  await dailyRoasStore.set({ dateKey, revenue, adSpend, roas });
 }
 
 async function getSingleDayRevenue(dateKey: string): Promise<number> {

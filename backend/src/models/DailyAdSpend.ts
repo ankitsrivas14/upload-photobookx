@@ -10,6 +10,12 @@ const DailyAdSpendSchema = new mongoose.Schema({
     type: Number,
     required: true
   },
+  // Amount imported from the daily ads CSV. Kept separate from the manually
+  // entered amount so the history table can show both values.
+  dailyAmountSpent: {
+    type: Number,
+    min: 0,
+  },
   notes: {
     type: String,
     default: ''

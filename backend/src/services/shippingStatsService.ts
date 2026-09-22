@@ -88,20 +88,16 @@ export async function recomputeShippingForDate(
     if (variant === 'large') largeAmounts.push(charge);
   }
 
-  await DailyShipping.findOneAndUpdate(
-    { dateKey },
-    {
-      $set: {
-        avgShipping: avgOf(allAmounts),
-        avgShippingSmall: avgOf(smallAmounts),
-        avgShippingLarge: avgOf(largeAmounts),
-        orderCount: allAmounts.length,
-        smallCount: smallAmounts.length,
-        largeCount: largeAmounts.length,
-      },
-    },
-    { upsert: true, new: true }
-  );
+  const { dailyShippingStore } = await import('../db/dailyStores');
+  await dailyShippingStore.set({
+    dateKey,
+    avgShipping: avgOf(allAmounts),
+    avgShippingSmall: avgOf(smallAmounts),
+    avgShippingLarge: avgOf(largeAmounts),
+    orderCount: allAmounts.length,
+    smallCount: smallAmounts.length,
+    largeCount: largeAmounts.length,
+  });
 }
 
 async function getSingleDayOrders(dateKey: string): Promise<any[]> {

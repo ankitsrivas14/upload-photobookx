@@ -8,6 +8,7 @@ import { backfillShippingStats } from '../services/shippingStatsService';
 import { backfillOrderStats } from '../services/orderStatsService';
 import { backfillDailyPnl, getVariantPerformance } from '../services/dailyPnlService';
 import { computeBreakevenMetrics, refreshBreakevenSnapshot } from '../services/breakevenService';
+import { dailyOrderStatsStore, dailyPnlStore, dailyShippingStore, dailyRoasStore, breakevenStore, readDailyRange } from '../db/dailyStores';
 import shopifyService from '../services/shopifyService';
 
 const router = express.Router();
@@ -1221,14 +1222,7 @@ router.get('/daily-roas', requireAdmin, async (req: AuthenticatedRequest, res: R
     //  • order-cache refresh    → scheduleRoasRecompute()        (shopifyService.updateCache)
     // Revenue and ad spend can only change through those two writers, so
     // recomputing here on every FE load was pure wasted work.
-    const filter: Record<string, any> = {};
-    if (startDate || endDate) {
-      filter.dateKey = {};
-      if (startDate) filter.dateKey.$gte = startDate;
-      if (endDate) filter.dateKey.$lte = endDate;
-    }
-
-    const records = await DailyROAS.find(filter).sort({ dateKey: 1 }).lean();
+    const records = await readDailyRange(dailyRoasStore, startDate, endDate);
 
     res.json({
       success: true,
@@ -1267,14 +1261,7 @@ router.post('/daily-roas/backfill', requireAdmin, async (_req: AuthenticatedRequ
 router.get('/daily-shipping', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
-    const filter: Record<string, any> = {};
-    if (startDate || endDate) {
-      filter.dateKey = {};
-      if (startDate) filter.dateKey.$gte = startDate;
-      if (endDate) filter.dateKey.$lte = endDate;
-    }
-
-    const records = await DailyShipping.find(filter).sort({ dateKey: 1 }).lean();
+    const records = await readDailyRange(dailyShippingStore, startDate, endDate);
 
     res.json({
       success: true,
@@ -1316,14 +1303,7 @@ router.post('/daily-shipping/backfill', requireAdmin, async (_req: Authenticated
 router.get('/daily-order-stats', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
-    const filter: Record<string, any> = {};
-    if (startDate || endDate) {
-      filter.dateKey = {};
-      if (startDate) filter.dateKey.$gte = startDate;
-      if (endDate) filter.dateKey.$lte = endDate;
-    }
-
-    const records = await DailyOrderStats.find(filter).sort({ dateKey: 1 }).lean();
+    const records = await readDailyRange(dailyOrderStatsStore, startDate, endDate);
 
     // Aggregate across all returned dates
     const agg = {
@@ -1486,41 +1466,35 @@ router.post('/firestore-sync-orders', requireAdmin, async (req: AuthenticatedReq
  */
 router.get('/monthly-order-counts', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
   try {
-    const rows = await DailyOrderStats.aggregate([
-      // Skip the partial Jan 2026 start month (data began 28 Jan).
-      { $match: { dateKey: { $gte: '2026-02-01' } } },
-      {
-        $group: {
-          _id: { $substrBytes: ['$dateKey', 0, 7] }, // 'YYYY-MM'
-          orders: { $sum: { $add: ['$prepaidCount', '$codCount'] } },
-        },
-      },
-      { $sort: { _id: 1 } },
-    ]);
+    // Read the daily docs from 'YYYY-MM' >= Feb 2026 and group by month in JS
+    // (Firestore has no aggregation pipeline; the collection is tiny).
+    const stats = await dailyOrderStatsStore.rangeByField('dateKey', '2026-02-01');
+    const byMonth = new Map<string, number>();
+    for (const s of stats) {
+      const month = String(s.dateKey).substring(0, 7);
+      byMonth.set(month, (byMonth.get(month) || 0) + (s.prepaidCount || 0) + (s.codCount || 0));
+    }
+    const months = [...byMonth.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([month, orders]) => ({ month, orders }));
 
     // "Pace" benchmark: average orders accumulated by today's day-of-month across
     // past complete months (excludes the current month and the partial Jan).
     const todayIST = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
     const currentMonth = todayIST.substring(0, 7);
     const dayOfMonth = todayIST.substring(8, 10); // zero-padded 'DD'
-    const paceRows = await DailyOrderStats.aggregate([
-      { $match: { dateKey: { $gte: '2026-02-01' } } },
-      { $match: { $expr: { $lte: [{ $substrBytes: ['$dateKey', 8, 2] }, dayOfMonth] } } },
-      {
-        $group: {
-          _id: { $substrBytes: ['$dateKey', 0, 7] },
-          orders: { $sum: { $add: ['$prepaidCount', '$codCount'] } },
-        },
-      },
-    ]);
-    const pastPace = (paceRows as any[]).filter((r) => r._id < currentMonth);
-    const paceAverage = pastPace.length
-      ? Math.round(pastPace.reduce((s, r) => s + r.orders, 0) / pastPace.length)
-      : 0;
+    const paceByMonth = new Map<string, number>();
+    for (const s of stats) {
+      if (String(s.dateKey).substring(8, 10) > dayOfMonth) continue;
+      const month = String(s.dateKey).substring(0, 7);
+      if (month >= currentMonth) continue;
+      paceByMonth.set(month, (paceByMonth.get(month) || 0) + (s.prepaidCount || 0) + (s.codCount || 0));
+    }
+    const paceVals = [...paceByMonth.values()];
+    const paceAverage = paceVals.length ? Math.round(paceVals.reduce((a, b) => a + b, 0) / paceVals.length) : 0;
 
     res.json({
       success: true,
-      months: rows.map((r: any) => ({ month: r._id as string, orders: r.orders as number })),
+      months,
       paceAverage,
       paceDay: Number(dayOfMonth),
     });
@@ -1538,32 +1512,34 @@ router.get('/monthly-order-counts', requireAdmin, async (_req: AuthenticatedRequ
  */
 router.get('/monthly-revenue', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
   try {
-    // Aggregated from the pre-computed DailyOrderStats.grossRevenue in the DB, so no
-    // full order-cache scan on the request path. Same basis as the order-count chart.
-    const rows = await DailyOrderStats.aggregate([
-      { $match: { dateKey: { $gte: '2026-02-01' } } }, // skip partial Jan 2026
-      { $group: { _id: { $substrBytes: ['$dateKey', 0, 7] }, revenue: { $sum: '$grossRevenue' } } },
-      { $sort: { _id: 1 } },
-    ]);
+    // Grouped from the pre-computed DailyOrderStats.grossRevenue in JS (tiny collection).
+    const stats = await dailyOrderStatsStore.rangeByField('dateKey', '2026-02-01');
+    const byMonth = new Map<string, number>();
+    for (const s of stats) {
+      const month = String(s.dateKey).substring(0, 7);
+      byMonth.set(month, (byMonth.get(month) || 0) + (s.grossRevenue || 0));
+    }
+    const months = [...byMonth.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([month, revenue]) => ({ month, revenue: Math.round(revenue) }));
 
     // "Pace" benchmark: avg revenue accumulated by today's day-of-month across past
     // complete months (excludes the current month and the partial Jan).
     const todayIST = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
     const currentMonth = todayIST.substring(0, 7);
     const dayOfMonth = todayIST.substring(8, 10); // zero-padded 'DD'
-    const paceRows = await DailyOrderStats.aggregate([
-      { $match: { dateKey: { $gte: '2026-02-01' } } },
-      { $match: { $expr: { $lte: [{ $substrBytes: ['$dateKey', 8, 2] }, dayOfMonth] } } },
-      { $group: { _id: { $substrBytes: ['$dateKey', 0, 7] }, revenue: { $sum: '$grossRevenue' } } },
-    ]);
-    const pastPace = (paceRows as any[]).filter((r) => r._id < currentMonth);
-    const paceAverage = pastPace.length
-      ? Math.round(pastPace.reduce((s, r) => s + r.revenue, 0) / pastPace.length)
-      : 0;
+    const paceByMonth = new Map<string, number>();
+    for (const s of stats) {
+      if (String(s.dateKey).substring(8, 10) > dayOfMonth) continue;
+      const month = String(s.dateKey).substring(0, 7);
+      if (month >= currentMonth) continue;
+      paceByMonth.set(month, (paceByMonth.get(month) || 0) + (s.grossRevenue || 0));
+    }
+    const paceVals = [...paceByMonth.values()];
+    const paceAverage = paceVals.length ? Math.round(paceVals.reduce((a, b) => a + b, 0) / paceVals.length) : 0;
 
     res.json({
       success: true,
-      months: rows.map((r: any) => ({ month: r._id as string, revenue: Math.round(r.revenue) })),
+      months,
       paceAverage,
       paceDay: Number(dayOfMonth),
     });
@@ -1643,20 +1619,17 @@ router.get('/daily-pnl', requireAdmin, async (req: AuthenticatedRequest, res: Re
     // on the request path. Freshness is maintained by the scheduled refresh (every
     // 30 min) and by an immediate recompute whenever an order's status is marked.
 
-    const filter: Record<string, any> = {};
-
+    let start: string | undefined;
+    let end: string | undefined;
     if (month) {
-      // YYYY-MM → match dateKey starting with that prefix
-      filter.dateKey = { $gte: `${month}-01`, $lte: `${month}-31` };
+      start = `${month}-01`; end = `${month}-31`;
     } else if (year) {
-      filter.dateKey = { $gte: `${year}-01-01`, $lte: `${year}-12-31` };
-    } else if (startDate || endDate) {
-      filter.dateKey = {};
-      if (startDate) filter.dateKey.$gte = startDate;
-      if (endDate) filter.dateKey.$lte = endDate;
+      start = `${year}-01-01`; end = `${year}-12-31`;
+    } else {
+      start = startDate; end = endDate;
     }
 
-    const records = await DailyPnl.find(filter).sort({ dateKey: 1 }).lean();
+    const records = await readDailyRange(dailyPnlStore, start, end);
 
     res.json({
       success: true,
@@ -1697,7 +1670,7 @@ router.get('/breakeven-metrics', requireAdmin, async (_req: AuthenticatedRequest
   try {
     // Read the pre-computed snapshot (refreshed by the scheduled job) — no order-cache
     // scan on the request path. Compute once on a cold snapshot to seed it.
-    const snap = await BreakevenSnapshot.findOne({ key: 'latest' }).lean();
+    const snap = await breakevenStore.get('latest');
     if (snap && (snap as any).metrics) {
       return res.json({ success: true, ...(snap as any).metrics });
     }
@@ -1725,8 +1698,8 @@ router.get('/ai-prediction-data', requireAdmin, async (req: AuthenticatedRequest
     const startDate = (req.query.startDate as string) || '2026-02-01';
 
     const [orderStatsDocs, pnlDocs] = await Promise.all([
-      DailyOrderStats.find({ dateKey: { $gte: startDate } }).sort({ dateKey: 1 }).lean(),
-      DailyPnl.find({ dateKey: { $gte: startDate } }).sort({ dateKey: 1 }).lean(),
+      readDailyRange(dailyOrderStatsStore, startDate),
+      readDailyRange(dailyPnlStore, startDate),
     ]);
 
     // Build a pnl lookup by dateKey

@@ -684,6 +684,7 @@ class ApiService {
       id: string;
       date: string;
       amount: number;
+      dailyAmountSpent?: number | null;
       notes: string;
       createdAt: string;
     }>;
@@ -702,6 +703,7 @@ class ApiService {
       id: string;
       date: string;
       amount: number;
+      dailyAmountSpent?: number | null;
       notes: string;
       createdAt: string;
     };
@@ -709,6 +711,28 @@ class ApiService {
   }> {
     return this.request('/api/admin/expenses/daily-ad-spend', {
       method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async upsertDailyAdSpend(data: {
+    date: string;
+    amount: number;
+    notes?: string;
+  }): Promise<{
+    success: boolean;
+    entry?: {
+      id: string;
+      date: string;
+      amount: number;
+      dailyAmountSpent?: number | null;
+      notes: string;
+      createdAt: string;
+    };
+    error?: string;
+  }> {
+    return this.request('/api/admin/expenses/daily-ad-spend', {
+      method: 'PUT',
       body: JSON.stringify(data),
     });
   }

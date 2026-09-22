@@ -77,6 +77,23 @@ export function AdsAnalysis() {
         }
     };
 
+    const parseCsvDate = (value: unknown): string | null => {
+        const raw = String(value ?? '').trim();
+        if (!raw) return null;
+
+        // Meta exports can contain a range such as "Sep 22, 2026 - Sep 22, 2026".
+        const isoDate = raw.match(/\b\d{4}-\d{2}-\d{2}\b/)?.[0];
+        if (isoDate) return isoDate;
+
+        const parsed = new Date(raw.split(/\s+[-–]\s+|\s+to\s+/i)[0].trim());
+        if (Number.isNaN(parsed.getTime())) return null;
+
+        const year = parsed.getFullYear();
+        const month = String(parsed.getMonth() + 1).padStart(2, '0');
+        const day = String(parsed.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    };
+
     const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
         const files = event.target.files;
         if (!files || files.length === 0) return;
@@ -86,6 +103,7 @@ export function AdsAnalysis() {
         const toastId = toast.loading('Syncing...');
         let processedCount = 0;
         const totalFiles = files.length;
+        const dailySpendByDate = new Map<string, number>();
 
         for (const file of Array.from(files)) { // Convert FileList to Array for consistent iteration
             Papa.parse(file, {
@@ -173,12 +191,17 @@ export function AdsAnalysis() {
                         const videoPlays95 = cleanNum(row[findActualKey(['video plays at 95%']) || '']);
                         const videoPlays100 = cleanNum(row[findActualKey(['video plays at 100%']) || '']);
 
-                        const dateKey = findActualKey(['reporting starts', 'date', 'day']);
-                        const date = row[dateKey || ''] || '';
+                        const dateKey = findActualKey(['reporting starts', 'reporting ends', 'date', 'day', 'month']);
+                        const date = parseCsvDate(row[dateKey || '']);
                         const statusKey = findActualKey(['delivery', 'status', 'ad delivery']);
                         const status = row[statusKey || ''] || 'Active';
 
                         return { name, status, spend, purchases, roas, reach, impressions, cpc, ctr, cpa, clicks, cpm, frequency, addsToCart, outboundClicks, dailyBudget, videoPlays, videoAvgPlayTime, videoPlays25, videoPlays50, videoPlays75, videoPlays95, videoPlays100, level, date };
+                    });
+
+                    data.forEach((row: { date: string | null; spend: number }) => {
+                        if (!row.date || row.spend <= 0) return;
+                        dailySpendByDate.set(row.date, (dailySpendByDate.get(row.date) || 0) + row.spend);
                     });
 
                     try {
@@ -187,12 +210,31 @@ export function AdsAnalysis() {
                             processedCount++;
                             setUploadedData(prev => [...prev, ...data]);
                             if (processedCount === totalFiles) {
-                                toast.success(`Successfully synced ${totalFiles} tactical reports`, { id: toastId });
+                                const dailySpendResults = await Promise.all(
+                                    Array.from(dailySpendByDate.entries()).map(([date, amount]) =>
+                                        api.upsertDailyAdSpend({
+                                            date,
+                                            amount,
+                                            notes: 'Imported from ads CSV',
+                                        })
+                                    )
+                                );
+                                const failedDailySpendUpdates = dailySpendResults.filter(result => !result.success);
+                                if (dailySpendByDate.size === 0) {
+                                    toast.error('Ads synced, but no valid report dates were found for daily spend history.', { id: toastId });
+                                } else if (failedDailySpendUpdates.length > 0) {
+                                    toast.error('Ads synced, but daily spend history could not be updated.', { id: toastId });
+                                } else {
+                                    const dateLabel = dailySpendByDate.size === 1 ? '1 date' : `${dailySpendByDate.size} dates`;
+                                    toast.success(`Successfully synced ${totalFiles} tactical reports and updated spend for ${dateLabel}`, { id: toastId });
+                                }
                                 loadData();
                             }
+                        } else {
+                            toast.error(`Sync error: ${file.name}`, { id: toastId });
                         }
                     } catch (err) {
-                        toast.error(`Sync error: ${file.name}`);
+                        toast.error(`Sync error: ${file.name}`, { id: toastId });
                     }
                 }
             });

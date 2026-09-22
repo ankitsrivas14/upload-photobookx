@@ -419,21 +419,17 @@ export async function recomputePnlForDate(
     heatmapProfit = -adSpend;
   }
 
-  await DailyPnl.findOneAndUpdate(
-    { dateKey },
-    {
-      $set: {
-        isCompleted,
-        barChartProfit,
-        heatmapProfit,
-        orderCount,
-        adSpend,
-        totalRevenue,
-        totalCogs,
-      },
-    },
-    { upsert: true, new: true }
-  );
+  const { dailyPnlStore } = await import('../db/dailyStores');
+  await dailyPnlStore.set({
+    dateKey,
+    isCompleted,
+    barChartProfit,
+    heatmapProfit,
+    orderCount,
+    adSpend,
+    totalRevenue,
+    totalCogs,
+  });
 }
 
 /**

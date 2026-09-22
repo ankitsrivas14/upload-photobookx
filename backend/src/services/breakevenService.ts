@@ -180,10 +180,7 @@ export async function computeBreakevenMetrics(): Promise<BreakevenMetrics> {
  */
 export async function refreshBreakevenSnapshot(): Promise<BreakevenMetrics> {
   const metrics = await computeBreakevenMetrics();
-  await BreakevenSnapshot.findOneAndUpdate(
-    { key: 'latest' },
-    { $set: { metrics } },
-    { upsert: true }
-  );
+  const { breakevenStore } = await import('../db/dailyStores');
+  await breakevenStore.set({ key: 'latest', metrics });
   return metrics;
 }

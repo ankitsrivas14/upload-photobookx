@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { requireAdmin } from './adminAuth';
-import { ExpenseSource, MetaAdsExpense, DailyAdSpend } from '../models';
+import { ExpenseSource, MetaAdsExpense, DailyAdSpend, MetaAdPerformance } from '../models';
 import type { AuthenticatedRequest } from '../types';
 import { recomputeForDate } from '../services/roasService';
 
@@ -207,12 +207,35 @@ router.get('/daily-ad-spend', requireAdmin, async (_req: AuthenticatedRequest, r
     const entries = await DailyAdSpend.find()
       .sort({ date: -1, createdAt: -1 });
 
+    // Older CSV uploads were saved in MetaAdPerformance before the dedicated
+    // dailyAmountSpent field existed. Reconstruct their CSV total by date so
+    // the new column is immediately useful without overwriting manual amounts.
+    const dateKeys = entries.map(entry => new Date(entry.date).toISOString().slice(0, 10));
+    const csvSpendByDate = new Map<string, number>();
+    if (dateKeys.length > 0) {
+      const levelTotals = await MetaAdPerformance.aggregate([
+        { $match: { date: { $in: dateKeys } } },
+        { $group: { _id: { date: '$date', level: '$level' }, total: { $sum: '$spend' } } },
+      ]);
+
+      for (const row of levelTotals) {
+        const dateKey = String(row._id.date);
+        const total = Number(row.total) || 0;
+        // Campaign/ad-set/ad exports can all describe the same daily spend.
+        // Use the largest level total rather than adding report levels together.
+        csvSpendByDate.set(dateKey, Math.max(csvSpendByDate.get(dateKey) || 0, total));
+      }
+    }
+
     res.json({
       success: true,
       entries: entries.map(entry => ({
         id: entry._id,
         date: entry.date,
         amount: entry.amount,
+        dailyAmountSpent: entry.dailyAmountSpent ?? (
+          csvSpendByDate.get(new Date(entry.date).toISOString().slice(0, 10)) ?? null
+        ),
         notes: entry.notes,
         createdAt: entry.createdAt,
       })),
@@ -220,6 +243,74 @@ router.get('/daily-ad-spend', requireAdmin, async (_req: AuthenticatedRequest, r
   } catch (error) {
     console.error('Error fetching daily ad spend:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch daily ad spend' });
+  }
+});
+
+/**
+ * PUT /api/admin/expenses/daily-ad-spend
+ * Create or replace the daily spend entry for a date.
+ * Used by the ads CSV importer so re-uploading a report is idempotent.
+ */
+router.put('/daily-ad-spend', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { date, amount, notes } = req.body;
+    const parsedAmount = Number(amount);
+
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(String(date))) {
+      res.status(400).json({ success: false, error: 'A valid date is required (YYYY-MM-DD)' });
+      return;
+    }
+
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      res.status(400).json({ success: false, error: 'Valid amount is required' });
+      return;
+    }
+
+    // Parse date-only values as UTC midnight so the stored calendar date does not
+    // shift when it is later formatted in the app's timezone.
+    const [year, month, day] = String(date).split('-').map(Number);
+    const parsedDate = new Date(Date.UTC(year, month - 1, day));
+    if (
+      Number.isNaN(parsedDate.getTime()) ||
+      parsedDate.getUTCFullYear() !== year ||
+      parsedDate.getUTCMonth() !== month - 1 ||
+      parsedDate.getUTCDate() !== day
+    ) {
+      res.status(400).json({ success: false, error: 'Invalid date' });
+      return;
+    }
+
+    const entry = await DailyAdSpend.findOneAndUpdate(
+      { date: parsedDate },
+      {
+        $set: {
+          dailyAmountSpent: parsedAmount,
+          ...(notes !== undefined ? { notes: String(notes).trim() } : {}),
+        },
+        // CSV uploads do not create a manual amount. Existing manual amounts
+        // are preserved; new CSV-only dates start with no manual amount.
+        $setOnInsert: { date: parsedDate, amount: 0 },
+      },
+      { new: true, upsert: true, setDefaultsOnInsert: true }
+    );
+
+    const dateKey = parsedDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+    recomputeForDate(dateKey).catch((err) => console.error('ROAS recompute error:', err));
+
+    res.json({
+      success: true,
+      entry: {
+        id: entry._id,
+        date: entry.date,
+        amount: entry.amount,
+        dailyAmountSpent: entry.dailyAmountSpent,
+        notes: entry.notes,
+        createdAt: entry.createdAt,
+      },
+    });
+  } catch (error) {
+    console.error('Error upserting daily ad spend:', error);
+    res.status(500).json({ success: false, error: 'Failed to save daily ad spend entry' });
   }
 });
 

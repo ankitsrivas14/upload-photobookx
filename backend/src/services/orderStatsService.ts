@@ -129,26 +129,22 @@ export async function recomputeOrderStatsForDate(
 
   const isCompleted = orders.length > 0 && nonFinalCount === 0;
 
-  await DailyOrderStats.findOneAndUpdate(
-    { dateKey },
-    {
-      $set: {
-        prepaidCount,
-        codCount,
-        deliveredCount,
-        failedCount,
-        inTransitCount,
-        outForDeliveryCount,
-        attemptedDeliveryCount,
-        confirmedCount,
-        codDeliveredCount,
-        codFailedCount,
-        grossRevenue,
-        isCompleted,
-      },
-    },
-    { upsert: true, new: true }
-  );
+  const { dailyOrderStatsStore } = await import('../db/dailyStores');
+  await dailyOrderStatsStore.set({
+    dateKey,
+    prepaidCount,
+    codCount,
+    deliveredCount,
+    failedCount,
+    inTransitCount,
+    outForDeliveryCount,
+    attemptedDeliveryCount,
+    confirmedCount,
+    codDeliveredCount,
+    codFailedCount,
+    grossRevenue,
+    isCompleted,
+  });
 }
 
 export async function backfillOrderStats(): Promise<{ upserted: number }> {

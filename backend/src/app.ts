@@ -30,6 +30,10 @@ const app = express();
 const normalizeOrigin = (o: string) => o.trim().replace(/\/+$/, '');
 const allowedOrigins = [
   ...String(config.frontendUrl || '').split(','),
+  // Both hostnames are useful during local development: the browser may resolve
+  // `localhost` to IPv6 while the Vite process is bound on IPv4.
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
   'https://upload.photobookx.com',
 ]
   .map(normalizeOrigin)
