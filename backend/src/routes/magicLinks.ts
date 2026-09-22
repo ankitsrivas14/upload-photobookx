@@ -339,8 +339,6 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
     const createdAtMin = typeof req.query.created_at_min === 'string' ? req.query.created_at_min : undefined;
     const monthStr = typeof req.query.month === 'string' ? req.query.month : undefined;
 
-    const _pt0 = Date.now();
-
     // Resolve a specific target month if one was requested.
     const specificMonth =
       monthStr && monthStr !== 'all' && monthStr !== 'last30'
@@ -386,18 +384,15 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
       });
       availableMonths = Array.from(availableMonthsSet).sort().reverse();
     }
-    const _perfGetAll = Date.now() - _pt0;
 
     // Fetch delivery dates from database for all orders
     const orderNumbers = orders.map(o => o.name);
     const normalizedOrderNumbers = orderNumbers.map(n => n.startsWith('#') ? n.substring(1) : n);
     const allOrderNumberVariants = [...new Set([...orderNumbers, ...normalizedOrderNumbers])];
 
-    const _pt1 = Date.now();
     const deliveryDates = await OrderDeliveryDate.find({
       orderNumber: { $in: allOrderNumberVariants }
     });
-    const _perfDelivery = Date.now() - _pt1;
 
     // Create a map for quick lookup (key by both with and without #)
     const deliveryDateMap = new Map();
@@ -411,12 +406,9 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
     });
 
     // Fetch shipping charges from database only (no auto-fetch)
-    const _pt2 = Date.now();
-    let _perfShipping = 0;
     let shippingChargesMap = new Map<string, any>();
     try {
       const dbChargesMap = await shiprocketService.getShippingCharges(allOrderNumberVariants);
-      _perfShipping = Date.now() - _pt2;
 
       // Make shippingChargesMap agnostic of # prefix
       for (const [key, value] of dbChargesMap.entries()) {
@@ -433,14 +425,6 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
 
     res.json({
       success: true,
-      _perf: {
-        getAllOrders: _perfGetAll,
-        deliveryDates: _perfDelivery,
-        shippingCharges: _perfShipping,
-        totalPreSerialize: Date.now() - _pt0,
-        ordersShaped: orders.length,
-        path: allOrders && specificMonth ? `month:${specificMonth}` : 'full',
-      },
       availableMonths,
       orders: orders.map(order => {
         // Get delivery status from multiple sources

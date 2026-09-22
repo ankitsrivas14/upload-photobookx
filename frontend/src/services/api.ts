@@ -370,6 +370,11 @@ class ApiService {
     );
   }
 
+  // Fast order sync: pulls recent orders straight from Shopify into Firestore.
+  async firestoreSyncOrders(): Promise<{ success: boolean; fetched?: number; written?: number; error?: string }> {
+    return this.request('/api/admin/sales/firestore-sync-orders', { method: 'POST' });
+  }
+
   // Shiprocket Shipping Charges
   async fetchShippingCharge(orderNumber: string, refetch: boolean = true): Promise<{ success: boolean; shippingCharge?: number; message?: string; error?: string }> {
     return this.request<{ success: boolean; shippingCharge?: number; message?: string; error?: string }>(

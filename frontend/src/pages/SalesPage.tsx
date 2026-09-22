@@ -440,10 +440,11 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       setRefreshStatus('Clearing shipping cache...');
       await api.clearShippingChargesCache();
 
-      // Step 1b: Sync latest orders from Shopify
+      // Step 1b: Sync latest orders from Shopify into Firestore (fast; no 15MB Mongo path)
       setRefreshStatus('Syncing new orders from Shopify...');
-      const shopifySyncResponse = await api.clearOrdersCache();
-      const syncedCount = (shopifySyncResponse as any).syncedCount || 0;
+      const shopifySyncResponse = await api.firestoreSyncOrders();
+      const syncedCount = (shopifySyncResponse as any).written || 0;
+      monthOrdersCache.current.clear(); // fresh orders — drop the client prefetch cache
 
       // Step 2: Load ALL fresh orders from DB/cache to find any pending syncs across all months
       setRefreshStatus(syncedCount > 0 ? `Found ${syncedCount} updated orders. Loading all orders...` : 'No new orders. Loading order list...');
