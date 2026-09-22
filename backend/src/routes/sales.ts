@@ -520,13 +520,15 @@ router.post('/predict', requireAdmin, async (req: AuthenticatedRequest, res: Res
       });
 
       // 2. Search in ShopifyOrderCache for unfulfilled or new orders
-      // We look for any "all_orders" cache entry which contains the most orders
-      const newestCache = await ShopifyOrderCache.findOne({
-        cacheKey: { $regex: /^all_orders_/ }
-      }).sort({ cachedAt: -1 });
+      // We look for any "all_orders" cache entry which contains the most orders.
+      // .lean() + projection avoids hydrating the ~16MB doc through Mongoose (slow).
+      const newestCache = await ShopifyOrderCache.findOne(
+        { cacheKey: { $regex: /^all_orders_/ } },
+        { orders: 1, cachedAt: 1 }
+      ).sort({ cachedAt: -1 }).lean();
 
-      if (newestCache && Array.isArray(newestCache.orders)) {
-        for (const o of newestCache.orders) {
+      if (newestCache && Array.isArray((newestCache as any).orders)) {
+        for (const o of (newestCache as any).orders) {
           if (ordersMap.size >= 50) break;
           
           const name = (o.name || '').toString();

@@ -625,8 +625,9 @@ class ShopifyService {
   async syncOrders(limit: number = 5000): Promise<number> {
     try {
       const cacheKey = `all_orders_${limit}`;
-      const cachedData = await ShopifyOrderCache.findOne({ cacheKey });
-      
+      // Read-only (we rewrite via updateCache below), so .lean() to skip hydration.
+      const cachedData = await ShopifyOrderCache.findOne({ cacheKey }, { orders: 1 }).lean() as { orders: ShopifyOrder[] } | null;
+
       if (!cachedData || !cachedData.orders || cachedData.orders.length === 0) {
         console.log(`[Sync] No cache found, performing full fetch...`);
         const orders = await this.getAllOrders(limit);
