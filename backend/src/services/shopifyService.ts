@@ -256,6 +256,12 @@ class ShopifyService {
         this.memOrders.set(cacheKey, { orders: trimmedOrders, at: Date.now() });
       }
 
+      // Rebuild the small per-month partitions the SalesPage reads, so a month load
+      // never has to pull the whole ~15MB doc. Only from the canonical full key.
+      if (cacheKey === 'all_orders_10000') {
+        await this.rebuildMonthPartitions(trimmedOrders);
+      }
+
       // Order data is the revenue source for DailyROAS — refresh it in the
       // background whenever the all_orders cache changes (the only event that
       // can change any day's revenue). Reads of /daily-roas never recompute.
@@ -355,6 +361,74 @@ class ShopifyService {
       console.error('Error clearing specific cache:', error);
       throw error;
     }
+  }
+
+  /** IST 'YYYY-MM' for an order's creation date. */
+  private orderMonthKey(order: any): string | null {
+    if (!order?.created_at) return null;
+    return new Date(order.created_at).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }).substring(0, 7);
+  }
+
+  /**
+   * Split the (already-trimmed) orders into one small `orders_month_<YYYY-MM>` doc per
+   * month. The SalesPage reads a single month doc (~1MB) instead of the full ~15MB doc.
+   */
+  private async rebuildMonthPartitions(orders: ShopifyOrder[]): Promise<void> {
+    try {
+      const byMonth = new Map<string, any[]>();
+      for (const o of orders as any[]) {
+        const month = this.orderMonthKey(o);
+        if (!month) continue;
+        if (!byMonth.has(month)) byMonth.set(month, []);
+        byMonth.get(month)!.push(o);
+      }
+      const now = new Date();
+      const expiresAt = new Date(now.getTime() + 100 * 365 * 24 * 60 * 60 * 1000);
+      for (const [month, monthOrders] of byMonth) {
+        const cacheKey = `orders_month_${month}`;
+        await ShopifyOrderCache.findOneAndUpdate(
+          { cacheKey },
+          { orders: monthOrders, cachedAt: now, expiresAt },
+          { upsert: true }
+        );
+        this.memOrders.set(cacheKey, { orders: monthOrders, at: Date.now() });
+      }
+    } catch (error) {
+      console.error('Error rebuilding month partitions:', error);
+    }
+  }
+
+  /**
+   * Orders for a single IST month ('YYYY-MM'), read from the small per-month partition.
+   * Falls back to building the partitions from the full cache if missing (one-time cost).
+   */
+  async getOrdersForMonth(monthKey: string): Promise<ShopifyOrder[]> {
+    const cacheKey = `orders_month_${monthKey}`;
+    const mem = this.memOrders.get(cacheKey);
+    if (mem && Date.now() - mem.at < ShopifyService.MEM_ORDERS_TTL_MS) return mem.orders;
+
+    const cached = await this.getCachedOrders(cacheKey);
+    if (cached) {
+      this.memOrders.set(cacheKey, { orders: cached, at: Date.now() });
+      return cached;
+    }
+
+    // Partition not built yet — build it once from the full cache, then read.
+    const all = await this.getAllOrders(10000);
+    await this.rebuildMonthPartitions(all);
+    return (await this.getCachedOrders(cacheKey)) || [];
+  }
+
+  /** Available months ('YYYY-MM', newest first) from the partition keys — a tiny query. */
+  async listAvailableMonths(): Promise<string[]> {
+    const docs = await ShopifyOrderCache.find(
+      { cacheKey: { $regex: /^orders_month_/ } },
+      { cacheKey: 1 }
+    ).lean();
+    return (docs as any[])
+      .map((d) => String(d.cacheKey).replace('orders_month_', ''))
+      .sort()
+      .reverse();
   }
 
   /**

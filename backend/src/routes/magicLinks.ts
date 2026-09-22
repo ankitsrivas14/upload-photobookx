@@ -340,40 +340,45 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
     const monthStr = typeof req.query.month === 'string' ? req.query.month : undefined;
 
     const _pt0 = Date.now();
-    const allFetchedOrders = allOrders
-      ? await shopifyService.getAllOrders(limit, createdAtMin)
-      : await shopifyService.getRecentOrders(limit);
-    const _perfGetAll = Date.now() - _pt0;
 
-    // Compute available months before filtering
-    const availableMonthsSet = new Set<string>();
-    allFetchedOrders.forEach((o: any) => {
-      if (!o.created_at) return;
-      const dateKey = new Date(o.created_at).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }).substring(0, 7);
-      availableMonthsSet.add(dateKey);
-    });
-    const availableMonths = Array.from(availableMonthsSet).sort().reverse();
+    // Resolve a specific target month if one was requested.
+    const specificMonth =
+      monthStr && monthStr !== 'all' && monthStr !== 'last30'
+        ? (monthStr === 'current'
+            ? new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }).substring(0, 7)
+            : monthStr)
+        : null;
 
-    // Filter orders by month parameter if requested
-    let orders = allFetchedOrders;
-    if (monthStr && monthStr !== 'all') {
+    let orders: any[];
+    let availableMonths: string[];
+
+    if (allOrders && specificMonth) {
+      // Fast path: read only that month's small partition, not the full ~15MB doc.
+      orders = await shopifyService.getOrdersForMonth(specificMonth);
+      availableMonths = await shopifyService.listAvailableMonths();
+    } else {
+      // 'all' / 'last30' / non-all fetch → load everything (slower, used rarely).
+      const allFetchedOrders = allOrders
+        ? await shopifyService.getAllOrders(limit, createdAtMin)
+        : await shopifyService.getRecentOrders(limit);
+
+      const availableMonthsSet = new Set<string>();
+      allFetchedOrders.forEach((o: any) => {
+        if (!o.created_at) return;
+        const dateKey = new Date(o.created_at).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }).substring(0, 7);
+        availableMonthsSet.add(dateKey);
+      });
+      availableMonths = Array.from(availableMonthsSet).sort().reverse();
+
+      orders = allFetchedOrders;
       if (monthStr === 'last30') {
         const thirtyDaysAgo = new Date();
         thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
         thirtyDaysAgo.setHours(0, 0, 0, 0);
         orders = allFetchedOrders.filter((o: any) => new Date(o.created_at) >= thirtyDaysAgo);
-      } else {
-        let targetMonth = monthStr;
-        if (monthStr === 'current') {
-          targetMonth = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }).substring(0, 7);
-        }
-        orders = allFetchedOrders.filter((o: any) => {
-          if (!o.created_at) return false;
-          const dateKey = new Date(o.created_at).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }).substring(0, 7);
-          return dateKey === targetMonth;
-        });
       }
     }
+    const _perfGetAll = Date.now() - _pt0;
 
     // Fetch delivery dates from database for all orders
     const orderNumbers = orders.map(o => o.name);
@@ -426,7 +431,7 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
         shippingCharges: _perfShipping,
         totalPreSerialize: Date.now() - _pt0,
         ordersShaped: orders.length,
-        ordersInCache: allFetchedOrders.length,
+        path: allOrders && specificMonth ? `month:${specificMonth}` : 'full',
       },
       availableMonths,
       orders: orders.map(order => {
@@ -460,7 +465,7 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
 
         // Check gateway field
         const gateway = order.gateway?.toLowerCase() || '';
-        const paymentGateways = order.payment_gateway_names?.map(g => g.toLowerCase()) || [];
+        const paymentGateways = order.payment_gateway_names?.map((g: string) => g.toLowerCase()) || [];
         const tags = order.tags?.toLowerCase() || '';
 
         // Check if it's COD based on gateway/tags — ignore financial_status because
@@ -469,7 +474,7 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
         if (
           gateway.includes('cash on delivery') ||
           gateway.includes('cod') ||
-          paymentGateways.some(g => g.includes('cash on delivery') || g.includes('cod')) ||
+          paymentGateways.some((g: string) => g.includes('cash on delivery') || g.includes('cod')) ||
           tags.includes('cod')
         ) {
           paymentMethod = 'COD';
@@ -505,7 +510,7 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
           customerState: dbDeliveryData?.addressState || shippingChargesMap.get(order.name)?.customerState || null,
           cancelledAt: order.cancelled_at,
           awbCode: shippingChargesMap.get(order.name)?.awbCode || null,
-          lineItems: order.line_items?.map(item => ({
+          lineItems: order.line_items?.map((item: any) => ({
             title: item.title,
             quantity: item.quantity,
             variantTitle: item.variant_title,
