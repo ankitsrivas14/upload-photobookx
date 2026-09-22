@@ -97,11 +97,11 @@ export async function runScheduledRefresh(): Promise<{
   // 2. Decide which orders need a shipping sync (orders from Firestore).
   const orders = await getAll();
   const orderNames = orders.map((o: any) => o.name);
-  const [rtoRows, chargeMap] = await Promise.all([
-    RTOOrder.find({}, { shopifyOrderId: 1, _id: 0 }).lean(),
+  const { rtoStore, idSet } = await import('../db/orderListStores');
+  const [rtoSet, chargeMap] = await Promise.all([
+    idSet(rtoStore),
     shiprocketService.getShippingCharges(orderNames),
   ]);
-  const rtoSet = new Set((rtoRows as any[]).map((r) => r.shopifyOrderId as number));
   const toSync = selectOrdersNeedingShippingSync(orders, rtoSet, chargeMap);
 
   // 3. One bulk shipping fetch (order-map + wallet-txn caches keep this cheap).

@@ -77,8 +77,9 @@ export async function computeBreakevenMetrics(): Promise<BreakevenMetrics> {
   // Load data needed to compute per-order metrics (orders + shipping from Firestore)
   const { getAll } = await import('../db/ordersRepo');
   const { getAllAsMap } = await import('../db/shippingRepo');
+  const { rtoStore, idSet } = await import('../db/orderListStores');
   const [rtoSet, shippingMap, cogsConfig, allOrders] = await Promise.all([
-    RTOOrder.find({}, { shopifyOrderId: 1 }).lean().then((docs) => new Set((docs as any[]).map((d) => d.shopifyOrderId as number))),
+    idSet(rtoStore),
     getAllAsMap(),
     COGSConfiguration.findOne({ effectiveFrom: { $lte: new Date() } })
       .sort({ effectiveFrom: -1 })

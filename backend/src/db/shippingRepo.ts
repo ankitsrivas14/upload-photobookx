@@ -55,6 +55,12 @@ export async function getAllAsMap(): Promise<Map<string, number>> {
   return map;
 }
 
+/** Every shipping-charge doc (full fields). */
+export async function getAllDocs(): Promise<any[]> {
+  const snap = await getFirestore().collection(COLLECTION).get();
+  return snap.docs.map((d) => d.data());
+}
+
 /** Fetch charge docs for the given order numbers, keyed by bare order number. */
 export async function getMany(orderNumbers: string[]): Promise<Map<string, any>> {
   const db = getFirestore();

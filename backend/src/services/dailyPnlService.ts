@@ -29,8 +29,8 @@ async function loadOrdersByDate(): Promise<Map<string, any[]>> {
 }
 
 async function loadRtoSet(): Promise<Set<number>> {
-  const docs = await RTOOrder.find({}, { shopifyOrderId: 1 }).lean();
-  return new Set((docs as any[]).map((d) => d.shopifyOrderId as number));
+  const { rtoStore, idSet } = await import('../db/orderListStores');
+  return idSet(rtoStore);
 }
 
 async function loadShippingMap(): Promise<Map<string, number>> {

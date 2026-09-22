@@ -11,8 +11,8 @@ function toDateKey(date: Date): string {
 
 /** Build set of shopifyOrderIds that are marked as RTO */
 async function buildRtoSet(): Promise<Set<number>> {
-  const rtos = await RTOOrder.find({}, { shopifyOrderId: 1 }).lean();
-  return new Set((rtos as any[]).map((r) => r.shopifyOrderId as number));
+  const { rtoStore, idSet } = await import('../db/orderListStores');
+  return idSet(rtoStore);
 }
 
 /** Build a map of dateKey → orders (non-cancelled) from Firestore */

@@ -390,9 +390,8 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
     const normalizedOrderNumbers = orderNumbers.map(n => n.startsWith('#') ? n.substring(1) : n);
     const allOrderNumberVariants = [...new Set([...orderNumbers, ...normalizedOrderNumbers])];
 
-    const deliveryDates = await OrderDeliveryDate.find({
-      orderNumber: { $in: allOrderNumberVariants }
-    });
+    const { deliveryDateStore } = await import('../db/orderListStores');
+    const deliveryDates = await deliveryDateStore.getMany(allOrderNumberVariants);
 
     // Create a map for quick lookup (key by both with and without #)
     const deliveryDateMap = new Map();
@@ -539,8 +538,9 @@ router.get('/shopify/gst-summary', requireAdmin, async (req: AuthenticatedReques
 
     // Delivery dates from DB (CSV-imported), keyed with and without the leading '#'.
     const orderNumbers = allOrders.map((o: any) => o.name);
-    const variants = [...new Set(orderNumbers.flatMap((n: string) => [n, n.startsWith('#') ? n.substring(1) : `#${n}`]))];
-    const deliveryDates = await OrderDeliveryDate.find({ orderNumber: { $in: variants } });
+    const variants = [...new Set(orderNumbers.flatMap((n: string) => [n, n.startsWith('#') ? n.substring(1) : `#${n}`]))] as string[];
+    const { deliveryDateStore } = await import('../db/orderListStores');
+    const deliveryDates = await deliveryDateStore.getMany(variants);
     const deliveryDateMap = new Map<string, any>();
     deliveryDates.forEach((dd) => {
       deliveryDateMap.set(dd.orderNumber, dd);

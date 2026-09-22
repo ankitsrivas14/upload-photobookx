@@ -68,25 +68,18 @@ router.post('/upload', requireAdmin, upload.single('csv'), async (req: Authentic
       })
       .on('end', async () => {
         try {
-          // Bulk upsert delivery dates
-          const bulkOps = results.map(({ orderNumber, deliveredAt, addressState }) => ({
-            updateOne: {
-              filter: { orderNumber },
-              update: {
-                $set: {
-                  orderNumber,
-                  deliveredAt,
-                  ...(addressState && { addressState }),
-                  source: 'csv' as 'csv' | 'shopify',
-                  updatedAt: new Date(),
-                },
-              },
-              upsert: true,
-            },
+          // Bulk upsert delivery dates into Firestore
+          const docs = results.map(({ orderNumber, deliveredAt, addressState }) => ({
+            orderNumber,
+            deliveredAt,
+            ...(addressState && { addressState }),
+            source: 'csv' as 'csv' | 'shopify',
+            updatedAt: new Date(),
           }));
 
-          if (bulkOps.length > 0) {
-            await OrderDeliveryDate.bulkWrite(bulkOps as any);
+          if (docs.length > 0) {
+            const { deliveryDateStore } = await import('../db/orderListStores');
+            await deliveryDateStore.bulkSet(docs);
           }
 
           res.json({
@@ -129,9 +122,11 @@ router.post('/upload', requireAdmin, upload.single('csv'), async (req: Authentic
  */
 router.get('/stats', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const total = await OrderDeliveryDate.countDocuments();
-    const csvCount = await OrderDeliveryDate.countDocuments({ source: 'csv' });
-    const shopifyCount = await OrderDeliveryDate.countDocuments({ source: 'shopify' });
+    const { deliveryDateStore } = await import('../db/orderListStores');
+    const all = await deliveryDateStore.all();
+    const total = all.length;
+    const csvCount = all.filter((d: any) => d.source === 'csv').length;
+    const shopifyCount = all.filter((d: any) => d.source === 'shopify').length;
 
     res.json({
       success: true,

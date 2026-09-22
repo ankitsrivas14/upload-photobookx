@@ -9,6 +9,7 @@ import { backfillOrderStats } from '../services/orderStatsService';
 import { backfillDailyPnl, getVariantPerformance } from '../services/dailyPnlService';
 import { computeBreakevenMetrics, refreshBreakevenSnapshot } from '../services/breakevenService';
 import { dailyOrderStatsStore, dailyPnlStore, dailyShippingStore, dailyRoasStore, breakevenStore, readDailyRange } from '../db/dailyStores';
+import { rtoStore, discardedStore, ackStore, ticketStore } from '../db/orderListStores';
 import shopifyService from '../services/shopifyService';
 
 const router = express.Router();
@@ -19,7 +20,7 @@ const router = express.Router();
  */
 router.get('/acknowledged-orders', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const acknowledgedOrders = await AcknowledgedOrder.find({}, { shopifyOrderId: 1, _id: 0 });
+    const acknowledgedOrders = await ackStore.all();
     const orderIds = acknowledgedOrders.map((order: any) => order.shopifyOrderId);
     
     res.json({
@@ -63,7 +64,7 @@ router.post('/acknowledge-orders', requireAdmin, async (req: AuthenticatedReques
       acknowledgedAt: new Date(),
     }));
     
-    await AcknowledgedOrder.insertMany(acknowledgedOrders, { ordered: false });
+    await ackStore.bulkSet(acknowledgedOrders);
     
     res.json({
       success: true,
@@ -97,7 +98,7 @@ router.delete('/acknowledge-orders', requireAdmin, async (req: AuthenticatedRequ
       return;
     }
     
-    await AcknowledgedOrder.deleteMany({ shopifyOrderId: { $in: orderIds } });
+    await ackStore.deleteMany(orderIds.map(String));
     
     res.json({
       success: true,
@@ -111,7 +112,7 @@ router.delete('/acknowledge-orders', requireAdmin, async (req: AuthenticatedRequ
 
 router.get('/ticket-raised-orders', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const ticketOrders = await TicketRaisedOrder.find({}, { shopifyOrderId: 1, _id: 0 });
+    const ticketOrders = await ticketStore.all();
     const orderIds = ticketOrders.map((order: any) => order.shopifyOrderId);
     
     res.json({
@@ -149,7 +150,7 @@ router.post('/ticket-raised-orders', requireAdmin, async (req: AuthenticatedRequ
       markedAt: new Date(),
     }));
     
-    await TicketRaisedOrder.insertMany(ticketOrders, { ordered: false });
+    await ticketStore.bulkSet(ticketOrders);
     
     res.json({
       success: true,
@@ -178,7 +179,7 @@ router.delete('/ticket-raised-orders', requireAdmin, async (req: AuthenticatedRe
       return;
     }
     
-    await TicketRaisedOrder.deleteMany({ shopifyOrderId: { $in: orderIds } });
+    await ticketStore.deleteMany(orderIds.map(String));
     
     res.json({
       success: true,
@@ -195,7 +196,7 @@ router.delete('/ticket-raised-orders', requireAdmin, async (req: AuthenticatedRe
  */
 router.get('/discarded-orders', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const discardedOrders = await DiscardedOrder.find({}, { shopifyOrderId: 1, _id: 0 });
+    const discardedOrders = await discardedStore.all();
     const orderIds = discardedOrders.map(order => order.shopifyOrderId);
     
     res.json({
@@ -239,7 +240,7 @@ router.post('/discard-orders', requireAdmin, async (req: AuthenticatedRequest, r
       discardedAt: new Date(),
     }));
     
-    await DiscardedOrder.insertMany(discardedOrders, { ordered: false });
+    await discardedStore.bulkSet(discardedOrders);
     
     res.json({
       success: true,
@@ -273,7 +274,7 @@ router.delete('/discard-orders', requireAdmin, async (req: AuthenticatedRequest,
       return;
     }
     
-    await DiscardedOrder.deleteMany({ shopifyOrderId: { $in: orderIds } });
+    await discardedStore.deleteMany(orderIds.map(String));
     
     res.json({
       success: true,
@@ -291,7 +292,7 @@ router.delete('/discard-orders', requireAdmin, async (req: AuthenticatedRequest,
  */
 router.get('/rto-orders', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const rtoOrders = await RTOOrder.find({}, { shopifyOrderId: 1, _id: 0 });
+    const rtoOrders = await rtoStore.all();
     const orderIds = rtoOrders.map(order => order.shopifyOrderId);
     
     res.json({
@@ -336,7 +337,7 @@ router.post('/mark-rto', requireAdmin, async (req: AuthenticatedRequest, res: Re
       notes: notes || undefined,
     }));
     
-    await RTOOrder.insertMany(rtoOrders, { ordered: false });
+    await rtoStore.bulkSet(rtoOrders);
 
     res.json({
       success: true,
@@ -376,7 +377,7 @@ router.delete('/mark-rto', requireAdmin, async (req: AuthenticatedRequest, res: 
       return;
     }
     
-    await RTOOrder.deleteMany({ shopifyOrderId: { $in: orderIds } });
+    await rtoStore.deleteMany(orderIds.map(String));
 
     res.json({
       success: true,
@@ -1405,6 +1406,34 @@ router.post('/firestore-backfill-orders', requireAdmin, async (_req: Authenticat
 });
 
 /**
+ * POST /api/admin/sales/firestore-backfill-lists
+ * One-time copy of the order membership lists + delivery dates from Mongo to Firestore.
+ */
+router.post('/firestore-backfill-lists', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const [rto, discarded, ack, ticket, delivery] = await Promise.all([
+      RTOOrder.find({}).lean(),
+      DiscardedOrder.find({}).lean(),
+      AcknowledgedOrder.find({}).lean(),
+      TicketRaisedOrder.find({}).lean(),
+      OrderDeliveryDate.find({}).lean(),
+    ]);
+    const { deliveryDateStore } = await import('../db/orderListStores');
+    const out = {
+      rto: await rtoStore.bulkSet(rto as any[]),
+      discarded: await discardedStore.bulkSet(discarded as any[]),
+      acknowledged: await ackStore.bulkSet(ack as any[]),
+      ticket: await ticketStore.bulkSet(ticket as any[]),
+      deliveryDates: await deliveryDateStore.bulkSet(delivery as any[]),
+    };
+    res.json({ success: true, written: out });
+  } catch (error) {
+    console.error('Firestore lists backfill failed:', error);
+    res.status(500).json({ success: false, error: String((error as any)?.message || error) });
+  }
+});
+
+/**
  * POST /api/admin/sales/refresh-aggregates
  * Recompute every dashboard aggregate from the current Firestore data (order stats,
  * shipping stats, daily P&L, ROAS, breakeven). Fast now that reads are on Firestore.
@@ -1566,7 +1595,7 @@ router.get('/incomplete-day-orders', requireAdmin, async (req: AuthenticatedRequ
     const { getMonth } = await import('../db/ordersRepo');
     const [orders, rtoRows] = await Promise.all([
       getMonth(date.substring(0, 7)), // only that month's orders from Firestore
-      RTOOrder.find({}, { shopifyOrderId: 1, _id: 0 }).lean(),
+      rtoStore.all(),
     ]);
     const rtoSet = new Set((rtoRows as any[]).map((r) => r.shopifyOrderId as number));
 
@@ -1966,42 +1995,18 @@ router.get('/failed-orders-analysis', requireAdmin, async (_req: AuthenticatedRe
   try {
     const DATA_START = '2026-01-28';
 
-    // Load all support data in parallel
-    const [rtoRows, discardedRows, shippingRows, cacheEntries] = await Promise.all([
-      RTOOrder.find({}, { shopifyOrderId: 1 }).lean(),
-      DiscardedOrder.find({}, { orderId: 1 }).lean(),
-      ShippingCharge.find({}, { orderNumber: 1, courierName: 1, pickupDate: 1, firstAttemptDate: 1, customerCity: 1 }).lean(),
-      ShopifyOrderCache.aggregate([
-        { $match: { cacheKey: { $regex: /^all_orders_/ } } },
-        { $project: {
-          orders: {
-            $map: {
-              input: { $filter: {
-                input: '$orders', as: 'o',
-                cond: { $and: [
-                  { $not: [{ $ifNull: ['$$o.cancelled_at', false] }] },
-                  { $gte: ['$$o.created_at', DATA_START] },
-                ]},
-              }},
-              as: 'o',
-              in: {
-                id: '$$o.id',
-                name: '$$o.name',
-                created_at: '$$o.created_at',
-                fulfillment_status: '$$o.fulfillment_status',
-                shipment_status: { $ifNull: [
-                  { $getField: { field: 'shipment_status', input: { $arrayElemAt: [{ $ifNull: ['$$o.fulfillments', []] }, -1] } } },
-                  null,
-                ]},
-              },
-            },
-          },
-        }},
-      ]),
+    // Load all support data from Firestore in parallel
+    const { getAll } = await import('../db/ordersRepo');
+    const { getAllDocs: getAllShipping } = await import('../db/shippingRepo');
+    const [rtoRows, discardedRows, shippingRows, allOrders] = await Promise.all([
+      rtoStore.all(),
+      discardedStore.all(),
+      getAllShipping(),
+      getAll(),
     ]);
 
     const rtoSet = new Set((rtoRows as any[]).map(r => r.shopifyOrderId as number));
-    const discardedSet = new Set((discardedRows as any[]).map(d => d.orderId as number));
+    const discardedSet = new Set((discardedRows as any[]).map(d => Number(d.shopifyOrderId)));
 
     // Build shipping map: normalise order number → { courierName, pickupDate, firstAttemptDate, city }
     const shipMap = new Map<string, { courierName: string | null; pickupDate: string | null; firstAttemptDate: string | null; city: string | null }>();
@@ -2012,16 +2017,18 @@ router.get('/failed-orders-analysis', requireAdmin, async (_req: AuthenticatedRe
       shipMap.set(`#${base}`, val);
     }
 
-    // Deduplicate orders across cache entries
-    const seen = new Set<number>();
-    const orders: Array<{ id: number; name: string; created_at: string; fulfillment_status: string | null; shipment_status: string | null }> = [];
-    for (const entry of cacheEntries as any[]) {
-      for (const o of (entry.orders ?? []) as any[]) {
-        if (!o.id || seen.has(o.id)) continue;
-        seen.add(o.id);
-        orders.push(o);
-      }
-    }
+    // Slim the Firestore orders to the shape this analysis needs.
+    const orders = (allOrders as any[])
+      .filter((o) => o.id && !o.cancelled_at && (o.created_at ?? '') >= DATA_START)
+      .map((o) => ({
+        id: o.id,
+        name: o.name,
+        created_at: o.created_at,
+        fulfillment_status: o.fulfillment_status ?? null,
+        shipment_status: o.fulfillments?.length
+          ? (o.fulfillments[o.fulfillments.length - 1].shipment_status ?? null)
+          : null,
+      }));
 
     // Courier name normalisation
     const groupCourier = (name: string | null | undefined): string => {
