@@ -339,9 +339,11 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
     const createdAtMin = typeof req.query.created_at_min === 'string' ? req.query.created_at_min : undefined;
     const monthStr = typeof req.query.month === 'string' ? req.query.month : undefined;
 
+    const _pt0 = Date.now();
     const allFetchedOrders = allOrders
       ? await shopifyService.getAllOrders(limit, createdAtMin)
       : await shopifyService.getRecentOrders(limit);
+    console.log(`[PERF] /shopify/orders: getAllOrders ${Date.now() - _pt0}ms (${allFetchedOrders.length})`);
 
     // Compute available months before filtering
     const availableMonthsSet = new Set<string>();
@@ -378,9 +380,11 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
     const normalizedOrderNumbers = orderNumbers.map(n => n.startsWith('#') ? n.substring(1) : n);
     const allOrderNumberVariants = [...new Set([...orderNumbers, ...normalizedOrderNumbers])];
 
+    const _pt1 = Date.now();
     const deliveryDates = await OrderDeliveryDate.find({
       orderNumber: { $in: allOrderNumberVariants }
     });
+    console.log(`[PERF] /shopify/orders: deliveryDates find ${Date.now() - _pt1}ms (${allOrderNumberVariants.length} variants, ${deliveryDates.length} found)`);
 
     // Create a map for quick lookup (key by both with and without #)
     const deliveryDateMap = new Map();
@@ -394,9 +398,11 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
     });
 
     // Fetch shipping charges from database only (no auto-fetch)
+    const _pt2 = Date.now();
     let shippingChargesMap = new Map<string, any>();
     try {
       const dbChargesMap = await shiprocketService.getShippingCharges(allOrderNumberVariants);
+      console.log(`[PERF] /shopify/orders: shippingCharges find ${Date.now() - _pt2}ms (${dbChargesMap.size} found)`);
 
       // Make shippingChargesMap agnostic of # prefix
       for (const [key, value] of dbChargesMap.entries()) {
@@ -411,6 +417,7 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
       console.error('[API] Error fetching shipping charges:', error);
     }
 
+    console.log(`[PERF] /shopify/orders: total pre-serialize ${Date.now() - _pt0}ms (shaping ${orders.length} orders)`);
     res.json({
       success: true,
       availableMonths,

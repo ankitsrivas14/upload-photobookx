@@ -476,13 +476,15 @@ class ShopifyService {
     // on every request within the TTL.
     const mem = this.memOrders.get(cacheKey);
     if (mem && Date.now() - mem.at < ShopifyService.MEM_ORDERS_TTL_MS) {
+      console.log(`[PERF] getAllOrders ${cacheKey}: MEM hit (${mem.orders.length})`);
       return mem.orders;
     }
 
     // Then the DB cache
+    const _t0 = Date.now();
     const cachedOrders = await this.getCachedOrders(cacheKey);
     if (cachedOrders) {
-      console.log(`Using cached orders: ${cachedOrders.length}`);
+      console.log(`[PERF] getAllOrders ${cacheKey}: DB cache read ${Date.now() - _t0}ms (${cachedOrders.length} orders)`);
       this.memOrders.set(cacheKey, { orders: cachedOrders, at: Date.now() });
       return cachedOrders;
     }
