@@ -62,12 +62,12 @@ export async function computeBreakevenMetrics(): Promise<BreakevenMetrics> {
   const startKey = toDateKey(start) < DATA_START_DATE ? DATA_START_DATE : toDateKey(start);
 
   // Get completed date keys from DailyOrderStats (liberal completion: prepaid assumed final)
-  const completedStats = await DailyOrderStats.find(
-    { dateKey: { $gte: startKey, $lte: endKey }, isCompleted: true },
-    { dateKey: 1 }
-  ).lean();
+  const { dailyOrderStatsStore } = await import('../db/dailyStores');
+  const completedStats = await dailyOrderStatsStore.rangeByField('dateKey', startKey, endKey);
 
-  const completedDateKeys = new Set((completedStats as any[]).map((d) => d.dateKey as string));
+  const completedDateKeys = new Set(
+    (completedStats as any[]).filter((d) => d.isCompleted).map((d) => d.dateKey as string)
+  );
   const completedDaysCount = completedDateKeys.size;
 
   if (completedDaysCount === 0) {

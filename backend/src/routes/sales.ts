@@ -1780,9 +1780,7 @@ router.get('/daily-averages', requireAdmin, async (req: AuthenticatedRequest, re
     startDate.setHours(0, 0, 0, 0);
     const startKey = startDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 
-    const docs = await DailyPnl.find({ dateKey: { $gte: startKey } })
-      .sort({ dateKey: 1 })
-      .lean();
+    const docs = await readDailyRange(dailyPnlStore, startKey);
 
     const daily = (docs as any[]).map((d) => {
       const orders = d.orderCount ?? 0;
