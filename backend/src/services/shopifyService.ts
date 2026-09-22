@@ -548,6 +548,36 @@ class ShopifyService {
   }
 
   /**
+   * Fetch orders created on/after `createdAtMin` straight from Shopify (trimmed), WITHOUT
+   * touching the Mongo cache. Used by the lightweight Firestore sync so order freshness
+   * never depends on reading/writing the ~15MB cache doc.
+   */
+  async fetchRecentOrders(createdAtMin: string, maxOrders: number = 2000): Promise<any[]> {
+    const perPage = 250;
+    const all: any[] = [];
+    let pageInfo: string | null = null;
+    let first = true;
+    while (all.length < maxOrders) {
+      let url: string;
+      if (first) {
+        url = `/orders.json?status=any&limit=${perPage}&created_at_min=${encodeURIComponent(createdAtMin)}`;
+        first = false;
+      } else if (pageInfo) {
+        url = `/orders.json?page_info=${pageInfo}&limit=${perPage}`;
+      } else {
+        break;
+      }
+      const { data, linkHeader } = await this.makeRequestWithHeaders<ShopifyOrdersResponse>(url);
+      const orders = data.orders || [];
+      if (orders.length === 0) break;
+      all.push(...orders);
+      pageInfo = this.parseNextPageInfo(linkHeader);
+      if (!pageInfo || orders.length < perPage) break;
+    }
+    return all.map((o) => this.trimOrderForCache(o));
+  }
+
+  /**
    * Get ALL recent orders (not filtered by product)
    * For sales tracking and general order management
    * Uses caching with 5-minute TTL

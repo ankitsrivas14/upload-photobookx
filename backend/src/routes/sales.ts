@@ -1425,6 +1425,25 @@ router.post('/firestore-backfill-orders', requireAdmin, async (_req: Authenticat
 });
 
 /**
+ * POST /api/admin/sales/firestore-sync-orders
+ * Fast freshness: fetch recent orders straight from Shopify (last N days) and upsert
+ * into Firestore — no 15MB Mongo round-trip. This is what keeps orders current.
+ */
+router.post('/firestore-sync-orders', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const days = Math.max(1, Math.min(60, Number(req.query.days) || 14));
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    const recent = await shopifyService.fetchRecentOrders(since);
+    const { saveAll } = await import('../db/ordersRepo');
+    const written = await saveAll(recent);
+    res.json({ success: true, fetched: recent.length, written, since });
+  } catch (error) {
+    console.error('Firestore orders sync failed:', error);
+    res.status(500).json({ success: false, error: String((error as any)?.message || error) });
+  }
+});
+
+/**
  * GET /api/admin/sales/monthly-order-counts
  * Total orders (prepaid + COD) grouped by month, oldest first — for the
  * dashboard's "Orders per month" bar chart. Aggregated in the DB.
