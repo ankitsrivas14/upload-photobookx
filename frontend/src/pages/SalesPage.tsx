@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
 import styles from './SalesPage.module.css';
@@ -106,6 +106,8 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
   const [selectAll, setSelectAll] = useState(false);
   const [selectedMonthFilter, setSelectedMonthFilter] = useState<string>(initialFilter?.period || 'current'); // 'all', 'current', 'last30', or 'YYYY-MM'
   const [availableMonthsList, setAvailableMonthsList] = useState<string[]>([]);
+  // Client-side cache of orders per month filter, so prefetched months switch instantly.
+  const monthOrdersCache = useRef<Map<string, ShopifyOrder[]>>(new Map());
   const [showBulkMenu, setShowBulkMenu] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -352,12 +354,21 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
     }
   };
 
-  const loadOrders = async (monthArg?: string) => {
-    setIsLoading(true);
+  const loadOrders = async (monthArg?: string, force = false) => {
     const targetMonth = monthArg || selectedMonthFilter;
+    // Instant switch if we already prefetched this month.
+    if (!force) {
+      const cached = monthOrdersCache.current.get(targetMonth);
+      if (cached) {
+        setOrders(cached);
+        return;
+      }
+    }
+    setIsLoading(true);
     try {
       const ordersResponse = await api.getOrders(10000, true, undefined, targetMonth);
       if (ordersResponse.success && ordersResponse.orders) {
+        monthOrdersCache.current.set(targetMonth, ordersResponse.orders);
         setOrders(ordersResponse.orders);
         if (ordersResponse.availableMonths) {
           setAvailableMonthsList(ordersResponse.availableMonths);
@@ -380,6 +391,27 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       fetchCurrentPrediction();
     }
   }, [selectedMonthFilter]);
+
+  // Once the current month is loaded and we know the available months, prefetch the
+  // other months in the background so switching to them is instant. Each is a small
+  // per-month read on the backend.
+  useEffect(() => {
+    if (availableMonthsList.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      for (const m of availableMonthsList) {
+        if (cancelled) break;
+        if (monthOrdersCache.current.has(m)) continue;
+        try {
+          const res = await api.getOrders(10000, true, undefined, m);
+          if (res.success && res.orders) monthOrdersCache.current.set(m, res.orders);
+        } catch {
+          /* background prefetch — ignore errors */
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [availableMonthsList]);
 
   // Fetch fixed monthly expenses total whenever the selected month changes
   useEffect(() => {
@@ -493,7 +525,8 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
 
       // Step 5: Reload to get updated data with shipping breakdown
       setRefreshStatus('Refreshing display...');
-      await loadOrders(selectedMonthFilter);
+      monthOrdersCache.current.clear(); // data changed across months — drop the prefetch cache
+      await loadOrders(selectedMonthFilter, true);
     } catch (err) {
       console.error('Failed to refresh data:', err);
       toast.error('Failed to refresh data. Please try again.');
@@ -1485,7 +1518,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
 
       if (response.success) {
         // Reload data to reflect the change
-        await loadOrders(selectedMonthFilter);
+        await loadOrders(selectedMonthFilter, true);
         setShowDeliveryStatusModal(false);
         setSelectedOrderForStatus(null);
         toast.success('Delivery status updated successfully');
@@ -1506,7 +1539,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
         const response = await api.addCustomerTag(customerId, tag);
         if (response.success) {
           await api.clearOrdersCache();
-          await loadOrders(selectedMonthFilter);
+          await loadOrders(selectedMonthFilter, true);
           toast.success('Tag added successfully');
         } else {
           toast.error(`Error: ${response.error || 'Failed to add tag'}`);
@@ -1571,7 +1604,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       const response = await api.bulkAddCustomerTags(customerIds, 'no-cod');
       if (response.success) {
         await api.clearOrdersCache();
-        await loadOrders(selectedMonthFilter);
+        await loadOrders(selectedMonthFilter, true);
         setSelectedOrders(new Set());
         setSelectAll(false);
         setShowBulkMenu(false);
