@@ -1055,7 +1055,15 @@ class ShopifyService {
 
       // Reflect the change in the cache WITHOUT wiping it — wiping forced the next
       // read to refetch every order from Shopify (slow). Patch the one order instead.
-      await this.patchCachedOrderDeliveryStatus(orderNumber, status === 'Delivered' ? 'delivered' : 'failure');
+      const shipmentStatus = status === 'Delivered' ? 'delivered' : 'failure';
+      await this.patchCachedOrderDeliveryStatus(orderNumber, shipmentStatus);
+      // And in Firestore, which the SalesPage now reads from.
+      try {
+        const { patchStatusByName } = await import('../db/ordersRepo');
+        await patchStatusByName(orderNumber, shipmentStatus);
+      } catch (e) {
+        console.error('[Firestore] mark patch failed (non-fatal):', e);
+      }
 
       return { success: true };
     } catch (error: any) {
