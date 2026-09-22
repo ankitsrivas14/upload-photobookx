@@ -51,18 +51,25 @@ export async function upsertMany(orders: any[]): Promise<number> {
   return written;
 }
 
-/** All orders created in the given IST month ('YYYY-MM'). */
+/** Newest-first by creation time (matches the order the UI expects). */
+function sortNewestFirst(orders: any[]): any[] {
+  return orders.sort(
+    (a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+  );
+}
+
+/** All orders created in the given IST month ('YYYY-MM'), newest first. */
 export async function getMonth(monthKey: string): Promise<any[]> {
   const db = getFirestore();
   const snap = await db.collection(COLLECTION).where('monthKey', '==', monthKey).get();
-  return snap.docs.map((d) => d.data());
+  return sortNewestFirst(snap.docs.map((d) => d.data()));
 }
 
-/** Every order (used by the 'all' / 'last30' views — reads the whole collection). */
+/** Every order (used by the 'all' / 'last30' views), newest first. */
 export async function getAll(): Promise<any[]> {
   const db = getFirestore();
   const snap = await db.collection(COLLECTION).get();
-  return snap.docs.map((d) => d.data());
+  return sortNewestFirst(snap.docs.map((d) => d.data()));
 }
 
 /** The IST months that have orders, newest first — from a metadata rollup if present,
