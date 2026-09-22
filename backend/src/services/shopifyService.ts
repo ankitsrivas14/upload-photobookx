@@ -413,10 +413,10 @@ class ShopifyService {
       return cached;
     }
 
-    // Partition not built yet — build it once from the full cache, then read.
+    // Partition not built yet — filter the full cache this once (slow), WITHOUT
+    // writing partitions on the request path. The scheduled sync builds them.
     const all = await this.getAllOrders(10000);
-    await this.rebuildMonthPartitions(all);
-    return (await this.getCachedOrders(cacheKey)) || [];
+    return (all as any[]).filter((o) => this.orderMonthKey(o) === monthKey);
   }
 
   /** Available months ('YYYY-MM', newest first) from the partition keys — a tiny query. */
