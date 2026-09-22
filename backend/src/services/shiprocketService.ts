@@ -703,6 +703,17 @@ class ShiprocketService {
     }
 
     console.log(`[Shiprocket] Bulk fetch complete: ${fetched} fetched, ${skipped} skipped`);
+
+    // Mirror the freshly-written charges into Firestore (which the orders endpoint reads).
+    try {
+      const variants = [...new Set(orderNumbers.flatMap((n) => [n, n.replace(/^#/, '')]))];
+      const rows = await ShippingCharge.find({ orderNumber: { $in: variants } }).lean();
+      const { upsertMany } = await import('../db/shippingRepo');
+      await upsertMany(rows as any[]);
+    } catch (e) {
+      console.error('[Firestore] shipping-charge sync failed (non-fatal):', e);
+    }
+
     return { fetched, skipped };
   }
 
@@ -711,13 +722,13 @@ class ShiprocketService {
    * Returns full shipping charge objects with breakdown
    */
   async getShippingCharges(orderNumbers: string[]): Promise<Map<string, any>> {
-    const charges = await ShippingCharge.find({
-      orderNumber: { $in: orderNumbers }
-    });
+    // Read from Firestore by document id (fast) instead of a Mongo $in over the slow tier.
+    const { getMany } = await import('../db/shippingRepo');
+    const charges = await getMany(orderNumbers);
 
     const shippingChargesMap = new Map<string, any>();
-    charges.forEach(charge => {
-      shippingChargesMap.set(charge.orderNumber, {
+    for (const [id, charge] of charges) {
+      const value = {
         shippingCharge: charge.shippingCharge,
         breakdown: {
           freightForward: charge.freightForward || 0,
@@ -737,8 +748,11 @@ class ShiprocketService {
         customerPhone: charge.customerPhone,
         fetchedAt: charge.fetchedAt,
         status: charge.status,
-      });
-    });
+      };
+      // Key by both bare and '#'-prefixed order number for caller convenience.
+      shippingChargesMap.set(id, value);
+      shippingChargesMap.set(`#${id}`, value);
+    }
 
     return shippingChargesMap;
   }

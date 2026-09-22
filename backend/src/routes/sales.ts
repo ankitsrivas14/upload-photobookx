@@ -1425,6 +1425,22 @@ router.post('/firestore-backfill-orders', requireAdmin, async (_req: Authenticat
 });
 
 /**
+ * POST /api/admin/sales/firestore-backfill-shipping
+ * Copy all Mongo ShippingCharge docs into Firestore (one-time seed). Idempotent.
+ */
+router.post('/firestore-backfill-shipping', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const rows = await ShippingCharge.find({}).lean();
+    const { upsertMany } = await import('../db/shippingRepo');
+    const written = await upsertMany(rows as any[]);
+    res.json({ success: true, written, total: rows.length });
+  } catch (error) {
+    console.error('Firestore shipping backfill failed:', error);
+    res.status(500).json({ success: false, error: String((error as any)?.message || error) });
+  }
+});
+
+/**
  * POST /api/admin/sales/firestore-sync-orders
  * Fast freshness: fetch recent orders straight from Shopify (last N days) and upsert
  * into Firestore — no 15MB Mongo round-trip. This is what keeps orders current.
