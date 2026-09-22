@@ -16,6 +16,15 @@ class ShopifyService {
   // Coalesces concurrent cache-miss fetches per cacheKey so a cold cache doesn't
   // trigger one full Shopify fetch per waiting request (thundering herd).
   private inFlightOrderFetches: Map<string, Promise<ShopifyOrder[]>> = new Map();
+  // Short-lived in-memory copy of the parsed orders per cacheKey, so repeated reads
+  // on a warm instance don't re-fetch and re-parse the ~16MB cache doc from Mongo.
+  // Invalidated whenever the cache is written or an order is patched.
+  private memOrders: Map<string, { orders: ShopifyOrder[]; at: number }> = new Map();
+  private static readonly MEM_ORDERS_TTL_MS = 3 * 60 * 1000;
+
+  private invalidateMemOrders(): void {
+    this.memOrders.clear();
+  }
 
   constructor() {
     this.storeDomain = config.shopify.storeDomain;
@@ -203,11 +212,13 @@ class ShopifyService {
    */
   private async getCachedOrders(cacheKey: string): Promise<ShopifyOrder[] | null> {
     try {
-      const cached = await ShopifyOrderCache.findOne({ cacheKey });
+      // .lean() returns a plain object straight from BSON, skipping Mongoose's
+      // hydration/change-tracking — which is very slow for a ~16MB orders array.
+      const cached = await ShopifyOrderCache.findOne({ cacheKey }, { orders: 1, cachedAt: 1 }).lean();
 
-      if (cached) {
-        console.log(`Cache hit for ${cacheKey}, cached at ${cached.cachedAt}`);
-        return cached.orders;
+      if (cached && (cached as any).orders) {
+        console.log(`Cache hit for ${cacheKey}, cached at ${(cached as any).cachedAt}`);
+        return (cached as any).orders as ShopifyOrder[];
       }
 
       console.log(`Cache miss for ${cacheKey}`);
@@ -239,6 +250,11 @@ class ShopifyService {
         },
         { upsert: true, new: true }
       );
+
+      // Keep the in-memory copy in step with the freshly written data.
+      if (cacheKey.startsWith('all_orders_')) {
+        this.memOrders.set(cacheKey, { orders: trimmedOrders, at: Date.now() });
+      }
 
       // Order data is the revenue source for DailyROAS — refresh it in the
       // background whenever the all_orders cache changes (the only event that
@@ -320,6 +336,7 @@ class ShopifyService {
   async clearOrdersCache(): Promise<void> {
     try {
       await ShopifyOrderCache.deleteMany({});
+      this.invalidateMemOrders();
       console.log('All order caches cleared');
     } catch (error) {
       console.error('Error clearing cache:', error);
@@ -389,6 +406,8 @@ class ShopifyService {
           await doc.save();
         }
       }
+      // The in-memory copy is now stale — drop it so the next read reflects the patch.
+      this.invalidateMemOrders();
     } catch (error) {
       console.error('Error patching cached order status:', error);
       // Non-fatal: the Shopify write already succeeded; a later sync will reconcile.
@@ -453,10 +472,18 @@ class ShopifyService {
   async getAllOrders(limit: number = 50, createdAtMin?: string): Promise<ShopifyOrder[]> {
     const cacheKey = createdAtMin ? `all_orders_${limit}_${createdAtMin}` : `all_orders_${limit}`;
 
-    // Try to get from cache first
+    // Warm in-memory copy first — avoids re-reading/parsing the ~16MB doc from Mongo
+    // on every request within the TTL.
+    const mem = this.memOrders.get(cacheKey);
+    if (mem && Date.now() - mem.at < ShopifyService.MEM_ORDERS_TTL_MS) {
+      return mem.orders;
+    }
+
+    // Then the DB cache
     const cachedOrders = await this.getCachedOrders(cacheKey);
     if (cachedOrders) {
       console.log(`Using cached orders: ${cachedOrders.length}`);
+      this.memOrders.set(cacheKey, { orders: cachedOrders, at: Date.now() });
       return cachedOrders;
     }
 
@@ -470,7 +497,9 @@ class ShopifyService {
     const fetchPromise = this.fetchAndCacheAllOrders(cacheKey, limit, createdAtMin);
     this.inFlightOrderFetches.set(cacheKey, fetchPromise);
     try {
-      return await fetchPromise;
+      const orders = await fetchPromise;
+      this.memOrders.set(cacheKey, { orders, at: Date.now() });
+      return orders;
     } finally {
       this.inFlightOrderFetches.delete(cacheKey);
     }
