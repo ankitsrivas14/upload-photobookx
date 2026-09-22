@@ -28,36 +28,23 @@ function avgOf(amounts: number[]): number | null {
   return valid.reduce((s, v) => s + v, 0) / valid.length;
 }
 
-/** Build a map of orderNumber → shippingCharge from ShippingCharge collection */
+/** Build a map of orderNumber → shippingCharge from Firestore */
 async function buildShippingChargeMap(): Promise<Map<string, number>> {
-  const charges = await ShippingCharge.find({}, { orderNumber: 1, shippingCharge: 1 }).lean();
-  const map = new Map<string, number>();
-  for (const c of charges as any[]) {
-    // Store both with and without # prefix for flexible lookup
-    const base = c.orderNumber.replace(/^#/, '');
-    map.set(base, c.shippingCharge);
-    map.set(`#${base}`, c.shippingCharge);
-  }
-  return map;
+  const { getAllAsMap } = await import('../db/shippingRepo');
+  return getAllAsMap();
 }
 
-/** Build a map of dateKey → fulfilled orders (non-cancelled) from ShopifyOrderCache */
+/** Build a map of dateKey → fulfilled orders (non-cancelled) from Firestore */
 async function buildOrdersByDate(): Promise<Map<string, any[]>> {
-  const cacheEntries = await ShopifyOrderCache.find(
-    { cacheKey: { $regex: /^all_orders_/ } },
-    { orders: 1 }
-  ).lean();
+  const { getAll } = await import('../db/ordersRepo');
+  const orders = await getAll();
 
-  const seenIds = new Set<number | string>();
   const byDate = new Map<string, any[]>();
 
-  for (const entry of cacheEntries) {
-    for (const order of (entry as any).orders as any[]) {
+  {
+    for (const order of orders) {
       if (order.cancelled_at) continue;
       if (order.fulfillment_status !== 'fulfilled') continue;
-      const id = order.id;
-      if (id && seenIds.has(id)) continue;
-      if (id) seenIds.add(id);
 
       const dateKey = toDateKey(new Date(order.created_at));
       if (dateKey < DATA_START_DATE) continue;
@@ -126,18 +113,12 @@ async function getSingleDayOrders(dateKey: string): Promise<any[]> {
  * Given a Shopify order name, return its dateKey from the cache.
  */
 export async function getOrderDateKey(orderName: string): Promise<string | null> {
-  const cacheEntries = await ShopifyOrderCache.find(
-    { cacheKey: { $regex: /^all_orders_/ } },
-    { orders: 1 }
-  ).lean();
-
+  const { getAll } = await import('../db/ordersRepo');
+  const orders = await getAll();
   const base = orderName.replace(/^#/, '');
-  for (const entry of cacheEntries) {
-    for (const order of (entry as any).orders as any[]) {
-      const name: string = (order.name ?? '').replace(/^#/, '');
-      if (name === base) {
-        return toDateKey(new Date(order.created_at));
-      }
+  for (const order of orders) {
+    if ((order.name ?? '').replace(/^#/, '') === base) {
+      return toDateKey(new Date(order.created_at));
     }
   }
   return null;

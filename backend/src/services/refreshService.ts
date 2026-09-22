@@ -88,11 +88,14 @@ export async function runScheduledRefresh(): Promise<{
   fetched: number;
   skipped: number;
 }> {
-  // 1. Latest order changes from Shopify.
-  const synced = await shopifyService.syncOrders(10000);
+  // 1. Latest orders straight into Firestore (fast; no 15MB Mongo path).
+  const since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+  const recent = await shopifyService.fetchRecentOrders(since);
+  const { saveAll, getAll } = await import('../db/ordersRepo');
+  const synced = await saveAll(recent);
 
-  // 2. Decide which orders need a shipping sync.
-  const orders = await shopifyService.getAllOrders(10000);
+  // 2. Decide which orders need a shipping sync (orders from Firestore).
+  const orders = await getAll();
   const orderNames = orders.map((o: any) => o.name);
   const [rtoRows, chargeMap] = await Promise.all([
     RTOOrder.find({}, { shopifyOrderId: 1, _id: 0 }).lean(),

@@ -1425,6 +1425,26 @@ router.post('/firestore-backfill-orders', requireAdmin, async (_req: Authenticat
 });
 
 /**
+ * POST /api/admin/sales/refresh-aggregates
+ * Recompute every dashboard aggregate from the current Firestore data (order stats,
+ * shipping stats, daily P&L, ROAS, breakeven). Fast now that reads are on Firestore.
+ */
+router.post('/refresh-aggregates', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { backfillAllDates } = await import('../services/roasService');
+    await backfillOrderStats();
+    await backfillShippingStats();
+    await backfillDailyPnl();
+    await refreshBreakevenSnapshot();
+    await backfillAllDates();
+    res.json({ success: true });
+  } catch (error) {
+    console.error('refresh-aggregates failed:', error);
+    res.status(500).json({ success: false, error: String((error as any)?.message || error) });
+  }
+});
+
+/**
  * POST /api/admin/sales/firestore-backfill-shipping
  * Copy all Mongo ShippingCharge docs into Firestore (one-time seed). Idempotent.
  */

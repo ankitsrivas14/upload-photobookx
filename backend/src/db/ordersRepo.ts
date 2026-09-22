@@ -13,6 +13,12 @@ import { getFirestore } from './firestore';
 const COLLECTION = 'orders';
 const STORE_TZ = 'Asia/Kolkata';
 
+// Short-lived in-memory cache of the whole collection, so several backfills in one
+// scheduled run share a single Firestore read. Invalidated on any write.
+let allCache: { orders: any[]; at: number } | null = null;
+const ALL_TTL_MS = 60 * 1000;
+function invalidateAll() { allCache = null; }
+
 function monthKeyOf(order: any): string | null {
   if (!order?.created_at) return null;
   return new Date(order.created_at).toLocaleDateString('en-CA', { timeZone: STORE_TZ }).substring(0, 7);
@@ -65,11 +71,14 @@ export async function getMonth(monthKey: string): Promise<any[]> {
   return sortNewestFirst(snap.docs.map((d) => d.data()));
 }
 
-/** Every order (used by the 'all' / 'last30' views), newest first. */
+/** Every order (used by the 'all'/'last30' views and the backfills), newest first. */
 export async function getAll(): Promise<any[]> {
+  if (allCache && Date.now() - allCache.at < ALL_TTL_MS) return allCache.orders;
   const db = getFirestore();
   const snap = await db.collection(COLLECTION).get();
-  return sortNewestFirst(snap.docs.map((d) => d.data()));
+  const orders = sortNewestFirst(snap.docs.map((d) => d.data()));
+  allCache = { orders, at: Date.now() };
+  return orders;
 }
 
 /** The IST months that have orders, newest first — from a metadata rollup if present,
@@ -111,6 +120,7 @@ export async function search(query: string, limit = 50): Promise<any[]> {
 
 /** Update an order's latest fulfillment shipment_status (Delivered/Failed mark). */
 export async function patchStatusByName(orderName: string, shipmentStatus: string): Promise<void> {
+  invalidateAll();
   const db = getFirestore();
   const snap = await db.collection(COLLECTION).where('nameBare', '==', bare(orderName)).limit(5).get();
   const now = new Date().toISOString();
@@ -130,6 +140,7 @@ export async function patchStatusByName(orderName: string, shipmentStatus: strin
 
 /** Convenience used by the dual-write path: upsert + keep the month index fresh. */
 export async function saveAll(orders: any[]): Promise<number> {
+  invalidateAll();
   const written = await upsertMany(orders);
   const months = new Set<string>();
   for (const o of orders) {

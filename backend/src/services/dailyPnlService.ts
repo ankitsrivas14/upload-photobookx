@@ -15,27 +15,15 @@ function toDateKey(date: Date): string {
 // ─── data loaders ────────────────────────────────────────────────────────────
 
 async function loadOrdersByDate(): Promise<Map<string, any[]>> {
-  const entries = await ShopifyOrderCache.find(
-    { cacheKey: { $regex: /^all_orders_/ } },
-    { orders: 1 }
-  ).lean();
-
-  const seen = new Set<number | string>();
+  const { getAll } = await import('../db/ordersRepo');
+  const orders = await getAll();
   const byDate = new Map<string, any[]>();
-
-  for (const entry of entries) {
-    for (const order of (entry as any).orders as any[]) {
-      if (order.cancelled_at) continue;
-      const id = order.id;
-      if (id && seen.has(id)) continue;
-      if (id) seen.add(id);
-
-      const dateKey = toDateKey(new Date(order.created_at));
-      if (dateKey < DATA_START_DATE) continue;
-
-      if (!byDate.has(dateKey)) byDate.set(dateKey, []);
-      byDate.get(dateKey)!.push(order);
-    }
+  for (const order of orders) {
+    if (order.cancelled_at) continue;
+    const dateKey = toDateKey(new Date(order.created_at));
+    if (dateKey < DATA_START_DATE) continue;
+    if (!byDate.has(dateKey)) byDate.set(dateKey, []);
+    byDate.get(dateKey)!.push(order);
   }
   return byDate;
 }
@@ -46,14 +34,8 @@ async function loadRtoSet(): Promise<Set<number>> {
 }
 
 async function loadShippingMap(): Promise<Map<string, number>> {
-  const docs = await ShippingCharge.find({}, { orderNumber: 1, shippingCharge: 1 }).lean();
-  const map = new Map<string, number>();
-  for (const d of docs as any[]) {
-    const base = (d.orderNumber as string).replace(/^#/, '');
-    map.set(base, d.shippingCharge);
-    map.set(`#${base}`, d.shippingCharge);
-  }
-  return map;
+  const { getAllAsMap } = await import('../db/shippingRepo');
+  return getAllAsMap();
 }
 
 async function loadAdSpendByDate(): Promise<Map<string, number>> {

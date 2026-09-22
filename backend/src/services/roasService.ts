@@ -9,32 +9,19 @@ function toDateKey(date: Date): string {
   return date.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
 }
 
-/** Aggregate all orders from all ShopifyOrderCache entries into a revenue map keyed by dateKey */
+/** Aggregate all Firestore orders into a revenue map keyed by dateKey */
 async function buildRevenueByDate(): Promise<Record<string, number>> {
-  const cacheEntries = await ShopifyOrderCache.find(
-    { cacheKey: { $regex: /^all_orders_/ } },
-    { orders: 1 }
-  ).lean();
-
+  const { getAll } = await import('../db/ordersRepo');
+  const orders = await getAll();
   const revenueByDate: Record<string, number> = {};
-
-  // Merge orders from all matching cache entries (deduplicate by order id)
-  const seenIds = new Set<number | string>();
-  for (const entry of cacheEntries) {
-    for (const order of entry.orders as any[]) {
-      if (order.cancelled_at) continue;
-      const id = order.id;
-      if (id && seenIds.has(id)) continue;
-      if (id) seenIds.add(id);
-
-      const dateKey = toDateKey(new Date(order.created_at));
-      if (dateKey < DATA_START_DATE) continue;
-      // Use current_total_price (reflects edits/discounts) falling back to total_price — same as dailyPnlService
-      const price = parseFloat(order.current_total_price ?? order.total_price ?? '0') || 0;
-      revenueByDate[dateKey] = (revenueByDate[dateKey] || 0) + price;
-    }
+  for (const order of orders) {
+    if (order.cancelled_at) continue;
+    const dateKey = toDateKey(new Date(order.created_at));
+    if (dateKey < DATA_START_DATE) continue;
+    // current_total_price (reflects edits/discounts) falling back to total_price
+    const price = parseFloat(order.current_total_price ?? order.total_price ?? '0') || 0;
+    revenueByDate[dateKey] = (revenueByDate[dateKey] || 0) + price;
   }
-
   return revenueByDate;
 }
 

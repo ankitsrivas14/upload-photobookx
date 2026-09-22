@@ -15,31 +15,18 @@ async function buildRtoSet(): Promise<Set<number>> {
   return new Set((rtos as any[]).map((r) => r.shopifyOrderId as number));
 }
 
-/** Build a map of dateKey → orders (non-cancelled) from ShopifyOrderCache */
+/** Build a map of dateKey → orders (non-cancelled) from Firestore */
 async function buildOrdersByDate(): Promise<Map<string, any[]>> {
-  const cacheEntries = await ShopifyOrderCache.find(
-    { cacheKey: { $regex: /^all_orders_/ } },
-    { orders: 1 }
-  ).lean();
-
-  const seenIds = new Set<number | string>();
+  const { getAll } = await import('../db/ordersRepo');
+  const orders = await getAll();
   const byDate = new Map<string, any[]>();
-
-  for (const entry of cacheEntries) {
-    for (const order of (entry as any).orders as any[]) {
-      if (order.cancelled_at) continue;
-      const id = order.id;
-      if (id && seenIds.has(id)) continue;
-      if (id) seenIds.add(id);
-
-      const dateKey = toDateKey(new Date(order.created_at));
-      if (dateKey < DATA_START_DATE) continue;
-
-      if (!byDate.has(dateKey)) byDate.set(dateKey, []);
-      byDate.get(dateKey)!.push(order);
-    }
+  for (const order of orders) {
+    if (order.cancelled_at) continue;
+    const dateKey = toDateKey(new Date(order.created_at));
+    if (dateKey < DATA_START_DATE) continue;
+    if (!byDate.has(dateKey)) byDate.set(dateKey, []);
+    byDate.get(dateKey)!.push(order);
   }
-
   return byDate;
 }
 

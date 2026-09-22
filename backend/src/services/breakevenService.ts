@@ -74,40 +74,27 @@ export async function computeBreakevenMetrics(): Promise<BreakevenMetrics> {
     return { aov: 0, avgCOGS: 0, avgShipping: 0, avgTotalCost: 0, contributionMargin: 0, breakevenROAS: 0, deliveredCount: 0, failedCount: 0, totalOrders: 0, completedDaysCount: 0 };
   }
 
-  // Load data needed to compute per-order metrics
-  const [rtoSet, shippingMap, cogsConfig, cacheEntries] = await Promise.all([
+  // Load data needed to compute per-order metrics (orders + shipping from Firestore)
+  const { getAll } = await import('../db/ordersRepo');
+  const { getAllAsMap } = await import('../db/shippingRepo');
+  const [rtoSet, shippingMap, cogsConfig, allOrders] = await Promise.all([
     RTOOrder.find({}, { shopifyOrderId: 1 }).lean().then((docs) => new Set((docs as any[]).map((d) => d.shopifyOrderId as number))),
-    ShippingCharge.find({}, { orderNumber: 1, shippingCharge: 1 }).lean().then((docs) => {
-      const map = new Map<string, number>();
-      for (const d of docs as any[]) {
-        const base = (d.orderNumber as string).replace(/^#/, '');
-        map.set(base, d.shippingCharge);
-        map.set(`#${base}`, d.shippingCharge);
-      }
-      return map;
-    }),
+    getAllAsMap(),
     COGSConfiguration.findOne({ effectiveFrom: { $lte: new Date() } })
       .sort({ effectiveFrom: -1 })
       .lean()
       .then((c) => (c as any)?.fields ?? []),
-    ShopifyOrderCache.find({ cacheKey: { $regex: /^all_orders_/ } }, { orders: 1 }).lean(),
+    getAll(),
   ]);
 
-  // Collect orders belonging to completed date keys, deduplicated
-  const seen = new Set<number | string>();
+  // Collect orders belonging to completed date keys
   const ordersByDate = new Map<string, any[]>();
-
-  for (const entry of cacheEntries) {
-    for (const order of (entry as any).orders as any[]) {
-      if (order.cancelled_at) continue;
-      const id = order.id;
-      if (id && seen.has(id)) continue;
-      if (id) seen.add(id);
-      const dateKey = toDateKey(new Date(order.created_at));
-      if (!completedDateKeys.has(dateKey)) continue;
-      if (!ordersByDate.has(dateKey)) ordersByDate.set(dateKey, []);
-      ordersByDate.get(dateKey)!.push(order);
-    }
+  for (const order of allOrders) {
+    if (order.cancelled_at) continue;
+    const dateKey = toDateKey(new Date(order.created_at));
+    if (!completedDateKeys.has(dateKey)) continue;
+    if (!ordersByDate.has(dateKey)) ordersByDate.set(dateKey, []);
+    ordersByDate.get(dateKey)!.push(order);
   }
 
   let totalRevenue = 0;
