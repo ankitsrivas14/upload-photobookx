@@ -78,15 +78,17 @@ export async function computeBreakevenMetrics(): Promise<BreakevenMetrics> {
   const { getAll } = await import('../db/ordersRepo');
   const { getAllAsMap } = await import('../db/shippingRepo');
   const { rtoStore, idSet } = await import('../db/orderListStores');
-  const [rtoSet, shippingMap, cogsConfig, allOrders] = await Promise.all([
+  const { cogsStore } = await import('../db/featureStores');
+  const [rtoSet, shippingMap, cogsVersions, allOrders] = await Promise.all([
     idSet(rtoStore),
     getAllAsMap(),
-    COGSConfiguration.findOne({ effectiveFrom: { $lte: new Date() } })
-      .sort({ effectiveFrom: -1 })
-      .lean()
-      .then((c) => (c as any)?.fields ?? []),
+    cogsStore.all(),
     getAll(),
   ]);
+  const nowMs = now.getTime();
+  const cogsConfig = (cogsVersions as any[])
+    .filter((v) => new Date(v.effectiveFrom).getTime() <= nowMs)
+    .sort((a, b) => new Date(b.effectiveFrom).getTime() - new Date(a.effectiveFrom).getTime())[0]?.fields ?? [];
 
   // Collect orders belonging to completed date keys
   const ordersByDate = new Map<string, any[]>();

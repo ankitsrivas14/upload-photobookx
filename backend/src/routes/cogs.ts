@@ -1,9 +1,16 @@
 import { Router } from 'express';
-import { COGSConfiguration } from '../models';
 import { requireAdmin } from './adminAuth';
 import { backfillDailyPnl } from '../services/dailyPnlService';
+import { cogsStore } from '../db/featureStores';
 
 const router = Router();
+
+const asTime = (d: any) => new Date(d).getTime();
+/** All versions newest-first (by effectiveFrom). */
+async function allVersionsDesc(): Promise<any[]> {
+  const versions = await cogsStore.all();
+  return versions.sort((a, b) => asTime(b.effectiveFrom) - asTime(a.effectiveFrom));
+}
 
 function validateFields(fields: any[]): string | null {
   if (!Array.isArray(fields)) return 'Fields must be an array';
@@ -23,15 +30,12 @@ function validateFields(fields: any[]): string | null {
 // Get the currently active version (effectiveFrom <= now, most recent wins)
 router.get('/configuration', requireAdmin, async (req, res) => {
   try {
-    let config = await COGSConfiguration.findOne({ effectiveFrom: { $lte: new Date() } })
-      .sort({ effectiveFrom: -1 })
-      .lean();
+    const now = Date.now();
+    let config = (await allVersionsDesc()).find((v) => asTime(v.effectiveFrom) <= now) ?? null;
 
     if (!config) {
       // Bootstrap an empty version
-      const doc = new COGSConfiguration({ fields: [], effectiveFrom: new Date('2000-01-01') });
-      await doc.save();
-      config = doc.toObject();
+      config = await cogsStore.create({ fields: [], effectiveFrom: new Date('2000-01-01') });
     }
 
     res.json({ fields: (config as any).fields, totalOverrides: (config as any).totalOverrides ?? {} });
@@ -44,9 +48,7 @@ router.get('/configuration', requireAdmin, async (req, res) => {
 // Get all versions sorted newest-first
 router.get('/configuration/versions', requireAdmin, async (req, res) => {
   try {
-    const versions = await COGSConfiguration.find()
-      .sort({ effectiveFrom: -1 })
-      .lean();
+    const versions = await allVersionsDesc();
     res.json({ success: true, versions });
   } catch (error) {
     console.error('Error fetching COGS versions:', error);
@@ -66,12 +68,12 @@ router.post('/configuration', requireAdmin, async (req, res) => {
     const validationError = validateFields(fields);
     if (validationError) return res.status(400).json({ error: validationError });
 
-    const config = new COGSConfiguration({
+    const config = await cogsStore.create({
       fields,
       effectiveFrom: new Date(effectiveFrom),
       totalOverrides: totalOverrides ?? {},
+      updatedAt: new Date(),
     });
-    await config.save();
 
     res.json({ success: true, message: 'COGS version created', version: config });
 
@@ -103,13 +105,9 @@ router.put('/configuration/:id', requireAdmin, async (req, res) => {
       update.totalOverrides = totalOverrides;
     }
 
-    const updated = await COGSConfiguration.findByIdAndUpdate(
-      req.params.id,
-      { $set: update },
-      { new: true }
-    );
-
-    if (!updated) return res.status(404).json({ error: 'Version not found' });
+    const existing = await cogsStore.getById(String(req.params.id));
+    if (!existing) return res.status(404).json({ error: 'Version not found' });
+    const updated = await cogsStore.updateById(String(req.params.id), update);
 
     res.json({ success: true, version: updated });
 
@@ -123,11 +121,11 @@ router.put('/configuration/:id', requireAdmin, async (req, res) => {
 // Delete a version (only allowed if there is more than one version)
 router.delete('/configuration/:id', requireAdmin, async (req, res) => {
   try {
-    const count = await COGSConfiguration.countDocuments();
+    const count = await cogsStore.count();
     if (count <= 1) {
       return res.status(400).json({ error: 'Cannot delete the only version' });
     }
-    await COGSConfiguration.findByIdAndDelete(req.params.id);
+    await cogsStore.deleteById(String(req.params.id));
     res.json({ success: true });
     backfillDailyPnl().catch(console.error);
   } catch (error) {

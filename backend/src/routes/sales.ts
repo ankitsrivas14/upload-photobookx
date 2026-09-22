@@ -1434,6 +1434,36 @@ router.post('/firestore-backfill-lists', requireAdmin, async (_req: Authenticate
 });
 
 /**
+ * POST /api/admin/sales/firestore-backfill-features
+ * One-time copy of COGS + expenses collections from Mongo to Firestore (preserving _id).
+ */
+router.post('/firestore-backfill-features', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { COGSConfiguration, DailyAdSpend, MetaAdsExpense, ExpenseSource } = await import('../models');
+    const { FixedMonthlyExpense } = await import('../models/FixedMonthlyExpense');
+    const { cogsStore, dailyAdSpendStore, metaAdsExpenseStore, expenseSourceStore, fixedMonthlyExpenseStore } = await import('../db/featureStores');
+    const [cogs, ads, meta, sources, fixed] = await Promise.all([
+      COGSConfiguration.find({}).lean(),
+      DailyAdSpend.find({}).lean(),
+      MetaAdsExpense.find({}).lean(),
+      ExpenseSource.find({}).lean(),
+      FixedMonthlyExpense.find({}).lean(),
+    ]);
+    const written = {
+      cogs: await cogsStore.bulkImport(cogs as any[]),
+      dailyAdSpend: await dailyAdSpendStore.bulkImport(ads as any[]),
+      metaAds: await metaAdsExpenseStore.bulkImport(meta as any[]),
+      sources: await expenseSourceStore.bulkImport(sources as any[]),
+      fixed: await fixedMonthlyExpenseStore.bulkImport(fixed as any[]),
+    };
+    res.json({ success: true, written });
+  } catch (error) {
+    console.error('Firestore features backfill failed:', error);
+    res.status(500).json({ success: false, error: String((error as any)?.message || error) });
+  }
+});
+
+/**
  * POST /api/admin/sales/refresh-aggregates
  * Recompute every dashboard aggregate from the current Firestore data (order stats,
  * shipping stats, daily P&L, ROAS, breakeven). Fast now that reads are on Firestore.

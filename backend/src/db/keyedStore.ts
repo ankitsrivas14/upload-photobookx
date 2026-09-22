@@ -1,6 +1,42 @@
 import { getFirestore } from './firestore';
 
 /**
+ * Deep-convert Mongo values Firestore can't store: ObjectId → string; drop _id/__v.
+ * Dates are preserved (Firestore stores them as Timestamps). Exported for other repos.
+ */
+export function sanitizeForFirestore(value: any): any {
+  if (value == null) return value;
+  if (value instanceof Date) return value;
+  if (typeof value === 'object') {
+    if (value._bsontype === 'ObjectId' || value._bsontype === 'ObjectID' || typeof value.toHexString === 'function') {
+      return value.toString();
+    }
+    if (Array.isArray(value)) return value.map(sanitizeForFirestore);
+    const out: any = {};
+    for (const k of Object.keys(value)) {
+      if (k === '_id' || k === '__v') continue;
+      out[k] = sanitizeForFirestore(value[k]);
+    }
+    return out;
+  }
+  return value;
+}
+
+/** Recursively convert Firestore Timestamps back to JS Dates on read (so callers can
+ *  use `.toISOString()` etc., matching the old Mongo shape). */
+export function fromFirestore(value: any): any {
+  if (value == null || typeof value !== 'object') return value;
+  if (value instanceof Date) return value;
+  if (typeof value.toDate === 'function' && (value._seconds !== undefined || value.seconds !== undefined)) {
+    return value.toDate();
+  }
+  if (Array.isArray(value)) return value.map(fromFirestore);
+  const out: any = {};
+  for (const k of Object.keys(value)) out[k] = fromFirestore(value[k]);
+  return out;
+}
+
+/**
  * A tiny generic Firestore accessor for collections that are keyed by a natural id
  * (a dateKey, an order id, an order number, …). Keeps the many small collection
  * migrations DRY: one document per key, read by id / range / whole collection.
@@ -10,30 +46,12 @@ import { getFirestore } from './firestore';
 export function keyedStore<T extends Record<string, any>>(collection: string, idField: keyof T) {
   const col = () => getFirestore().collection(collection);
 
-  // Deep-convert Mongo values Firestore can't store: ObjectId → string; drop _id/__v.
-  // Dates are preserved (Firestore stores them as Timestamps).
-  function strip(value: any): any {
-    if (value == null) return value;
-    if (value instanceof Date) return value;
-    if (typeof value === 'object') {
-      if (value._bsontype === 'ObjectId' || value._bsontype === 'ObjectID' || typeof value.toHexString === 'function') {
-        return value.toString();
-      }
-      if (Array.isArray(value)) return value.map(strip);
-      const out: any = {};
-      for (const k of Object.keys(value)) {
-        if (k === '_id' || k === '__v') continue;
-        out[k] = strip(value[k]);
-      }
-      return out;
-    }
-    return value;
-  }
+  const strip = sanitizeForFirestore;
 
   return {
     async get(id: string): Promise<T | null> {
       const snap = await col().doc(id).get();
-      return snap.exists ? (snap.data() as T) : null;
+      return snap.exists ? (fromFirestore(snap.data()) as T) : null;
     },
 
     async set(item: T): Promise<void> {
@@ -75,7 +93,7 @@ export function keyedStore<T extends Record<string, any>>(collection: string, id
     /** Whole collection. */
     async all(): Promise<T[]> {
       const snap = await col().get();
-      return snap.docs.map((d) => d.data() as T);
+      return snap.docs.map((d) => fromFirestore(d.data()) as T);
     },
 
     /** Documents whose id (== a string field like dateKey) is within [start, end]. */
@@ -84,7 +102,7 @@ export function keyedStore<T extends Record<string, any>>(collection: string, id
       if (start) q = q.where(field, '>=', start);
       if (end) q = q.where(field, '<=', end);
       const snap = await q.get();
-      return snap.docs.map((d) => d.data() as T);
+      return snap.docs.map((d) => fromFirestore(d.data()) as T);
     },
 
     /** Get several documents by id in one batched read. */
@@ -95,7 +113,7 @@ export function keyedStore<T extends Record<string, any>>(collection: string, id
       for (let i = 0; i < uniq.length; i += 300) {
         const refs = uniq.slice(i, i + 300).map((id) => db.collection(collection).doc(id));
         const snaps = await db.getAll(...refs);
-        for (const s of snaps) if (s.exists) out.push(s.data() as T);
+        for (const s of snaps) if (s.exists) out.push(fromFirestore(s.data()) as T);
       }
       return out;
     },

@@ -39,11 +39,12 @@ async function loadShippingMap(): Promise<Map<string, number>> {
 }
 
 async function loadAdSpendByDate(): Promise<Map<string, number>> {
-  const docs = await DailyAdSpend.find({}, { date: 1, amount: 1 }).lean();
+  const { dailyAdSpendStore } = await import('../db/featureStores');
+  const docs = await dailyAdSpendStore.all();
   const map = new Map<string, number>();
   for (const d of docs as any[]) {
     const key = toDateKey(new Date(d.date));
-    map.set(key, (map.get(key) ?? 0) + (d.amount as number));
+    map.set(key, (map.get(key) ?? 0) + (d.amount || 0));
   }
   return map;
 }
@@ -64,7 +65,10 @@ interface CogsVersion {
 }
 
 async function loadCogsVersions(): Promise<CogsVersion[]> {
-  const docs = await COGSConfiguration.find().sort({ effectiveFrom: 1 }).lean();
+  const { cogsStore } = await import('../db/featureStores');
+  const docs = (await cogsStore.all()).sort(
+    (a, b) => new Date(a.effectiveFrom).getTime() - new Date(b.effectiveFrom).getTime()
+  );
   return (docs as any[]).map((d) => ({
     effectiveFrom: toDateKey(new Date(d.effectiveFrom)),
     fields: d.fields ?? [],

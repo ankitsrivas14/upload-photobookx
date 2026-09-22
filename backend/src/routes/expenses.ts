@@ -1,8 +1,9 @@
 import { Router, Response } from 'express';
 import { requireAdmin } from './adminAuth';
-import { ExpenseSource, MetaAdsExpense, DailyAdSpend, MetaAdPerformance } from '../models';
+import { MetaAdPerformance } from '../models';
 import type { AuthenticatedRequest } from '../types';
 import { recomputeForDate } from '../services/roasService';
+import { expenseSourceStore, metaAdsExpenseStore, dailyAdSpendStore } from '../db/featureStores';
 
 const router = Router();
 
@@ -12,7 +13,8 @@ const router = Router();
  */
 router.get('/sources', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
   try {
-    const sources = await ExpenseSource.find({ category: 'meta-ads' }).sort({ name: 1 });
+    const sources = (await expenseSourceStore.where('category', '==', 'meta-ads'))
+      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
 
     res.json({
       success: true,
@@ -42,12 +44,16 @@ router.post('/sources', requireAdmin, async (req: AuthenticatedRequest, res: Res
       return;
     }
 
-    const source = new ExpenseSource({
+    const existing = await expenseSourceStore.where('name', '==', name.trim());
+    if (existing.some((s) => s.category === 'meta-ads')) {
+      res.status(400).json({ success: false, error: 'Source name already exists' });
+      return;
+    }
+    const source = await expenseSourceStore.create({
       name: name.trim(),
       category: 'meta-ads',
+      createdAt: new Date(),
     });
-
-    await source.save();
 
     res.status(201).json({
       success: true,
@@ -81,14 +87,12 @@ router.get('/meta-ads', requireAdmin, async (req: AuthenticatedRequest, res: Res
 
     const skip = (page - 1) * limit;
 
-    const [expenses, total] = await Promise.all([
-      MetaAdsExpense.find()
-        .populate('sourceId', 'name')
-        .sort({ date: -1, createdAt: -1 })
-        .skip(skip)
-        .limit(limit),
-      MetaAdsExpense.countDocuments(),
-    ]);
+    const allExpenses = (await metaAdsExpenseStore.all()).sort((a, b) => {
+      const d = new Date(b.date).getTime() - new Date(a.date).getTime();
+      return d !== 0 ? d : new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+    });
+    const total = allExpenses.length;
+    const expenses = allExpenses.slice(skip, skip + limit);
 
     res.json({
       success: true,
@@ -139,13 +143,13 @@ router.post('/meta-ads', requireAdmin, async (req: AuthenticatedRequest, res: Re
     }
 
     // Verify source exists
-    const source = await ExpenseSource.findById(sourceId);
+    const source = await expenseSourceStore.getById(sourceId);
     if (!source) {
       res.status(400).json({ success: false, error: 'Invalid source' });
       return;
     }
 
-    const expense = new MetaAdsExpense({
+    const expense = await metaAdsExpenseStore.create({
       amount: parseFloat(amount),
       date: new Date(date),
       sourceId,
@@ -153,9 +157,8 @@ router.post('/meta-ads', requireAdmin, async (req: AuthenticatedRequest, res: Re
       notes: notes?.trim() || undefined,
       isTaxExempt: isTaxExempt === true,
       createdBy: req.user!.userId,
+      createdAt: new Date(),
     });
-
-    await expense.save();
 
     res.status(201).json({
       success: true,
@@ -182,14 +185,14 @@ router.post('/meta-ads', requireAdmin, async (req: AuthenticatedRequest, res: Re
  */
 router.delete('/meta-ads/:expenseId', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const expenseId = req.params.expenseId;
+    const expenseId = String(req.params.expenseId);
 
-    const expense = await MetaAdsExpense.findByIdAndDelete(expenseId);
-
+    const expense = await metaAdsExpenseStore.getById(expenseId);
     if (!expense) {
       res.status(404).json({ success: false, error: 'Expense not found' });
       return;
     }
+    await metaAdsExpenseStore.deleteById(expenseId);
 
     res.json({ success: true });
   } catch (error) {
@@ -204,8 +207,10 @@ router.delete('/meta-ads/:expenseId', requireAdmin, async (req: AuthenticatedReq
  */
 router.get('/daily-ad-spend', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
   try {
-    const entries = await DailyAdSpend.find()
-      .sort({ date: -1, createdAt: -1 });
+    const entries = (await dailyAdSpendStore.all()).sort((a, b) => {
+      const d = new Date(b.date).getTime() - new Date(a.date).getTime();
+      return d !== 0 ? d : new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+    });
 
     // Older CSV uploads were saved in MetaAdPerformance before the dedicated
     // dailyAmountSpent field existed. Reconstruct their CSV total by date so
@@ -280,19 +285,16 @@ router.put('/daily-ad-spend', requireAdmin, async (req: AuthenticatedRequest, re
       return;
     }
 
-    const entry = await DailyAdSpend.findOneAndUpdate(
-      { date: parsedDate },
-      {
-        $set: {
-          dailyAmountSpent: parsedAmount,
-          ...(notes !== undefined ? { notes: String(notes).trim() } : {}),
-        },
-        // CSV uploads do not create a manual amount. Existing manual amounts
-        // are preserved; new CSV-only dates start with no manual amount.
-        $setOnInsert: { date: parsedDate, amount: 0 },
-      },
-      { new: true, upsert: true, setDefaultsOnInsert: true }
-    );
+    // Upsert by date: find an existing entry for this date, else create one.
+    const sameDate = (await dailyAdSpendStore.where('date', '==', parsedDate));
+    const patch: any = { dailyAmountSpent: parsedAmount };
+    if (notes !== undefined) patch.notes = String(notes).trim();
+    let entry: any;
+    if (sameDate.length > 0) {
+      entry = await dailyAdSpendStore.updateById(sameDate[0]._id, patch);
+    } else {
+      entry = await dailyAdSpendStore.create({ date: parsedDate, amount: 0, createdAt: new Date(), ...patch });
+    }
 
     const dateKey = parsedDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
     recomputeForDate(dateKey).catch((err) => console.error('ROAS recompute error:', err));
@@ -332,16 +334,15 @@ router.post('/daily-ad-spend', requireAdmin, async (req: AuthenticatedRequest, r
       return;
     }
 
-    const entry = new DailyAdSpend({
+    const entry = await dailyAdSpendStore.create({
       date: new Date(date),
       amount: parseFloat(amount),
       notes: notes?.trim() || '',
+      createdAt: new Date(),
     });
 
-    await entry.save();
-
     // Recompute ROAS for this date asynchronously (don't block the response)
-    const dateKey = entry.date.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+    const dateKey = new Date(entry.date).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
     recomputeForDate(dateKey).catch((err) => console.error('ROAS recompute error:', err));
 
     res.status(201).json({
@@ -366,17 +367,17 @@ router.post('/daily-ad-spend', requireAdmin, async (req: AuthenticatedRequest, r
  */
 router.delete('/daily-ad-spend/:entryId', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const entryId = req.params.entryId;
+    const entryId = String(req.params.entryId);
 
-    const entry = await DailyAdSpend.findByIdAndDelete(entryId);
-
+    const entry = await dailyAdSpendStore.getById(entryId);
     if (!entry) {
       res.status(404).json({ success: false, error: 'Entry not found' });
       return;
     }
+    await dailyAdSpendStore.deleteById(entryId);
 
     // Recompute ROAS for the affected date asynchronously
-    const dateKey = (entry as any).date.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+    const dateKey = new Date((entry as any).date).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
     recomputeForDate(dateKey).catch((err) => console.error('ROAS recompute error:', err));
 
     res.json({ success: true });

@@ -27,11 +27,12 @@ async function buildRevenueByDate(): Promise<Record<string, number>> {
 
 /** Aggregate DailyAdSpend into a map keyed by dateKey */
 async function buildAdSpendByDate(): Promise<Record<string, number>> {
-  const entries = await DailyAdSpend.find({}, { date: 1, amount: 1 }).lean();
+  const { dailyAdSpendStore } = await import('../db/featureStores');
+  const entries = await dailyAdSpendStore.all();
   const adSpendByDate: Record<string, number> = {};
   for (const entry of entries as any[]) {
     const dateKey = toDateKey(new Date(entry.date));
-    adSpendByDate[dateKey] = (adSpendByDate[dateKey] || 0) + entry.amount;
+    adSpendByDate[dateKey] = (adSpendByDate[dateKey] || 0) + (entry.amount || 0);
   }
   return adSpendByDate;
 }

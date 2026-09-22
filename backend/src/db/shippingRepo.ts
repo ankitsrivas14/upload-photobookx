@@ -1,4 +1,5 @@
 import { getFirestore } from './firestore';
+import { fromFirestore } from './keyedStore';
 
 /**
  * Firestore store for Shiprocket shipping charges — `shippingCharges/{orderNumber}`
@@ -58,7 +59,7 @@ export async function getAllAsMap(): Promise<Map<string, number>> {
 /** Every shipping-charge doc (full fields). */
 export async function getAllDocs(): Promise<any[]> {
   const snap = await getFirestore().collection(COLLECTION).get();
-  return snap.docs.map((d) => d.data());
+  return snap.docs.map((d) => fromFirestore(d.data()));
 }
 
 /** Fetch charge docs for the given order numbers, keyed by bare order number. */
@@ -69,7 +70,7 @@ export async function getMany(orderNumbers: string[]): Promise<Map<string, any>>
   for (let i = 0; i < ids.length; i += 300) {
     const refs = ids.slice(i, i + 300).map((id) => db.collection(COLLECTION).doc(id));
     const snaps = await db.getAll(...refs);
-    for (const s of snaps) if (s.exists) map.set(s.id, s.data());
+    for (const s of snaps) if (s.exists) map.set(s.id, fromFirestore(s.data()));
   }
   return map;
 }
