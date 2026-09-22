@@ -20,7 +20,11 @@ export async function upsertMany(docs: any[]): Promise<number> {
     for (const d of docs.slice(i, i + 450)) {
       const id = bare(d.orderNumber);
       if (!id) continue;
-      batch.set(db.collection(COLLECTION).doc(id), { ...d, orderNumber: id }, { merge: true });
+      // Drop Mongo-only fields Firestore can't serialize (_id is an ObjectId).
+      const rest: any = { ...d };
+      delete rest._id;
+      delete rest.__v;
+      batch.set(db.collection(COLLECTION).doc(id), { ...rest, orderNumber: id }, { merge: true });
       n++;
     }
     await batch.commit();
