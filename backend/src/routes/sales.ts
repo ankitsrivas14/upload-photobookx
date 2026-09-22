@@ -1426,6 +1426,23 @@ router.post('/daily-order-stats/backfill', requireAdmin, async (_req: Authentica
 });
 
 /**
+ * POST /api/admin/sales/firestore-backfill-orders
+ * Phase 1: copy the current Mongo order cache into Firestore (one doc per order).
+ * Idempotent — safe to re-run. Seeds Firestore without waiting on the scheduled sync.
+ */
+router.post('/firestore-backfill-orders', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const orders = await shopifyService.getAllOrders(10000);
+    const { saveAll } = await import('../db/ordersRepo');
+    const written = await saveAll(orders);
+    res.json({ success: true, written, total: orders.length });
+  } catch (error) {
+    console.error('Firestore orders backfill failed:', error);
+    res.status(500).json({ success: false, error: String((error as any)?.message || error) });
+  }
+});
+
+/**
  * GET /api/admin/sales/monthly-order-counts
  * Total orders (prepaid + COD) grouped by month, oldest first — for the
  * dashboard's "Orders per month" bar chart. Aggregated in the DB.

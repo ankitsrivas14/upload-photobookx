@@ -260,6 +260,15 @@ class ShopifyService {
       // never has to pull the whole ~15MB doc. Only from the canonical full key.
       if (cacheKey === 'all_orders_10000') {
         await this.rebuildMonthPartitions(trimmedOrders);
+        // Phase 1: dual-write orders to Firestore (one doc per order). Tolerant so a
+        // missing/disabled Firestore never breaks the Mongo write.
+        try {
+          const { saveAll } = await import('../db/ordersRepo');
+          const n = await saveAll(trimmedOrders);
+          console.log(`[Firestore] upserted ${n} orders`);
+        } catch (e) {
+          console.error('[Firestore] order dual-write failed (non-fatal):', e);
+        }
       }
 
       // Order data is the revenue source for DailyROAS — refresh it in the
