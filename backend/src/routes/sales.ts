@@ -597,7 +597,14 @@ router.post('/predict', requireAdmin, async (req: AuthenticatedRequest, res: Res
   router.post('/generate-incomplete-address-message', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { customerName, orderNumber } = req.body;
-      const message = await aiService.generateIncompleteAddressMessage({ customerName, orderNumber });
+      // Templated (no AI): the message only needs the first name and order number,
+      // so a fixed template is instant, free, and never hallucinates.
+      const firstName = String(customerName || '').trim().split(/\s+/)[0] || 'there';
+      const message =
+        `Hi ${firstName},\n\n` +
+        `Thank you for your order ${orderNumber}. Could you please share your complete delivery address — ` +
+        `including House No., Area, Landmark, and Pincode — so we can make sure your photobook reaches you safely and quickly?\n\n` +
+        `Thank you,\n- PhotobookX team`;
       res.json({ success: true, message });
     } catch (error) {
       console.error('Generate Incomplete Address Message Error:', error);
