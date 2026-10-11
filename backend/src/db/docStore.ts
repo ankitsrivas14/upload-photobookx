@@ -45,8 +45,75 @@ export function docStore(collection: string) {
       return s.docs.map((d) => withId(d.id, d.data()));
     },
 
+    /** Multiple equality/range clauses ANDed together. */
+    async query(clauses: Array<[string, FirebaseFirestore.WhereFilterOp, any]>): Promise<any[]> {
+      let q: FirebaseFirestore.Query = col();
+      for (const [f, op, v] of clauses) q = q.where(f, op, v);
+      const s = await q.get();
+      return s.docs.map((d) => withId(d.id, d.data()));
+    },
+
+    /** Docs where a string field starts with `prefix` (e.g. dateStr '2026-05-'). */
+    async prefix(field: string, prefix: string): Promise<any[]> {
+      const s = await col().where(field, '>=', prefix).where(field, '<=', prefix + '').get();
+      return s.docs.map((d) => withId(d.id, d.data()));
+    },
+
+    /** Upsert with an explicit (deterministic/composite) document id. */
+    async setById(id: string, data: any): Promise<any> {
+      const ref = col().doc(String(id));
+      await ref.set({ ...sanitizeForFirestore(data), _id: String(id), id: String(id) }, { merge: true });
+      const s = await ref.get();
+      return withId(s.id, s.data());
+    },
+
     async count(): Promise<number> {
       return (await col().get()).size;
+    },
+
+    /** Insert many new docs (auto-ids), batched; returns the created docs (with _id). */
+    async bulkCreate(items: any[]): Promise<any[]> {
+      const db = getFirestore();
+      const created: any[] = [];
+      for (let i = 0; i < items.length; i += 450) {
+        const batch = db.batch();
+        for (const it of items.slice(i, i + 450)) {
+          const ref = col().doc();
+          const doc = { ...sanitizeForFirestore(it), _id: ref.id, id: ref.id };
+          batch.set(ref, doc);
+          created.push(doc);
+        }
+        await batch.commit();
+      }
+      return created;
+    },
+
+    /** Merge `patch` into every doc matching the clauses. Returns count updated. */
+    async updateWhere(clauses: Array<[string, FirebaseFirestore.WhereFilterOp, any]>, patch: any): Promise<number> {
+      let q: FirebaseFirestore.Query = col();
+      for (const [f, op, v] of clauses) q = q.where(f, op, v);
+      const snap = await q.get();
+      const db = getFirestore();
+      let n = 0;
+      const ids = snap.docs.map((d) => d.id);
+      for (let i = 0; i < ids.length; i += 450) {
+        const batch = db.batch();
+        for (const id of ids.slice(i, i + 450)) { batch.set(col().doc(id), sanitizeForFirestore(patch), { merge: true }); n++; }
+        await batch.commit();
+      }
+      return n;
+    },
+
+    /** Merge `patch` into each doc id. */
+    async updateByIds(ids: string[], patch: any): Promise<number> {
+      const db = getFirestore();
+      let n = 0;
+      for (let i = 0; i < ids.length; i += 450) {
+        const batch = db.batch();
+        for (const id of ids.slice(i, i + 450)) { batch.set(col().doc(String(id)), sanitizeForFirestore(patch), { merge: true }); n++; }
+        await batch.commit();
+      }
+      return n;
     },
 
     /** Backfill: copy Mongo docs, preserving the original _id as the Firestore doc id. */

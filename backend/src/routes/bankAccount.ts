@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import { requireAdmin } from './adminAuth';
-import { BankCategory, BankTransaction, BankNarrationRule } from '../models';
 import type { AuthenticatedRequest } from '../types';
+import { bankCategoryStore, bankTransactionStore, bankNarrationRuleStore } from '../db/featureStores';
 
 const router = Router();
 
@@ -11,7 +11,7 @@ const router = Router();
  */
 router.get('/narration-rules', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
     try {
-        const rules = await BankNarrationRule.find().sort({ createdAt: -1 });
+        const rules = (await bankNarrationRuleStore.all()).sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
         res.json({
             success: true,
             rules: rules.map(r => ({
@@ -39,13 +39,12 @@ router.post('/narration-rules', requireAdmin, async (req: AuthenticatedRequest, 
             return;
         }
 
-        const rule = new BankNarrationRule({
+        const rule = await bankNarrationRuleStore.create({
             keyword: keyword.trim(),
             nickname: nickname.trim(),
             createdBy: req.user!.userId,
+            createdAt: new Date(),
         });
-
-        await rule.save();
 
         res.status(201).json({
             success: true,
@@ -72,7 +71,7 @@ router.post('/narration-rules', requireAdmin, async (req: AuthenticatedRequest, 
 router.delete('/narration-rules/:id', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
     try {
         const { id } = req.params;
-        await BankNarrationRule.findByIdAndDelete(id);
+        await bankNarrationRuleStore.deleteById(String(id));
         res.json({ success: true });
     } catch (error) {
         console.error('Error deleting narration rule:', error);
@@ -86,7 +85,7 @@ router.delete('/narration-rules/:id', requireAdmin, async (req: AuthenticatedReq
  */
 router.get('/categories', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
     try {
-        const categories = await BankCategory.find().sort({ name: 1 });
+        const categories = (await bankCategoryStore.all()).sort((a, b) => String(a.name).localeCompare(String(b.name)));
         res.json({
             success: true,
             categories: categories.map(cat => ({
@@ -113,12 +112,16 @@ router.post('/categories', requireAdmin, async (req: AuthenticatedRequest, res: 
             return;
         }
 
-        const category = new BankCategory({
+        const dupe = await bankCategoryStore.where('name', '==', name.trim());
+        if (dupe.length > 0) {
+            res.status(400).json({ success: false, error: 'Category already exists' });
+            return;
+        }
+        const category = await bankCategoryStore.create({
             name: name.trim(),
             createdBy: req.user!.userId,
+            createdAt: new Date(),
         });
-
-        await category.save();
 
         res.status(201).json({
             success: true,
@@ -140,7 +143,10 @@ router.post('/categories', requireAdmin, async (req: AuthenticatedRequest, res: 
  */
 router.get('/transactions', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
     try {
-        const transactions = await BankTransaction.find().sort({ date: -1, createdAt: -1 });
+        const transactions = (await bankTransactionStore.all()).sort((a, b) => {
+            const d = new Date(b.date).getTime() - new Date(a.date).getTime();
+            return d !== 0 ? d : new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+        });
         res.json({
             success: true,
             transactions: transactions.map(tx => ({
@@ -182,10 +188,12 @@ router.post('/transactions/bulk', requireAdmin, async (req: AuthenticatedRequest
             deposit: tx.deposit,
             balance: tx.balance,
             category: tx.category,
+            tags: [],
             createdBy: req.user!.userId,
+            createdAt: new Date(),
         }));
 
-        const savedTxs = await BankTransaction.insertMany(txDocs);
+        const savedTxs = await bankTransactionStore.bulkCreate(txDocs);
 
         res.status(201).json({
             success: true,
@@ -214,12 +222,12 @@ router.post('/transactions/bulk', requireAdmin, async (req: AuthenticatedRequest
 router.delete('/transactions/:id', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
     try {
         const { id } = req.params;
-        const tx = await BankTransaction.findByIdAndDelete(id);
-
+        const tx = await bankTransactionStore.getById(String(id));
         if (!tx) {
             res.status(404).json({ success: false, error: 'Transaction not found' });
             return;
         }
+        await bankTransactionStore.deleteById(String(id));
 
         res.json({ success: true });
     } catch (error) {
@@ -245,20 +253,15 @@ router.patch('/categories/:oldName', requireAdmin, async (req: AuthenticatedRequ
         const trimmedNewName = newName.trim();
 
         // 1. Update the category itself
-        const category = await BankCategory.findOne({ name: oldName });
-        if (!category) {
+        const cats = await bankCategoryStore.where('name', '==', oldName);
+        if (cats.length === 0) {
             res.status(404).json({ success: false, error: 'Category not found' });
             return;
         }
-
-        category.name = trimmedNewName;
-        await category.save();
+        await bankCategoryStore.updateById(cats[0]._id, { name: trimmedNewName });
 
         // 2. Update all transactions using this category
-        await BankTransaction.updateMany(
-            { category: oldName },
-            { $set: { category: trimmedNewName } }
-        );
+        await bankTransactionStore.updateWhere([['category', '==', oldName]], { category: trimmedNewName });
 
         res.json({
             success: true,
@@ -283,37 +286,31 @@ router.delete('/categories/:name', requireAdmin, async (req: AuthenticatedReques
         const { name } = req.params;
 
         // 1. Find the category
-        const category = await BankCategory.findOne({ name });
-        if (!category) {
+        const cats = await bankCategoryStore.where('name', '==', name);
+        if (cats.length === 0) {
             res.status(404).json({ success: false, error: 'Category not found' });
             return;
         }
 
         // 2. Check for transactions using this category
-        const transactionCount = await BankTransaction.countDocuments({ category: name });
+        const usingCategory = await bankTransactionStore.where('category', '==', name);
+        const transactionCount = usingCategory.length;
 
         if (transactionCount > 0) {
             const deletedCategoryName = `deleted_${name}`;
 
             // Ensure the "deleted_" version exists as a category record
-            let deletedCat = await BankCategory.findOne({ name: deletedCategoryName });
-            if (!deletedCat) {
-                deletedCat = new BankCategory({
-                    name: deletedCategoryName,
-                    createdBy: req.user!.userId,
-                });
-                await deletedCat.save();
+            const deletedCats = await bankCategoryStore.where('name', '==', deletedCategoryName);
+            if (deletedCats.length === 0) {
+                await bankCategoryStore.create({ name: deletedCategoryName, createdBy: req.user!.userId, createdAt: new Date() });
             }
 
             // Move transactions to the "deleted_" category
-            await BankTransaction.updateMany(
-                { category: name },
-                { $set: { category: deletedCategoryName } }
-            );
+            await bankTransactionStore.updateWhere([['category', '==', name]], { category: deletedCategoryName });
         }
 
         // 3. Delete the original category
-        await BankCategory.deleteOne({ name });
+        for (const c of cats) await bankCategoryStore.deleteById(c._id);
 
         res.json({
             success: true,
@@ -339,16 +336,12 @@ router.patch('/categories/:name/tags', requireAdmin, async (req: AuthenticatedRe
             return;
         }
 
-        const category = await BankCategory.findOneAndUpdate(
-            { name },
-            { $set: { tags: tags.map(t => t.trim()) } },
-            { new: true }
-        );
-
-        if (!category) {
+        const cats = await bankCategoryStore.where('name', '==', name);
+        if (cats.length === 0) {
             res.status(404).json({ success: false, error: 'Category not found' });
             return;
         }
+        const category = await bankCategoryStore.updateById(cats[0]._id, { tags: tags.map((t: string) => t.trim()) });
 
         res.json({ success: true, tags: category.tags });
     } catch (error) {
@@ -370,9 +363,9 @@ router.patch('/transactions/bulk/tags', requireAdmin, async (req: AuthenticatedR
             return;
         }
 
-        await BankTransaction.updateMany(
-            { _id: { $in: ids } },
-            { $set: { tags: tags.map(t => t.trim()) } }
+        await bankTransactionStore.updateByIds(
+            ids.map((id: string) => String(id)),
+            { tags: tags.map((tag: string) => tag.trim()) }
         );
 
         res.json({ success: true });
@@ -396,16 +389,16 @@ router.patch('/transactions/:id', requireAdmin, async (req: AuthenticatedRequest
             return;
         }
 
-        const tx = await BankTransaction.findByIdAndUpdate(
-            id,
-            {
-                $set: {
-                    category,
-                    tags: [] // Clear tags when category changes
-                }
-            },
-            { new: true }
-        );
+        const existingTx = await bankTransactionStore.getById(String(id));
+        if (!existingTx) {
+            res.status(404).json({ success: false, error: 'Transaction not found' });
+            return;
+        }
+
+        const tx = await bankTransactionStore.updateById(String(id), {
+            category,
+            tags: [], // Clear tags when category changes
+        });
 
         if (!tx) {
             res.status(404).json({ success: false, error: 'Transaction not found' });

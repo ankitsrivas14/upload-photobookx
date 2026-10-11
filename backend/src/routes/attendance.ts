@@ -1,12 +1,15 @@
 import { Router, Response } from 'express';
 import { requireAdmin } from './adminAuth';
-import { Employee, Attendance, SalaryAdvance, SalaryPayment, AttendanceAuditLog, HourlyLog } from '../models';
 import type { AuthenticatedRequest } from '../types';
+import {
+  employeeStore, attendanceStore, salaryAdvanceStore, salaryPaymentStore,
+  attendanceAuditStore, hourlyLogStore,
+} from '../db/featureStores';
 
 async function logAudit(action: string, details: string, employeeId?: string, req?: AuthenticatedRequest) {
   try {
     const adminUser = req?.user?.email || 'System';
-    await AttendanceAuditLog.create({ action, details, employeeId, adminUser });
+    await attendanceAuditStore.create({ action, details, employeeId, adminUser, createdAt: new Date() });
   } catch (error) {
     console.error('Failed to log attendance audit:', error);
   }
@@ -20,17 +23,18 @@ const router = Router();
 router.post('/employees', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { name, employeeType, monthlySalary, hourlyRate, joiningDate } = req.body;
-    const employee = new Employee({
+    const employee = await employeeStore.create({
       name,
       employeeType: employeeType || 'monthly',
       monthlySalary: employeeType === 'hourly' ? 0 : (monthlySalary || 0),
       hourlyRate: employeeType === 'hourly' ? (hourlyRate || 0) : 0,
-      joiningDate: new Date(joiningDate)
+      joiningDate: new Date(joiningDate),
+      isActive: true,
+      createdAt: new Date(),
     });
-    await employee.save();
-    
-    const details = employeeType === 'hourly' 
-      ? `Added hourly employee ${name} at ₹${hourlyRate}/hr` 
+
+    const details = employeeType === 'hourly'
+      ? `Added hourly employee ${name} at ₹${hourlyRate}/hr`
       : `Added employee ${name} with salary ₹${monthlySalary}/month`;
     await logAudit('ADD_EMPLOYEE', details, employee._id.toString(), req);
 
@@ -54,12 +58,8 @@ router.put('/employees/:id', requireAdmin, async (req: AuthenticatedRequest, res
     if (isFnfMarked !== undefined) updateData.isFnfMarked = isFnfMarked;
     if (fnfAmount !== undefined) updateData.fnfAmount = fnfAmount;
 
-    const employee = await Employee.findByIdAndUpdate(
-      req.params.id,
-      updateData,
-      { new: true }
-    );
-    
+    const employee = await employeeStore.updateById(String(req.params.id), updateData);
+
     await logAudit('UPDATE_EMPLOYEE', `Updated employee ${name} (Active: ${isActive})`, req.params.id as string, req);
 
     res.json({ success: true, employee });
@@ -71,7 +71,10 @@ router.put('/employees/:id', requireAdmin, async (req: AuthenticatedRequest, res
 // Get all employees (for management tab)
 router.get('/employees', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const employees = await Employee.find({}).sort({ isActive: -1, createdAt: -1 }).lean();
+    const employees = (await employeeStore.all()).sort((a, b) => {
+      const act = (b.isActive ? 1 : 0) - (a.isActive ? 1 : 0);
+      return act !== 0 ? act : new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+    });
     res.json({ success: true, employees });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
@@ -90,8 +93,8 @@ router.get('/employees/stats', requireAdmin, async (req: AuthenticatedRequest, r
     const endDate = new Date(year, monthNum, 0, 23, 59, 59);
     const daysInMonth = endDate.getDate();
 
-    const employeesData = await Employee.find({ employeeType: { $ne: 'hourly' } }).lean();
-    
+    const employeesData = (await employeeStore.all()).filter((e) => e.employeeType !== 'hourly');
+
     // Only include active employees, or those terminated on/after the start of this month
     const employees = employeesData.filter(emp => {
       if (new Date(emp.joiningDate) > endDate) return false; // Joined after this month ends
@@ -101,23 +104,11 @@ router.get('/employees/stats', requireAdmin, async (req: AuthenticatedRequest, r
       }
       return false;
     });
-    
-    const employeeIds = employees.map(e => e._id);
 
-    const attendances = await Attendance.find({
-      employeeId: { $in: employeeIds },
-      dateStr: { $regex: `^${month}` }
-    }).lean();
-
-    const advances = await SalaryAdvance.find({
-      employeeId: { $in: employeeIds },
-      date: { $gte: startDate, $lte: endDate }
-    }).lean();
-
-    const payments = await SalaryPayment.find({
-      employeeId: { $in: employeeIds },
-      month
-    }).lean();
+    // Scope by month/range, then group per-employee in JS (Firestore `in` caps at 30).
+    const attendances = await attendanceStore.prefix('dateStr', month);
+    const advances = await salaryAdvanceStore.query([['date', '>=', startDate], ['date', '<=', endDate]]);
+    const payments = await salaryPaymentStore.where('month', '==', month);
 
     const stats = employees.map(emp => {
       const empAttendances = attendances.filter(a => a.employeeId.toString() === emp._id.toString());
@@ -189,7 +180,7 @@ router.get('/records', requireAdmin, async (req: AuthenticatedRequest, res: Resp
     const { dateStr } = req.query;
     if (!dateStr) return res.status(400).json({ success: false, error: 'dateStr is required' });
 
-    const records = await Attendance.find({ dateStr });
+    const records = await attendanceStore.where('dateStr', '==', dateStr);
     res.json({ success: true, records });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
@@ -200,9 +191,7 @@ router.get('/records', requireAdmin, async (req: AuthenticatedRequest, res: Resp
 router.get('/records/month/:month', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { month } = req.params; // YYYY-MM
-    const records = await Attendance.find({
-      dateStr: { $regex: new RegExp(`^${month}-`) }
-    });
+    const records = await attendanceStore.prefix('dateStr', `${month}-`);
     res.json({ success: true, records });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
@@ -214,17 +203,16 @@ router.post('/records', requireAdmin, async (req: AuthenticatedRequest, res: Res
   try {
     const { employeeId, dateStr, status, notes } = req.body;
     
+    const existingAtt = await attendanceStore.query([['employeeId', '==', employeeId], ['dateStr', '==', dateStr]]);
     if (!status || status === 'none') {
-      await Attendance.deleteOne({ employeeId, dateStr });
+      for (const e of existingAtt) await attendanceStore.deleteById(e._id);
       await logAudit('CLEAR_ATTENDANCE', `Cleared attendance for ${dateStr}`, employeeId, req);
       return res.json({ success: true, message: 'Attendance removed' });
     }
 
-    const record = await Attendance.findOneAndUpdate(
-      { employeeId, dateStr },
-      { status, notes },
-      { new: true, upsert: true }
-    );
+    const record = existingAtt.length
+      ? await attendanceStore.updateById(existingAtt[0]._id, { status, notes })
+      : await attendanceStore.create({ employeeId, dateStr, status, notes, createdAt: new Date() });
     
     await logAudit('MARK_ATTENDANCE', `Marked attendance as ${status} for ${dateStr}`, employeeId, req);
 
@@ -240,13 +228,13 @@ router.post('/records', requireAdmin, async (req: AuthenticatedRequest, res: Res
 router.post('/advances', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { employeeId, date, amount, reason } = req.body;
-    const advance = new SalaryAdvance({
+    const advance = await salaryAdvanceStore.create({
       employeeId,
       date: new Date(date),
       amount,
-      reason
+      reason,
+      createdAt: new Date(),
     });
-    await advance.save();
     
     await logAudit('ADD_ADVANCE', `Added advance of ${amount} for reason: ${reason}`, employeeId, req);
 
@@ -263,12 +251,11 @@ router.post('/payments', requireAdmin, async (req: AuthenticatedRequest, res: Re
   try {
     const { employeeId, month, amountPaid } = req.body;
     
-    const payment = await SalaryPayment.findOneAndUpdate(
-      { employeeId, month },
-      { amountPaid, paidAt: new Date() },
-      { new: true, upsert: true }
-    );
-    
+    const existingPay = await salaryPaymentStore.query([['employeeId', '==', employeeId], ['month', '==', month]]);
+    const payment = existingPay.length
+      ? await salaryPaymentStore.updateById(existingPay[0]._id, { amountPaid, paidAt: new Date() })
+      : await salaryPaymentStore.create({ employeeId, month, amountPaid, paidAt: new Date(), createdAt: new Date() });
+
     await logAudit('MARK_PAID', `Marked salary as paid (${amountPaid}) for month ${month}`, employeeId, req);
 
     res.json({ success: true, payment });
@@ -292,12 +279,11 @@ router.post('/hourly-logs', requireAdmin, async (req: AuthenticatedRequest, res:
       return res.status(400).json({ success: false, error: 'Hours must be between 0 and 24' });
     }
     
-    const log = await HourlyLog.findOneAndUpdate(
-      { employeeId, dateStr },
-      { hoursWorked, notes },
-      { new: true, upsert: true }
-    );
-    
+    const existingLog = await hourlyLogStore.query([['employeeId', '==', employeeId], ['dateStr', '==', dateStr]]);
+    const log = existingLog.length
+      ? await hourlyLogStore.updateById(existingLog[0]._id, { hoursWorked, notes })
+      : await hourlyLogStore.create({ employeeId, dateStr, hoursWorked, notes, createdAt: new Date() });
+
     await logAudit('LOG_HOURS', `Logged ${hoursWorked}h for ${dateStr}`, employeeId, req);
     
     res.json({ success: true, log });
@@ -310,7 +296,8 @@ router.post('/hourly-logs', requireAdmin, async (req: AuthenticatedRequest, res:
 router.delete('/hourly-logs/:employeeId/:dateStr', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { employeeId, dateStr } = req.params;
-    await HourlyLog.deleteOne({ employeeId, dateStr });
+    const toDelete = await hourlyLogStore.query([['employeeId', '==', employeeId], ['dateStr', '==', dateStr]]);
+    for (const e of toDelete) await hourlyLogStore.deleteById(e._id);
     await logAudit('DELETE_HOURS_LOG', `Deleted hours log for ${dateStr}`, employeeId as string, req);
     res.json({ success: true });
   } catch (error: any) {
@@ -322,15 +309,9 @@ router.delete('/hourly-logs/:employeeId/:dateStr', requireAdmin, async (req: Aut
 router.get('/hourly-logs/month/:month', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { month } = req.params; // YYYY-MM
-    const employees = await Employee.find({ isActive: true, employeeType: 'hourly' }).lean();
-    const logs = await HourlyLog.find({
-      dateStr: { $regex: new RegExp(`^${month}-`) }
-    }).lean();
-    
-    const payments = await SalaryPayment.find({
-      month,
-      employeeId: { $in: employees.map(e => e._id) }
-    }).lean();
+    const employees = (await employeeStore.all()).filter((e) => e.isActive && e.employeeType === 'hourly');
+    const logs = await hourlyLogStore.prefix('dateStr', `${month}-`);
+    const payments = await salaryPaymentStore.where('month', '==', month);
 
     const summary = employees.map(emp => {
       const empLogs = logs.filter(l => l.employeeId.toString() === emp._id.toString());
@@ -357,10 +338,11 @@ router.get('/hourly-logs/month/:month', requireAdmin, async (req: AuthenticatedR
 // Get all hourly logs (all time) grouped by employee, for the records table
 router.get('/hourly-logs/all', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const employees = await Employee.find({ isActive: true, employeeType: 'hourly' }).lean();
-    const logs = await HourlyLog.find({
-      employeeId: { $in: employees.map(e => e._id) }
-    }).sort({ dateStr: -1 }).lean();
+    const employees = (await employeeStore.all()).filter((e) => e.isActive && e.employeeType === 'hourly');
+    const empIds = new Set(employees.map((e) => String(e._id)));
+    const logs = (await hourlyLogStore.all())
+      .filter((l) => empIds.has(String(l.employeeId)))
+      .sort((a, b) => String(b.dateStr).localeCompare(String(a.dateStr)));
 
     res.json({ success: true, employees, logs });
   } catch (error: any) {
