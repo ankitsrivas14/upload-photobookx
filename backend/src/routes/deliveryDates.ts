@@ -1,33 +1,25 @@
 import { Router, Response } from 'express';
-import multer from 'multer';
 import csv from 'csv-parser';
 import { Readable } from 'stream';
 import OrderDeliveryDate from '../models/OrderDeliveryDate';
 import { requireAdmin } from './adminAuth';
+import { singleFile } from '../middleware/multipart';
 import type { AuthenticatedRequest } from '../types';
 
 const router = Router();
 
-// Configure multer for CSV upload (memory storage)
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB limit
-  },
-  fileFilter: (req, file, cb) => {
-    if (file.mimetype === 'text/csv' || file.originalname.endsWith('.csv')) {
-      cb(null, true);
-    } else {
-      cb(new Error('Only CSV files are allowed'));
-    }
-  },
+// CSV upload, buffered in memory. See middleware/multipart for why this isn't multer.
+const uploadCsv = singleFile('csv', {
+  fileSize: 10 * 1024 * 1024, // 10MB limit
+  accept: (f) => f.mimetype === 'text/csv' || f.originalname.endsWith('.csv'),
+  acceptError: 'Only CSV files are allowed',
 });
 
 /**
  * POST /api/admin/delivery-dates/upload
  * Upload CSV file with delivery dates
  */
-router.post('/upload', requireAdmin, upload.single('csv'), async (req: AuthenticatedRequest, res: Response) => {
+router.post('/upload', requireAdmin, uploadCsv, async (req: AuthenticatedRequest, res: Response) => {
   try {
     if (!req.file) {
       return res.status(400).json({ success: false, error: 'No CSV file uploaded' });

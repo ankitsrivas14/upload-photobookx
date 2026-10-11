@@ -1,5 +1,4 @@
 import { Router, Request, Response } from 'express';
-import multer from 'multer';
 import { PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { v4 as uuidv4 } from 'uuid';
 import magicLinkService from '../services/magicLinkService';
@@ -7,23 +6,16 @@ import { UploadedImage } from '../models';
 import type { PhotoSize, PhotoType } from '../models/UploadedImage';
 import config from '../config';
 import { getS3Client } from '../services/s3';
+import { singleFile } from '../middleware/multipart';
 
 const router = Router();
 
-// Configure multer for memory storage (we'll stream to S3)
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 20 * 1024 * 1024, // 20MB max
-  },
-  fileFilter: (_req, file, cb) => {
-    // Only allow images
-    if (file.mimetype.startsWith('image/')) {
-      cb(null, true);
-    } else {
-      cb(new Error('Only image files are allowed'));
-    }
-  },
+// Photos are buffered in memory on the way to S3. Not multer — see middleware/multipart
+// for why that cannot work behind Cloud Functions.
+const uploadPhoto = singleFile('photo', {
+  fileSize: 20 * 1024 * 1024, // 20MB max
+  accept: (f) => f.mimetype.startsWith('image/'),
+  acceptError: 'Only image files are allowed',
 });
 
 
@@ -68,7 +60,7 @@ router.get('/:token', async (req: Request, res: Response) => {
  * POST /api/upload/:token/upload
  * Upload a single image (public - no auth required, just valid magic link)
  */
-router.post('/:token/upload', upload.single('photo'), async (req: Request, res: Response) => {
+router.post('/:token/upload', uploadPhoto, async (req: Request, res: Response) => {
   try {
     const token = req.params.token as string;
     const result = await magicLinkService.validateToken(token);
@@ -321,7 +313,7 @@ router.delete('/:token/images/:imageId', async (req: Request, res: Response) => 
  * PUT /api/upload/:token/images/:imageId
  * Update an existing image (replace with edited version)
  */
-router.put('/:token/images/:imageId', upload.single('photo'), async (req: Request, res: Response) => {
+router.put('/:token/images/:imageId', uploadPhoto, async (req: Request, res: Response) => {
   try {
     const token = req.params.token as string;
     const imageId = req.params.imageId as string;
