@@ -5,7 +5,6 @@ import styles from './SalesPage.module.css';
 import {
   Amount,
   Button,
-  Card,
   Checkbox,
   DataList,
   Dialog,
@@ -206,10 +205,6 @@ export function SalesPage({ initialFilter, embedded = false }: SalesPageProps = 
   // Ad spend by date (YYYY-MM-DD -> total amount). Used to show "Ad spend" in day header row.
   const [adSpendByDate, setAdSpendByDate] = useState<Record<string, number>>({});
 
-  // AI Prediction State
-  const [aiPrediction, setAiPrediction] = useState<any>(null);
-  const [isPredicting, setIsPredicting] = useState(false);
-
   // Derived: ad cost per order per day — depends on orders + adSpendByDate, no fetch needed
   // id → order lookup, so bulk handlers don't linearly scan `orders` per selected id.
   const ordersById = useMemo(() => {
@@ -232,77 +227,6 @@ export function SalesPage({ initialFilter, embedded = false }: SalesPageProps = 
     });
     return result;
   }, [orders, adSpendByDate]);
-
-  const fetchCurrentPrediction = async () => {
-    const monthYear = selectedMonthFilter === 'current' 
-      ? new Date().toISOString().substring(0, 7)
-      : selectedMonthFilter;
-    
-    if (monthYear.length !== 7) return;
-
-    try {
-      const res = await api.getProfitPrediction(monthYear);
-      if (res.success && res.prediction) {
-        setAiPrediction(res.prediction);
-      } else {
-        setAiPrediction(null);
-      }
-    } catch (err) {
-      console.error('Failed to fetch prediction:', err);
-    }
-  };
-
-  const runAiPrediction = async () => {
-    if (!expectedProfit) return;
-    
-    const monthYear = selectedMonthFilter === 'current' 
-      ? new Date().toISOString().substring(0, 7)
-      : selectedMonthFilter;
-
-    setIsPredicting(true);
-    try {
-      // Fetch pre-computed historical stats from DB (replaces 10k-order fetch)
-      const predDataRes = await api.getAiPredictionData('2026-02-01');
-      if (!predDataRes.success) {
-        toast.error(predDataRes.error || 'Failed to load historical data');
-        return;
-      }
-      const sixMonthsStats = predDataRes.sixMonthsStats ?? [];
-      const sixMonthsDailyData = predDataRes.sixMonthsDailyData ?? [];
-
-      const res = await api.predictProfit({
-        monthYear,
-        daysElapsed: expectedProfit.daysElapsed,
-        totalDays: expectedProfit.totalDays,
-        currentOrders: stats.totalOrders,
-        currentPL: expectedProfit.currentPL,
-        sixMonthsStats,
-        sixMonthsDailyData,
-        pendingOrdersCount: expectedProfit.pendingOrdersCount,
-        avgPLPerDay: expectedProfit.avgPLPerDay,
-        avgOrdersPerDay: stats.totalOrders / expectedProfit.daysElapsed,
-        ndrRate: globalNdrRate,
-        stats: {
-          delivered: stats.deliveredCount,
-          failed: stats.failedCount,
-          prepaid: stats.prepaidCount,
-          cod: stats.codCount,
-          avgProfitPerOrder: expectedProfit.avgPLPerDeliveredOrder,
-          avgLossPerFailure: (expectedProfit as any).avgLossPerFailedOrder || 0
-        }
-      });
-
-      if (res.success && res.prediction) {
-        setAiPrediction(res.prediction);
-      } else {
-        toast.error(res.error || 'Prediction failed');
-      }
-    } catch (err) {
-      toast.error('Error running AI prediction');
-    } finally {
-      setIsPredicting(false);
-    }
-  };
 
   const loadStaticData = async () => {
     try {
@@ -383,9 +307,6 @@ export function SalesPage({ initialFilter, embedded = false }: SalesPageProps = 
 
   useEffect(() => {
     loadOrders(selectedMonthFilter);
-    if (selectedMonthFilter !== 'all') {
-      fetchCurrentPrediction();
-    }
   }, [selectedMonthFilter]);
 
   // Once the current month is loaded and we know the available months, prefetch the
@@ -1919,43 +1840,6 @@ export function SalesPage({ initialFilter, embedded = false }: SalesPageProps = 
           </StatCard>
         )}
       </StatStrip>
-
-      {selectedMonthFilter !== 'all' && expectedProfit && (
-        <Card
-          title="AI forecast"
-          eyebrow={aiPrediction
-            ? `analysed ${new Date(aiPrediction.lastUpdated).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}, ${new Date(aiPrediction.lastUpdated).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}`
-            : 'not analysed yet'}
-          actions={
-            <Button size="sm" variant="secondary" icon="sparkles" onClick={runAiPrediction} loading={isPredicting}>
-              {isPredicting ? 'Analysing…' : 'Refresh AI'}
-            </Button>
-          }
-        >
-          <div className={styles.ai}>
-            <DataList
-              items={[
-                { label: 'Orders by month-end', value: aiPrediction?.predictedOrders ? Number(aiPrediction.predictedOrders).toLocaleString('en-IN') : '—' },
-                {
-                  label: 'Expected NDR',
-                  sub: 'projected final rate',
-                  value: aiPrediction?.predictedNDR ? `${Number(aiPrediction.predictedNDR).toFixed(1)}%` : '—',
-                  tone: aiPrediction?.predictedNDR ? (aiPrediction.predictedNDR > 15 ? 'negative' : 'positive') : undefined,
-                },
-                {
-                  label: 'Predicted P/L',
-                  value: aiPrediction?.predictedFinalProfit ? formatINR(aiPrediction.predictedFinalProfit, { signed: true }) : '—',
-                  tone: aiPrediction?.predictedFinalProfit ? (aiPrediction.predictedFinalProfit > 0 ? 'positive' : 'negative') : undefined,
-                },
-              ]}
-            />
-            <div className={styles.insight}>
-              <p className={styles.insightText}>{aiPrediction?.insight || 'Refresh AI to get an actionable insight for this month.'}</p>
-              {aiPrediction?.reasoning && <p className={styles.reasoning}>{aiPrediction.reasoning}</p>}
-            </div>
-          </div>
-        </Card>
-      )}
 
       <section className={styles.orders} aria-label="Order filters">
         <div className={styles.statusStrip} role="group" aria-label="Filter by delivery status">

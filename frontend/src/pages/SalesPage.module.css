@@ -37,34 +37,6 @@
 }
 
 /* AI forecast: the figures beside the insight */
-.ai {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--space-3) var(--space-6);
-}
-
-@media (min-width: 960px) {
-  .ai {
-    grid-template-columns: minmax(240px, 1fr) minmax(0, 2fr);
-  }
-}
-
-.insight {
-  min-width: 0;
-}
-
-.insightText {
-  margin: 0;
-  font: 400 13px/20px var(--font-sans);
-  color: var(--ink);
-}
-
-.reasoning {
-  margin: var(--space-2) 0 0;
-  font: 400 12px/18px var(--font-sans);
-  color: var(--ink-muted);
-}
-
 .orders {
   display: flex;
   flex-direction: column;

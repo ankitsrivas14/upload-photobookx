@@ -1250,17 +1250,6 @@ class ApiService {
     return this.request(`/api/admin/sales/search-orders?query=${encodeURIComponent(query)}`);
   }
 
-  async getProfitPrediction(monthYear: string): Promise<{ success: boolean; prediction?: any; error?: string }> {
-    return this.request(`/api/admin/sales/prediction/${monthYear}`);
-  }
-
-  async predictProfit(data: any): Promise<{ success: boolean; prediction?: any; reasoning?: string; error?: string }> {
-    return this.request('/api/admin/sales/predict', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
-
   async predictStock(data: {
     daysToPredict: number;
     historicalData: any[];
@@ -1552,27 +1541,6 @@ async getVariantPerformance(days = 30): Promise<{
 
   async backfillDailyPnl(): Promise<{ success: boolean; upserted?: number; error?: string }> {
     return this.request('/api/admin/sales/daily-pnl/backfill', { method: 'POST' });
-  }
-
-  async getAiPredictionData(startDate: string): Promise<{
-    success: boolean;
-    sixMonthsStats?: Array<{
-      month: string;
-      totalOrders: number;
-      ndrRateTotal: number;
-      ndrRateCOD: number;
-      ndrRatePrepaid: number;
-      totalPL: number;
-    }>;
-    sixMonthsDailyData?: Array<{
-      date: string;
-      placed: number;
-      delivered: number;
-      failed: number;
-    }>;
-    error?: string;
-  }> {
-    return this.request(`/api/admin/sales/ai-prediction-data?startDate=${startDate}`);
   }
 
   /** Everything the Dashboard shows on open, in one request; each part is shaped like its own route's response. */
