@@ -64,13 +64,13 @@ Reference screens: `DashboardPage.tsx` and `SalesPage.tsx`.
 | Expenses | Fixed monthly | `pages/FixedMonthlyPage` | 233 | To do |
 | Expenses | COGS | `pages/COGSPage` | 489 | To do |
 | Expenses | Bank account | `pages/BankAccountPage` | 1,211 | To do |
-| Tools | Section tabs | `pages/ToolsPage` | 149 | To do |
-| Tools | GST reports | `pages/GSTReportsPage`, `pages/GSTMonthlyReports` | 527 | To do |
-| Tools | Products | `pages/tools/ProductsManager` | 480 | To do |
-| Tools | Labels | `pages/tools/Labels` | 270 | To do |
-| Tools | Variant performance | `pages/tools/VariantPerformance` | 232 | To do |
-| Tools | Profit prediction | `pages/ProfitPredictionCalculator` | 437 | To do |
-| Tools | Stock prediction | `pages/StockPrediction` | 334 | To do |
+| Tools | Section tabs | `pages/ToolsPage` | 149 | In progress |
+| Tools | GST reports | `pages/GSTReportsPage`, `pages/GSTMonthlyReports` | 527 | In progress |
+| Tools | Products | `pages/tools/ProductsManager` | 480 | In progress |
+| Tools | Labels | `pages/tools/Labels` | 270 | In progress |
+| Tools | Variant performance | `pages/tools/VariantPerformance` | 232 | In progress |
+| Tools | Profit prediction | `pages/ProfitPredictionCalculator` | 437 | In progress |
+| Tools | Stock prediction | `pages/StockPrediction` | 334 | In progress |
 | People | Attendance | `pages/AttendancePage` | 864 | To do |
 | Access | Login | `pages/AdminLogin` | 116 | To do |
 | Customer | Photo upload (magic link) | `pages/UploadPage` | 954 | To do |
@@ -119,3 +119,6 @@ check every route, then fast-forward `main` so Vercel ships it.
 More than one session works in this worktree. Before starting a screen, set its Status to "In
 progress" here. Stage only your own files (`git add <paths>`, never `git add -A`), and don't edit
 a screen that another session has in progress.
+
+Current split (2026-10-25): one session works down the sidebar from the top (Backlog first);
+another takes the Tools area from the bottom.
