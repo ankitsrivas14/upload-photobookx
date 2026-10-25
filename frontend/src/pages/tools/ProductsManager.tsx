@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
+import toast from 'react-hot-toast';
 import { api } from '../../services/api';
-import styles from '../AdminDashboard.module.css'; // Reusing dashboard styles for now
+import { Alert, Amount, Badge, Button, Card, DataTable, Dialog, EmptyState, SegmentedControl, TextField, type Column } from '../../components/ui/pbx';
+import styles from './ProductsManager.module.css';
 
 interface Product {
     id: number;
@@ -23,25 +25,51 @@ interface Product {
     image: string | null;
 }
 
+type StatusFilter = 'all' | 'active' | 'inactive';
+type UpdateType = 'set' | 'increase' | 'decrease';
+
+interface UpdateOutcome {
+    successful: number;
+    failed: number;
+    failures: string[];
+}
+
+const STATUS_OPTIONS = [
+    { value: 'all', label: 'All' },
+    { value: 'active', label: 'Active' },
+    { value: 'inactive', label: 'Inactive' },
+];
+
+const UPDATE_OPTIONS = [
+    { value: 'set', label: 'Set price' },
+    { value: 'increase', label: 'Increase' },
+    { value: 'decrease', label: 'Decrease' },
+];
+
+const plural = (n: number, word: string) => `${n.toLocaleString('en-IN')} ${word}${n === 1 ? '' : 's'}`;
+const statusLabel = (status: string) => status.charAt(0).toUpperCase() + status.slice(1);
+
+/** Products: the Shopify catalogue with both variant prices, and a bulk price update for selected products. */
 export function ProductsManager() {
     const [products, setProducts] = useState<Product[]>([]);
     const [isLoadingProducts, setIsLoadingProducts] = useState(false);
 
     // Product filters
     const [productSearch, setProductSearch] = useState('');
-    const [productStatusFilter, setProductStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
-    const [selectedProducts, setSelectedProducts] = useState<Set<number>>(new Set());
+    const [productStatusFilter, setProductStatusFilter] = useState<StatusFilter>('all');
+    const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set());
 
-    // Bulk price update modal
+    // Bulk price update dialog
     const [showPriceUpdateModal, setShowPriceUpdateModal] = useState(false);
     const [isUpdatingPrices, setIsUpdatingPrices] = useState(false);
-    const [priceUpdateType, setPriceUpdateType] = useState<'set' | 'increase' | 'decrease'>('set');
+    const [priceUpdateType, setPriceUpdateType] = useState<UpdateType>('set');
     const [variant1Price, setVariant1Price] = useState('');
     const [variant2Price, setVariant2Price] = useState('');
     const [variant1CompareAtPrice, setVariant1CompareAtPrice] = useState('');
     const [variant2CompareAtPrice, setVariant2CompareAtPrice] = useState('');
     const [priceChangePercent, setPriceChangePercent] = useState('');
     const [priceChangeAmount, setPriceChangeAmount] = useState('');
+    const [outcome, setOutcome] = useState<UpdateOutcome | null>(null);
 
     const loadProducts = useCallback(async () => {
         setIsLoadingProducts(true);
@@ -52,6 +80,7 @@ export function ProductsManager() {
             }
         } catch (err) {
             console.error('Failed to load products:', err);
+            toast.error('Could not load products. Try again.');
         } finally {
             setIsLoadingProducts(false);
         }
@@ -75,30 +104,49 @@ export function ProductsManager() {
         return matchesSearch && matchesStatus;
     });
 
-    const toggleProductSelection = (productId: number) => {
-        setSelectedProducts(prev => {
-            const newSet = new Set(prev);
-            if (newSet.has(productId)) {
-                newSet.delete(productId);
-            } else {
-                newSet.add(productId);
-            }
-            return newSet;
-        });
-    };
+    const variant1Name = products[0]?.variants[0]?.title || 'Variant 1';
+    const variant2Name = products[0]?.variants[1]?.title || 'Variant 2';
 
-    const toggleSelectAll = () => {
-        if (selectedProducts.size === filteredProducts.length && filteredProducts.length > 0) {
-            setSelectedProducts(new Set());
-        } else {
-            setSelectedProducts(new Set(filteredProducts.map(p => p.id)));
-        }
-    };
+    const columns: Column<Product>[] = [
+        {
+            key: 'title',
+            header: 'Product',
+            render: (product) => (
+                <span className={styles.product}>
+                    {product.image ? <img src={product.image} alt="" className={styles.thumb} loading="lazy" /> : <span className={styles.thumb} />}
+                    <span className={styles.productText}>
+                        <span className={styles.productTitle}>{product.title}</span>
+                        <span className={styles.productId}>{product.id}</span>
+                    </span>
+                </span>
+            ),
+        },
+        {
+            key: 'status',
+            header: 'Status',
+            render: (product) => <Badge size="sm" tone={product.status === 'active' ? 'positive' : 'neutral'}>{statusLabel(product.status)}</Badge>,
+        },
+        {
+            key: 'variant1',
+            header: variant1Name,
+            numeric: true,
+            render: (product) => (product.variants[0] ? <Amount value={parseFloat(product.variants[0].price)} decimals={2} /> : '—'),
+        },
+        {
+            key: 'variant2',
+            header: variant2Name,
+            numeric: true,
+            render: (product) => (product.variants[1] ? <Amount value={parseFloat(product.variants[1].price)} decimals={2} /> : '—'),
+        },
+    ];
 
-    const allSelected = filteredProducts.length > 0 && selectedProducts.size === filteredProducts.length;
-
-    const handleBulkPriceUpdate = () => {
-        setShowPriceUpdateModal(true);
+    const resetForm = () => {
+        setVariant1Price('');
+        setVariant2Price('');
+        setVariant1CompareAtPrice('');
+        setVariant2CompareAtPrice('');
+        setPriceChangePercent('');
+        setPriceChangeAmount('');
     };
 
     const applyPriceUpdate = async () => {
@@ -107,11 +155,11 @@ export function ProductsManager() {
         setIsUpdatingPrices(true);
 
         try {
-            const productIds = Array.from(selectedProducts);
+            const productIds = Array.from(selectedProducts).map(Number);
 
             const updateData: {
                 productIds: number[];
-                updateType: 'set' | 'increase' | 'decrease';
+                updateType: UpdateType;
                 variant1Price?: string;
                 variant1CompareAtPrice?: string | null;
                 variant2Price?: string;
@@ -143,338 +191,159 @@ export function ProductsManager() {
                 const { successful, failed, total } = result.summary;
 
                 if (successful === total) {
-                    alert(`✅ Successfully updated prices for ${successful} product${successful !== 1 ? 's' : ''}!`);
+                    toast.success(`Updated prices for ${plural(successful, 'product')}`);
+                    setOutcome(null);
                 } else {
-                    alert(
-                        `⚠️ Updated ${successful} product${successful !== 1 ? 's' : ''}, ${failed} failed.\n\n` +
-                        `Failed products:\n${result.results
-                            .filter(r => !r.success)
-                            .map(r => `Product ID ${r.productId}: ${r.error}`)
-                            .join('\n')}`
-                    );
+                    // Partial failures stay on the page so the failed products can be checked.
+                    setOutcome({
+                        successful,
+                        failed,
+                        failures: result.results.filter(r => !r.success).map(r => `Product ${r.productId}: ${r.error}`),
+                    });
                 }
 
                 // Reload products to reflect changes
                 await loadProducts();
 
-                // Reset and close modal
+                // Reset and close the dialog
                 setShowPriceUpdateModal(false);
-                setVariant1Price('');
-                setVariant2Price('');
-                setVariant1CompareAtPrice('');
-                setVariant2CompareAtPrice('');
-                setPriceChangePercent('');
-                setPriceChangeAmount('');
+                resetForm();
                 setSelectedProducts(new Set());
             } else {
-                alert(result.error || 'Failed to update prices');
+                toast.error(result.error || 'Failed to update prices');
             }
         } catch (error) {
             console.error('Error updating prices:', error);
-            alert('An error occurred while updating prices. Please try again.');
+            toast.error('Could not update prices. Try again.');
         } finally {
             setIsUpdatingPrices(false);
         }
     };
 
+    const filtersOn = productSearch !== '' || productStatusFilter !== 'all';
+
     return (
-        <div className={styles['content-section']}>
-            <div className={styles['section-header']}>
-                <h2>Products Management</h2>
-                <p>Manage your photobook products and variants</p>
+        <div className={styles.products}>
+            <div className={styles.toolbar}>
+                <TextField
+                    className={styles.search}
+                    size="sm"
+                    icon="search"
+                    type="search"
+                    aria-label="Search products"
+                    placeholder="Search products"
+                    value={productSearch}
+                    onChange={(e) => setProductSearch(e.target.value)}
+                />
+                <SegmentedControl size="sm" label="Status" value={productStatusFilter} onChange={(v) => setProductStatusFilter(v as StatusFilter)} options={STATUS_OPTIONS} />
+                <span className={styles.count}>{plural(filteredProducts.length, 'product')}</span>
             </div>
 
-            {isLoadingProducts ? (
-                <div className={styles['loading-section']}>
-                    <div className={styles.spinner}></div>
-                    <p>Loading products...</p>
-                </div>
-            ) : (
-                <>
-                    <div className={styles['filters-bar']}>
-                        <div className={styles['filter-search']}>
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                <circle cx="11" cy="11" r="8" />
-                                <path d="m21 21-4.35-4.35" />
-                            </svg>
-                            <input
-                                type="text"
-                                placeholder="Search products..."
-                                value={productSearch}
-                                onChange={(e) => setProductSearch(e.target.value)}
-                            />
-                        </div>
-
-                        <div className={styles['filter-group']}>
-                            <label>Status:</label>
-                            <select
-                                value={productStatusFilter}
-                                onChange={(e) => setProductStatusFilter(e.target.value as 'all' | 'active' | 'inactive')}
-                            >
-                                <option value="all">All</option>
-                                <option value="active">Active</option>
-                                <option value="inactive">Inactive</option>
-                            </select>
-                        </div>
-
-                        {selectedProducts.size > 0 && (
-                            <div className={styles['selection-info']}>
-                                <span>{selectedProducts.size} selected</span>
-                                <button
-                                    className={styles['bulk-action-btn']}
-                                    onClick={handleBulkPriceUpdate}
-                                >
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                        <line x1="12" y1="1" x2="12" y2="23" />
-                                        <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-                                    </svg>
-                                    Update Prices
-                                </button>
-                                <button
-                                    className={styles['clear-selection-btn']}
-                                    onClick={() => setSelectedProducts(new Set())}
-                                >
-                                    Clear
-                                </button>
-                            </div>
-                        )}
-
-                        <div className={styles['filter-results']}>
-                            <span>{filteredProducts.length} product{filteredProducts.length !== 1 ? 's' : ''}</span>
-                        </div>
-                    </div>
-
-                    <div className={styles['table-card']}>
-                        <table className={`${styles['data-table']} ${styles['products-table']} ${styles.compact}`}>
-                            <thead>
-                                <tr>
-                                    <th style={{ width: '40px' }}>
-                                        <input
-                                            type="checkbox"
-                                            className={styles['table-checkbox']}
-                                            checked={allSelected}
-                                            onChange={toggleSelectAll}
-                                        />
-                                    </th>
-                                    <th>Product</th>
-                                    <th>{products[0]?.variants[0]?.title || 'Variant 1'}</th>
-                                    <th>{products[0]?.variants[1]?.title || 'Variant 2'}</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {filteredProducts.length === 0 ? (
-                                    <tr>
-                                        <td colSpan={4} className={styles['empty-state']}>
-                                            <div className={styles['empty-icon']}>📦</div>
-                                            <div className={styles['empty-text']}>
-                                                {productSearch || productStatusFilter !== 'all'
-                                                    ? 'No products match your filters'
-                                                    : 'No products found'}
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ) : (
-                                    filteredProducts.map((product) => {
-                                        const isSelected = selectedProducts.has(product.id);
-                                        return (
-                                            <tr key={product.id} className={`${styles['product-row']} ${isSelected ? styles.selected : ''}`}>
-                                                <td>
-                                                    <input
-                                                        type="checkbox"
-                                                        className={styles['table-checkbox']}
-                                                        checked={isSelected}
-                                                        onChange={() => toggleProductSelection(product.id)}
-                                                    />
-                                                </td>
-                                                <td>
-                                                    <div className={styles['product-cell']}>
-                                                        <span className={`${styles['status-indicator']} ${product.status === 'active' ? styles.active : styles.inactive}`}></span>
-                                                        {product.image && (
-                                                            <img src={product.image} alt={product.title} className={styles['product-image']} />
-                                                        )}
-                                                        <div className={styles['product-info']}>
-                                                            <span className={styles['product-title']}>{product.title}</span>
-                                                            <span className={styles['product-meta']}>ID: {product.id}</span>
-                                                        </div>
-                                                    </div>
-                                                </td>
-                                                <td className={styles['variant-column']}>
-                                                    {product.variants[0] ? (
-                                                        <span className={styles['variant-price']}>₹{product.variants[0].price}</span>
-                                                    ) : (
-                                                        <span className={styles['no-variant']}>—</span>
-                                                    )}
-                                                </td>
-                                                <td className={styles['variant-column']}>
-                                                    {product.variants[1] ? (
-                                                        <span className={styles['variant-price']}>₹{product.variants[1].price}</span>
-                                                    ) : (
-                                                        <span className={styles['no-variant']}>—</span>
-                                                    )}
-                                                </td>
-                                            </tr>
-                                        );
-                                    })
-                                )}
-                            </tbody>
-                        </table>
-                    </div>
-                </>
+            {outcome && (
+                <Alert
+                    tone="caution"
+                    title={`Updated ${plural(outcome.successful, 'product')}; ${outcome.failed} failed`}
+                    action={<Button size="sm" variant="ghost" onClick={() => setOutcome(null)}>Dismiss</Button>}
+                >
+                    <ul className={styles.failures}>
+                        {outcome.failures.map((line) => <li key={line}>{line}</li>)}
+                    </ul>
+                </Alert>
             )}
 
-            {/* Bulk Price Update Modal */}
-            {showPriceUpdateModal && (
-                <div className={styles['modal-overlay']} onClick={() => setShowPriceUpdateModal(false)}>
-                    <div className={`${styles['modal-content']} ${styles['price-update-modal']}`} onClick={(e) => e.stopPropagation()}>
-                        <div className={styles['modal-header']}>
-                            <h2>Update Prices</h2>
-                            <button className={styles['modal-close']} onClick={() => setShowPriceUpdateModal(false)}>
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                    <line x1="18" y1="6" x2="6" y2="18" />
-                                    <line x1="6" y1="6" x2="18" y2="18" />
-                                </svg>
-                            </button>
-                        </div>
+            <Card title="Products" description="Select products to change their prices on Shopify." padding="none">
+                <DataTable
+                    columns={columns}
+                    rows={filteredProducts}
+                    getRowId={(product) => String(product.id)}
+                    loading={isLoadingProducts}
+                    selectable
+                    selected={selectedProducts}
+                    onSelectionChange={setSelectedProducts}
+                    bulkActions={
+                        <Button size="sm" variant="primary" icon="indian-rupee" onClick={() => setShowPriceUpdateModal(true)}>
+                            Update prices
+                        </Button>
+                    }
+                    caption="Products and variant prices"
+                    empty={
+                        <EmptyState
+                            size="sm"
+                            icon="package"
+                            title={filtersOn ? 'No products match your filters' : 'No products found'}
+                            description={filtersOn ? 'Clear the search or pick another status.' : undefined}
+                        />
+                    }
+                />
+            </Card>
 
-                        <div className={styles['modal-body']}>
-                            <div className={styles['price-update-tabs']}>
-                                <button
-                                    className={`${styles['tab-btn']} ${priceUpdateType === 'set' ? styles.active : ''}`}
-                                    onClick={() => setPriceUpdateType('set')}
-                                >
-                                    Set Price
-                                </button>
-                                <button
-                                    className={`${styles['tab-btn']} ${priceUpdateType === 'increase' ? styles.active : ''}`}
-                                    onClick={() => setPriceUpdateType('increase')}
-                                >
-                                    + Increase
-                                </button>
-                                <button
-                                    className={`${styles['tab-btn']} ${priceUpdateType === 'decrease' ? styles.active : ''}`}
-                                    onClick={() => setPriceUpdateType('decrease')}
-                                >
-                                    − Decrease
-                                </button>
+            <Dialog
+                open={showPriceUpdateModal}
+                onClose={() => !isUpdatingPrices && setShowPriceUpdateModal(false)}
+                title="Update prices"
+                description={`${plural(selectedProducts.size, 'product')} selected. Prices change on Shopify straight away.`}
+                icon="indian-rupee"
+                footer={
+                    <>
+                        <Button onClick={() => setShowPriceUpdateModal(false)} disabled={isUpdatingPrices}>
+                            Cancel
+                        </Button>
+                        <Button variant="primary" onClick={applyPriceUpdate} loading={isUpdatingPrices}>
+                            {isUpdatingPrices ? 'Updating…' : 'Update prices'}
+                        </Button>
+                    </>
+                }
+            >
+                <div className={styles.form}>
+                    <SegmentedControl label="Kind of change" value={priceUpdateType} onChange={(v) => setPriceUpdateType(v as UpdateType)} options={UPDATE_OPTIONS} />
+
+                    {priceUpdateType === 'set' ? (
+                        <>
+                            <fieldset className={styles.variant}>
+                                <legend className={styles.legend}>{variant1Name}</legend>
+                                <TextField label="Price" prefix="₹" type="number" placeholder="Unchanged" value={variant1Price} onChange={(e) => setVariant1Price(e.target.value)} />
+                                <TextField label="Compare-at price" prefix="₹" type="number" placeholder="Unchanged" value={variant1CompareAtPrice} onChange={(e) => setVariant1CompareAtPrice(e.target.value)} />
+                            </fieldset>
+                            <fieldset className={styles.variant}>
+                                <legend className={styles.legend}>{variant2Name}</legend>
+                                <TextField label="Price" prefix="₹" type="number" placeholder="Unchanged" value={variant2Price} onChange={(e) => setVariant2Price(e.target.value)} />
+                                <TextField label="Compare-at price" prefix="₹" type="number" placeholder="Unchanged" value={variant2CompareAtPrice} onChange={(e) => setVariant2CompareAtPrice(e.target.value)} />
+                            </fieldset>
+                        </>
+                    ) : (
+                        <>
+                            <div className={styles.change}>
+                                <TextField
+                                    label="By percentage"
+                                    suffix="%"
+                                    type="number"
+                                    placeholder="10"
+                                    value={priceChangePercent}
+                                    onChange={(e) => {
+                                        setPriceChangePercent(e.target.value);
+                                        if (e.target.value) setPriceChangeAmount('');
+                                    }}
+                                />
+                                <span className={styles.or}>or</span>
+                                <TextField
+                                    label="By amount"
+                                    prefix="₹"
+                                    type="number"
+                                    placeholder="100"
+                                    value={priceChangeAmount}
+                                    onChange={(e) => {
+                                        setPriceChangeAmount(e.target.value);
+                                        if (e.target.value) setPriceChangePercent('');
+                                    }}
+                                />
                             </div>
-
-                            {priceUpdateType === 'set' && (
-                                <div className={styles['price-inputs']}>
-                                    <div className={styles['variant-price-section']}>
-                                        <label className={styles['variant-section-label']}>{products[0]?.variants[0]?.title || 'Variant 1'}</label>
-                                        <div className={styles['variant-inputs-row']}>
-                                            <div className={`${styles['input-group']} ${styles.compact}`}>
-                                                <label>Price</label>
-                                                <div className={styles['input-with-prefix']}>
-                                                    <span className={styles['prefix']}>₹</span>
-                                                    <input
-                                                        type="number"
-                                                        value={variant1Price}
-                                                        onChange={(e) => setVariant1Price(e.target.value)}
-                                                        placeholder="Current"
-                                                    />
-                                                </div>
-                                            </div>
-                                            <div className={`${styles['input-group']} ${styles.compact}`}>
-                                                <label>Compare At</label>
-                                                <div className={styles['input-with-prefix']}>
-                                                    <span className={styles['prefix']}>₹</span>
-                                                    <input
-                                                        type="number"
-                                                        value={variant1CompareAtPrice}
-                                                        onChange={(e) => setVariant1CompareAtPrice(e.target.value)}
-                                                        placeholder="Original"
-                                                    />
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div className={styles['variant-price-section']}>
-                                        <label className={styles['variant-section-label']}>{products[0]?.variants[1]?.title || 'Variant 2'}</label>
-                                        <div className={styles['variant-inputs-row']}>
-                                            <div className={`${styles['input-group']} ${styles.compact}`}>
-                                                <label>Price</label>
-                                                <div className={styles['input-with-prefix']}>
-                                                    <span className={styles['prefix']}>₹</span>
-                                                    <input
-                                                        type="number"
-                                                        value={variant2Price}
-                                                        onChange={(e) => setVariant2Price(e.target.value)}
-                                                        placeholder="Current"
-                                                    />
-                                                </div>
-                                            </div>
-                                            <div className={`${styles['input-group']} ${styles.compact}`}>
-                                                <label>Compare At</label>
-                                                <div className={styles['input-with-prefix']}>
-                                                    <span className={styles['prefix']}>₹</span>
-                                                    <input
-                                                        type="number"
-                                                        value={variant2CompareAtPrice}
-                                                        onChange={(e) => setVariant2CompareAtPrice(e.target.value)}
-                                                        placeholder="Original"
-                                                    />
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-
-                            {(priceUpdateType === 'increase' || priceUpdateType === 'decrease') && (
-                                <div className={styles['price-inputs']}>
-                                    <div className={styles['input-group']}>
-                                        <label>Percentage Change (%)</label>
-                                        <input
-                                            type="number"
-                                            value={priceChangePercent}
-                                            onChange={(e) => {
-                                                setPriceChangePercent(e.target.value);
-                                                if (e.target.value) setPriceChangeAmount('');
-                                            }}
-                                            placeholder="e.g. 10"
-                                        />
-                                    </div>
-                                    <div className={styles['divider']}><span>OR</span></div>
-                                    <div className={styles['input-group']}>
-                                        <label>Fixed Amount (₹)</label>
-                                        <input
-                                            type="number"
-                                            value={priceChangeAmount}
-                                            onChange={(e) => {
-                                                setPriceChangeAmount(e.target.value);
-                                                if (e.target.value) setPriceChangePercent('');
-                                            }}
-                                            placeholder="e.g. 100"
-                                        />
-                                    </div>
-                                    <p className={styles['help-text']}>
-                                        This will {priceUpdateType} the price of all variants for selected products.
-                                    </p>
-                                </div>
-                            )}
-                        </div>
-
-                        <div className={styles['modal-footer']}>
-                            <button
-                                className={styles['cancel-btn']}
-                                onClick={() => setShowPriceUpdateModal(false)}
-                                disabled={isUpdatingPrices}
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                className={styles['confirm-btn']}
-                                onClick={applyPriceUpdate}
-                                disabled={isUpdatingPrices}
-                            >
-                                {isUpdatingPrices ? 'Updating...' : 'Update Prices'}
-                            </button>
-                        </div>
-                    </div>
+                            <p className={styles.help}>
+                                This will {priceUpdateType} the price of every variant of the selected products.
+                            </p>
+                        </>
+                    )}
                 </div>
-            )}
+            </Dialog>
         </div>
     );
 }

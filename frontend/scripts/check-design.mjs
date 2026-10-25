@@ -36,7 +36,6 @@ const LEGACY = new Set([
   'pages/analysis/TaggingLogsAnalysis.module.css',
   'pages/analysis/TicketsAnalysis.tsx',
   'pages/tools/Labels.tsx',
-  'pages/tools/ProductsManager.tsx',
   'pages/tools/VariantPerformance.tsx',
 ]);
 

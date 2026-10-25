@@ -66,7 +66,7 @@ Reference screens: `DashboardPage.tsx` and `SalesPage.tsx`.
 | Expenses | Bank account | `pages/BankAccountPage` | 1,211 | To do |
 | Tools | Section tabs | `pages/ToolsPage` | 149 | Done |
 | Tools | GST reports | `pages/GSTMonthlyReports` (unrouted `GSTReportsPage` deleted) | 427 | Done |
-| Tools | Products | `pages/tools/ProductsManager` | 480 | In progress |
+| Tools | Products | `pages/tools/ProductsManager` | 480 | Done |
 | Tools | Labels | `pages/tools/Labels` | 270 | In progress |
 | Tools | Variant performance | `pages/tools/VariantPerformance` | 232 | In progress |
 | Tools | Profit prediction | `pages/ProfitPredictionCalculator` | 437 | Done |
@@ -88,8 +88,7 @@ Reference screens: `DashboardPage.tsx` and `SalesPage.tsx`.
 7. **Customer upload page.** Phone first, built from `Stepper`, `OptionCard`, `Dropzone` and
    `PhotoTile`. Customers see this page, so check it on a real phone.
 8. **Cleanup.**
-   - Delete the unrouted `pages/AdminDashboard.tsx`; Products borrows its CSS, so move that
-     first.
+   - Delete the unrouted `pages/AdminDashboard.tsx` and its CSS; nothing else uses them now.
    - Delete the orphaned `pages/analysis/TaggingLogsAnalysis.module.css`.
    - Remove Tailwind (nothing uses its classes), the Poppins rules in `index.css`, and the
      `lucide-react`, `@radix-ui/react-dropdown-menu`, `class-variance-authority`,
