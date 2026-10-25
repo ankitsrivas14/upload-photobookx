@@ -20,7 +20,7 @@ const AbandonedCheckoutsPage = lazy(() => import('./pages/AbandonedCheckoutsPage
 // The boundary sits inside each route, so the admin sidebar stays put while a page loads.
 function Page({ children }: { children: React.ReactNode }) {
   return (
-    <Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.85rem' }}>Loading...</div>}>
+    <Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', color: 'var(--ink-subtle)', fontSize: '0.85rem' }}>Loading...</div>}>
       {children}
     </Suspense>
   );

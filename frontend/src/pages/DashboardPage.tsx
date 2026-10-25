@@ -566,21 +566,21 @@ export function DashboardPage() {
 
     return {
       paymentMethod: [
-        { name: 'Prepaid', value: prepaidCount, color: '#10b981' },
-        { name: 'COD', value: codCount, color: '#f59e0b' },
+        { name: 'Prepaid', value: prepaidCount, color: 'var(--positive)' },
+        { name: 'COD', value: codCount, color: 'var(--chart-amber)' },
       ],
       deliveryStatus: [
-        { name: 'Delivered', value: deliveredCount, color: '#10b981' },
-        { name: 'Out for Delivery', value: outForDeliveryCount, color: '#eab308' },
-        { name: 'Attempted Delivery', value: attemptedDeliveryCount, color: '#f97316' },
-        { name: 'In Transit', value: inTransitCount, color: '#3b82f6' },
-        { name: 'Confirmed', value: confirmedCount, color: '#64748b' },
-        { name: 'Failed', value: failedCount, color: '#ef4444' },
+        { name: 'Delivered', value: deliveredCount, color: 'var(--positive)' },
+        { name: 'Out for Delivery', value: outForDeliveryCount, color: 'var(--info)' },
+        { name: 'Attempted Delivery', value: attemptedDeliveryCount, color: 'var(--chart-amber)' },
+        { name: 'In Transit', value: inTransitCount, color: 'var(--chart-bar)' },
+        { name: 'Confirmed', value: confirmedCount, color: 'var(--line)' },
+        { name: 'Failed', value: failedCount, color: 'var(--negative)' },
       ].filter(item => item.value > 0),
       codTotal: codDeliveredCount + codFailedCount,
       codStatus: [
-        { name: 'Delivered', value: codDeliveredCount, color: '#10b981' },
-        { name: 'Failed', value: codFailedCount, color: '#ef4444' },
+        { name: 'Delivered', value: codDeliveredCount, color: 'var(--positive)' },
+        { name: 'Failed', value: codFailedCount, color: 'var(--negative)' },
       ].filter(item => item.value > 0),
       totalOrders: prepaidCount + codCount,
     };
