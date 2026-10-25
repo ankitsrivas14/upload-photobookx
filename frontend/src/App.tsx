@@ -34,6 +34,12 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+// The sign-in page sends anyone already signed in to the dashboard. If the stored token has
+// expired, the shell's session check signs them out and brings them back here.
+function SignInRoute() {
+  return api.isAuthenticated() ? <Navigate to="/admin/dashboard" replace /> : <AdminLogin />;
+}
+
 // Redirect to external site
 function ExternalRedirect() {
   window.location.href = 'https://photobookx.com';
@@ -50,7 +56,7 @@ function App() {
 
         {/* Admin: login at /admin, all other /admin/* use shared layout with sidebar */}
         <Route path="/admin">
-          <Route index element={<AdminLogin />} />
+          <Route index element={<SignInRoute />} />
           <Route
             path="*"
             element={
