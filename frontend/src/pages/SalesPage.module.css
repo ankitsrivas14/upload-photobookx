@@ -3,9 +3,9 @@
 .page {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--page-gap);
   max-width: var(--content-max);
-  padding: var(--space-4) var(--space-5) var(--space-8);
+  padding: var(--page-pad-y) var(--page-pad-x) var(--space-10);
   box-sizing: border-box;
 }
 
@@ -13,7 +13,7 @@
 .embedded {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--page-gap);
 }
 
 .embeddedBar {
@@ -26,7 +26,7 @@
 
 @media (max-width: 640px) {
   .page {
-    padding: var(--space-3) var(--space-4) var(--space-6);
+    padding: var(--space-4) var(--space-4) var(--space-8);
   }
 }
 
@@ -69,15 +69,20 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+  padding: 0 var(--card-pad) var(--space-2);
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-md);
 }
 
 /* Status filters: a ruled strip of toggles, each with its count and prepaid/COD split */
 .statusStrip {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  margin: 0 calc(-1 * var(--card-pad));
   overflow: hidden;
-  border-top: 1px solid var(--rule);
   border-bottom: 1px solid var(--line);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
 }
 
 .statusCell {
@@ -87,7 +92,7 @@
   gap: 1px;
   min-width: 0;
   margin-right: -1px;
-  padding: 8px var(--space-3) 9px;
+  padding: var(--space-3) var(--card-pad);
   border: 0;
   border-right: 1px solid var(--line);
   background: transparent;
@@ -143,7 +148,7 @@
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2) var(--space-3);
-  padding: var(--space-2) 0;
+  padding: var(--space-3) 0;
 }
 
 .chips {
@@ -403,7 +408,7 @@
 .breakdown {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: var(--space-4) var(--space-6);
+  gap: var(--grid-gap);
 }
 
 @media (min-width: 720px) {

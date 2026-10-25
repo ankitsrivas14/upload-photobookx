@@ -3,15 +3,15 @@
 .page {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--page-gap);
   max-width: var(--content-max);
-  padding: var(--space-4) var(--space-5) var(--space-8);
+  padding: var(--page-pad-y) var(--page-pad-x) var(--space-10);
   box-sizing: border-box;
 }
 
 @media (max-width: 640px) {
   .page {
-    padding: var(--space-3) var(--space-4) var(--space-6);
+    padding: var(--space-4) var(--space-4) var(--space-8);
   }
 }
 
@@ -21,9 +21,10 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 4px var(--space-5);
-  padding: 8px 0;
-  border-top: 1px solid var(--rule);
-  border-bottom: 1px solid var(--line);
+  padding: var(--space-3) var(--card-pad);
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-md);
   font: 400 12px/16px var(--font-sans);
   color: var(--ink);
 }

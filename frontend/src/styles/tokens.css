@@ -1,8 +1,9 @@
 /* PhotoBookX design tokens (Ledger), generated from the design system tokens.json. Do not hand-edit. */
 :root, [data-theme="light"] {
+  --canvas: var(--gray-25);
   --paper: var(--gray-0);
   --surface: var(--gray-0);
-  --surface-side: var(--gray-25);
+  --surface-side: var(--gray-0);
   --surface-sunken: var(--gray-50);
   --surface-hover: var(--gray-100);
   --line: var(--gray-150);
@@ -62,7 +63,7 @@
   --input-border: var(--line-strong);
   --input-border-focus: var(--ink);
   --input-placeholder: var(--ink-subtle);
-  --card-bg: var(--paper);
+  --card-bg: var(--gray-0);
   --card-border: var(--line);
   --card-rule: var(--rule);
   --nav-item-fg: var(--ink-muted);
@@ -70,7 +71,7 @@
   --nav-item-bg-active: var(--surface-hover);
   --nav-item-marker: var(--brand);
   --nav-item-fg-active: var(--ink);
-  --table-header-bg: var(--paper);
+  --table-header-bg: var(--card-bg);
   --table-row-hover: var(--surface-sunken);
   --table-row-selected: var(--surface-hover);
   --control-checked: var(--ink);
@@ -145,6 +146,7 @@
   --focus-ring: 0 0 0 2px #ffffff, 0 0 0 4px #1f6f3f;
 }
 [data-theme="dark"] {
+  --canvas: var(--gray-925);
   --paper: var(--gray-925);
   --surface: var(--gray-900);
   --surface-side: var(--gray-975);
@@ -207,7 +209,7 @@
   --input-border: var(--line-strong);
   --input-border-focus: var(--ink);
   --input-placeholder: var(--ink-subtle);
-  --card-bg: var(--paper);
+  --card-bg: var(--gray-900);
   --card-border: var(--line);
   --card-rule: var(--rule);
   --nav-item-fg: var(--ink-muted);
@@ -215,7 +217,7 @@
   --nav-item-bg-active: var(--surface-hover);
   --nav-item-marker: var(--brand);
   --nav-item-fg-active: var(--ink);
-  --table-header-bg: var(--paper);
+  --table-header-bg: var(--card-bg);
   --table-row-hover: var(--surface-sunken);
   --table-row-selected: var(--surface-hover);
   --control-checked: var(--ink);
@@ -302,18 +304,24 @@
   --space-16: 64px;
   --radius-none: 0px;
   --radius-sm: 2px;
+  --radius-md: 6px;
   --radius-full: 9999px;
   --opacity-disabled: 0.5;
   --opacity-loading: 0.7;
-  --control-sm: 24px;
-  --control-md: 28px;
+  --control-sm: 28px;
+  --control-md: 32px;
   --control-lg: 40px;
-  --row: 32px;
-  --sidebar: 200px;
+  --row: 38px;
+  --sidebar: 216px;
   --sidebar-collapsed: 48px;
-  --topbar: 48px;
+  --topbar: 52px;
   --drawer: 420px;
   --content-max: 1600px;
+  --page-gap: 20px;
+  --page-pad-y: 24px;
+  --page-pad-x: 28px;
+  --grid-gap: 20px;
+  --card-pad: 16px;
   --tile: 10px;
   --tile-gap: 2px;
   --z-sticky: 10;

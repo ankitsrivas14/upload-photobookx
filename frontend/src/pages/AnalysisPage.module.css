@@ -4,15 +4,15 @@
 .page {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--page-gap);
   max-width: var(--content-max);
-  padding: var(--space-4) var(--space-5) var(--space-8);
+  padding: var(--page-pad-y) var(--page-pad-x) var(--space-10);
   box-sizing: border-box;
 }
 
 @media (max-width: 640px) {
   .page {
-    padding: var(--space-3) var(--space-4) var(--space-6);
+    padding: var(--space-4) var(--space-4) var(--space-8);
   }
 }
 
@@ -28,8 +28,7 @@
 .split {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: var(--space-4) var(--space-6);
-  align-items: start;
+  gap: var(--grid-gap);
 }
 
 @media (min-width: 960px) {
@@ -382,7 +381,7 @@
   height: 9px;
   box-sizing: border-box;
   border: 1px solid var(--ink-subtle);
-  background: var(--paper);
+  background: var(--card-bg);
 }
 
 .timeline li.timelineNow::before {
@@ -544,7 +543,7 @@
   left: 0;
   z-index: 1;
   min-width: 220px;
-  background: var(--paper);
+  background: var(--card-bg);
 }
 
 .reelCell {

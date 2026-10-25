@@ -1,7 +1,7 @@
 .shell {
   display: flex;
   min-height: 100vh;
-  background: var(--paper);
+  background: var(--canvas);
   color: var(--ink);
   font-family: var(--font-sans);
 }
