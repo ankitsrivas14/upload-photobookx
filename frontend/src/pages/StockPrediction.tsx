@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
+import toast from 'react-hot-toast';
 import { api } from '../services/api';
 import type { ShopifyOrder } from '../services/api';
+import { Alert, Button, Card, DataTable, EmptyState, StatCard, StatStrip, TextField, type Column } from '../components/ui/pbx';
 import styles from './StockPrediction.module.css';
 
 interface ProductStats {
@@ -18,6 +20,24 @@ interface StockPredictionResult {
   reasoning: string;
 }
 
+const rowId = (r: { productName: string; variantTitle: string }) => `${r.productName}|||${r.variantTitle}`;
+
+const SALES_COLUMNS: Column<ProductStats>[] = [
+  { key: 'productName', header: 'Product', render: (r) => <span className={styles.product}>{r.productName}</span> },
+  { key: 'variantTitle', header: 'Variant' },
+  { key: 'totalOrders', header: 'Copies sold', numeric: true, render: (r) => r.totalOrders.toLocaleString('en-IN') },
+  { key: 'avgOrdersPerDay', header: 'Per day', numeric: true, render: (r) => r.avgOrdersPerDay.toFixed(2) },
+];
+
+const PREDICTION_COLUMNS: Column<StockPredictionResult>[] = [
+  { key: 'productName', header: 'Product', render: (r) => <span className={styles.product}>{r.productName}</span> },
+  { key: 'variantTitle', header: 'Variant' },
+  { key: 'currentAvgPerDay', header: 'Per day', numeric: true, render: (r) => r.currentAvgPerDay.toFixed(2) },
+  { key: 'requiredStock', header: 'Stock needed', numeric: true, render: (r) => <strong>{r.requiredStock.toLocaleString('en-IN')}</strong> },
+  { key: 'reasoning', header: 'Reasoning', render: (r) => <span className={styles.reasoning}>{r.reasoning}</span> },
+];
+
+/** Stock prediction: copies sold per book variant since launch, and an AI estimate of the stock to hold. */
 export function StockPrediction() {
   const [products, setProducts] = useState<ProductStats[]>([]);
   const [predictionResults, setPredictionResults] = useState<StockPredictionResult[]>([]);
@@ -40,7 +60,7 @@ export function StockPrediction() {
 
       // Fetch all orders
       const response = await api.getOrders(10000, true);
-      
+
       if (!response.success || !response.orders) {
         setError('Failed to fetch orders');
         return;
@@ -68,7 +88,7 @@ export function StockPrediction() {
         const orderDate = new Date(order.createdAt);
         order.lineItems?.forEach(item => {
           const itemTitle = item.title.toLowerCase();
-          
+
           // Only include specific books and find their normalized label
           const matchedBook = allowedBooks.find(book => itemTitle.includes(book.key));
           if (!matchedBook) {
@@ -77,11 +97,11 @@ export function StockPrediction() {
 
           const normalizedTitle = matchedBook.label;
           const variantTitle = (item.variantTitle || 'Default').trim();
-          
+
           // Use normalized title as part of the key to merge different historical names
           const productKey = `${normalizedTitle}|||${variantTitle}`;
           const existing = productMap.get(productKey);
-          
+
           if (existing) {
             existing.count += item.quantity;
             // Update first seen if this order is earlier
@@ -105,7 +125,7 @@ export function StockPrediction() {
         .map((product) => {
           // Calculate days since this specific product was first seen
           const productDaysActive = Math.max(1, Math.ceil((now.getTime() - product.firstSeen.getTime()) / (1000 * 60 * 60 * 24)));
-          
+
           return {
             productName: product.title,
             variantTitle: product.variant,
@@ -128,7 +148,7 @@ export function StockPrediction() {
 
   const handleRunAiPrediction = async () => {
     if (products.length === 0) return;
-    
+
     try {
       setIsPredicting(true);
       const res = await api.predictStock({
@@ -140,194 +160,98 @@ export function StockPrediction() {
       if (res.success && res.predictions) {
         setPredictionResults(res.predictions);
       } else {
-        alert(res.error || 'AI Prediction failed');
+        toast.error(res.error || 'AI prediction failed');
       }
-    } catch (err) {
-      alert('Error running AI stock prediction');
+    } catch {
+      toast.error('Could not run the AI stock prediction');
     } finally {
       setIsPredicting(false);
     }
   };
 
-  if (isLoading) {
-    return (
-      <div className={styles['stock-prediction']}>
-        <div className={styles['loading-header']}>
-          <div className={styles['loading-title']} />
-          <div className={styles['loading-subtitle']} />
-        </div>
-        <div className={styles['table-container']}>
-          <table className={styles.table}>
-            <thead>
-              <tr>
-                <th>Product Name</th>
-                <th>Variant</th>
-                <th>Total Orders</th>
-                <th>Avg Orders/Day</th>
-              </tr>
-            </thead>
-            <tbody>
-              {[1, 2, 3, 4, 5, 6].map((i) => (
-                <tr key={i}>
-                  <td><span className={`${styles['skeleton']} ${styles['skeleton-wide']}`} /></td>
-                  <td><span className={`${styles['skeleton']} ${styles['skeleton-narrow']}`} /></td>
-                  <td><span className={styles['skeleton']} /></td>
-                  <td><span className={styles['skeleton']} /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    );
-  }
+  const refresh = () => {
+    api.invalidateCache();
+    loadOrdersAndCalculate();
+  };
 
-  if (error) {
-    return (
-      <div className={styles['stock-prediction']}>
-        <div className={styles.error}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="12" cy="12" r="10" />
-            <line x1="12" y1="8" x2="12" y2="12" />
-            <line x1="12" y1="16" x2="12.01" y2="16" />
-          </svg>
-          <p>{error}</p>
-          <button onClick={loadOrdersAndCalculate} className={styles['retry-btn']}>
-            Try Again
-          </button>
-        </div>
-      </div>
-    );
-  }
+  const since = startDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+  const totalSold = products.reduce((sum, p) => sum + p.totalOrders, 0);
+  const totalPerDay = products.reduce((sum, p) => sum + p.avgOrdersPerDay, 0);
 
   return (
-    <div className={styles['stock-prediction']}>
-      <div className={styles.header}>
-        <div className={styles['header-info']}>
-          <h2>Stock Prediction</h2>
-          <p className={styles.subtitle}>
-            Based on orders from {startDate.toLocaleDateString()} onwards ({daysSinceStart} days)
-          </p>
-        </div>
-        <div className={styles['header-actions']}>
-          <div className={styles['prediction-input-group']}>
-            <label htmlFor="predict-days">Predict for</label>
-            <input 
-              id="predict-days"
-              type="number" 
-              value={predictionDays} 
-              onChange={(e) => setPredictionDays(parseInt(e.target.value) || 0)}
-              className={styles['days-input']}
-            />
-            <span>days</span>
-          </div>
-          <button 
-            onClick={handleRunAiPrediction} 
-            className={styles['ai-btn']}
-            disabled={isPredicting || products.length === 0}
-          >
-            {isPredicting ? 'Analyzing...' : 'Predict with AI'}
-          </button>
-          <button onClick={() => { api.invalidateCache(); loadOrdersAndCalculate(); }} className={styles['refresh-btn']}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M21 2v6h-6" />
-              <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
-              <path d="M3 22v-6h6" />
-              <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
-            </svg>
-          </button>
-        </div>
+    <div className={styles.stock}>
+      <div className={styles.toolbar}>
+        <p className={styles.note}>
+          Jyotirling and Bharat ke Dhaam orders since {since}
+          {daysSinceStart > 0 ? ` · ${daysSinceStart} days` : ''}. Cancelled orders are left out.
+        </p>
+        <Button size="sm" icon="refresh-cw" onClick={refresh} disabled={isLoading}>
+          Refresh
+        </Button>
       </div>
 
-      {predictionResults.length > 0 ? (
-        <div className={styles['ai-results-container']}>
-          <div className={styles['results-header']}>
-            <h3>AI Prediction Results ({predictionDays} Days)</h3>
-            <button className={styles['clear-btn']} onClick={() => setPredictionResults([])}>Clear</button>
-          </div>
-          <div className={styles['table-container']}>
-            <table className={styles.table}>
-              <thead>
-                <tr>
-                  <th>Product</th>
-                  <th>Variant</th>
-                  <th>Avg Sales/Day</th>
-                  <th className={styles['highlight-th']}>Required Stock</th>
-                  <th>Reasoning</th>
-                </tr>
-              </thead>
-              <tbody>
-                {predictionResults.map((result, idx) => (
-                  <tr key={idx} className={styles['ai-row']}>
-                    <td className={styles['product-name']}>{result.productName}</td>
-                    <td>{result.variantTitle}</td>
-                    <td>{result.currentAvgPerDay.toFixed(2)}</td>
-                    <td className={styles['required-stock-cell']}>
-                      <span className={styles['stock-badge']}>{result.requiredStock}</span>
-                    </td>
-                    <td className={styles['reasoning-cell']}>{result.reasoning}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+      {error ? (
+        <Alert tone="negative" title={error} action={<Button size="sm" onClick={loadOrdersAndCalculate}>Try again</Button>}>
+          The orders could not be loaded.
+        </Alert>
       ) : (
-        <div className={styles['table-container']}>
-          <table className={styles.table}>
-            <thead>
-              <tr>
-                <th>Product Name</th>
-                <th>Variant</th>
-                <th>Total Orders</th>
-                <th>Avg Orders/Day</th>
-              </tr>
-            </thead>
-            <tbody>
-              {products.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className={styles['no-data']}>
-                    No orders found from {startDate.toLocaleDateString()}
-                  </td>
-                </tr>
-              ) : (
-                products.map((product, index) => (
-                  <tr key={index}>
-                    <td className={styles['product-name']}>{product.productName}</td>
-                    <td className={styles['variant-title']}>{product.variantTitle}</td>
-                    <td className={styles['total-orders']}>{product.totalOrders}</td>
-                    <td className={styles['avg-orders']}>
-                      <span className={styles['avg-badge']}>
-                        {product.avgOrdersPerDay.toFixed(2)}
-                      </span>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
+        <>
+          <StatStrip label="Sales since launch" minWidth={140}>
+            <StatCard label="Variants" loading={isLoading} value={products.length.toLocaleString('en-IN')} />
+            <StatCard label="Copies sold" loading={isLoading} value={totalSold.toLocaleString('en-IN')} />
+            <StatCard label="Copies per day" loading={isLoading} value={totalPerDay.toFixed(2)} sub="all variants together" />
+          </StatStrip>
 
-      {products.length > 0 && !predictionResults.length && (
-        <div className={styles.summary}>
-          <div className={styles['summary-card']}>
-            <div className={styles['summary-label']}>Total Products</div>
-            <div className={styles['summary-value']}>{products.length}</div>
-          </div>
-          <div className={styles['summary-card']}>
-            <div className={styles['summary-label']}>Total Orders</div>
-            <div className={styles['summary-value']}>
-              {products.reduce((sum, p) => sum + p.totalOrders, 0)}
-            </div>
-          </div>
-          <div className={styles['summary-card']}>
-            <div className={styles['summary-label']}>Total Avg Orders/Day</div>
-            <div className={styles['summary-value']}>
-              {products.reduce((sum, p) => sum + p.avgOrdersPerDay, 0).toFixed(2)}
-            </div>
-          </div>
-        </div>
+          <Card
+            title="AI stock prediction"
+            description="How much stock to hold for the coming days, from the sales below."
+            actions={
+              <>
+                {predictionResults.length > 0 ? (
+                  <Button size="sm" variant="ghost" onClick={() => setPredictionResults([])}>
+                    Clear
+                  </Button>
+                ) : null}
+                <TextField
+                  className={styles.days}
+                  size="sm"
+                  type="number"
+                  min="1"
+                  aria-label="Days to predict"
+                  suffix="days"
+                  value={predictionDays}
+                  onChange={(e) => setPredictionDays(parseInt(e.target.value) || 0)}
+                />
+                <Button size="sm" variant="primary" icon="sparkles" loading={isPredicting} disabled={isLoading || products.length === 0} onClick={handleRunAiPrediction}>
+                  {isPredicting ? 'Predicting…' : 'Predict with AI'}
+                </Button>
+              </>
+            }
+            padding={predictionResults.length > 0 ? 'none' : 'md'}
+          >
+            {predictionResults.length > 0 ? (
+              <DataTable
+                columns={PREDICTION_COLUMNS}
+                rows={predictionResults}
+                getRowId={rowId}
+                caption={`Stock needed for ${predictionDays} days`}
+              />
+            ) : (
+              <p className={styles.note}>Choose how many days to cover, then predict.</p>
+            )}
+          </Card>
+
+          <Card title="Sales per variant" eyebrow={`Since ${since}`} padding="none">
+            <DataTable
+              columns={SALES_COLUMNS}
+              rows={products}
+              getRowId={rowId}
+              loading={isLoading}
+              caption="Copies sold per book variant"
+              empty={<EmptyState size="sm" icon="package" title="No orders yet" description={`No book orders since ${since}.`} />}
+            />
+          </Card>
+        </>
       )}
     </div>
   );
