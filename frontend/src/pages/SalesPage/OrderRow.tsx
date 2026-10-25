@@ -1,16 +1,13 @@
 import React from 'react';
-import { MoreVertical, CheckCircle, Tag, LifeBuoy, Bookmark } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { cn } from '@/lib/utils';
+import toast from 'react-hot-toast';
+import { Amount, Badge, Button, Checkbox, DeliveryBadge, Icon, Menu } from '../../components/ui/pbx';
+import type { MenuItem } from '../../components/ui/pbx';
 import styles from '../SalesPage.module.css';
 
 import { type ShopifyOrder } from '../../services/api';
+
+const STORE_TIMEZONE = 'Asia/Kolkata';
 
 interface OrderRowProps {
   order: ShopifyOrder;
@@ -19,7 +16,6 @@ interface OrderRowProps {
   orderProfitLoss: Map<number, number>;
   rtoOrderIds: Set<number>;
   getDelayDays: (order: ShopifyOrder) => number | null;
-  getDeliveryStatusBadge: (status: string | null | undefined) => { text: string; className: string };
   handleOpenCogsModal: (order: ShopifyOrder) => void;
   onUpdateDeliveryStatus?: (orderId: number, orderName: string) => void;
   onAddCustomerTag?: (customerId: number, tag: string) => void;
@@ -40,7 +36,6 @@ export const OrderRow: React.FC<OrderRowProps> = ({
   orderProfitLoss,
   rtoOrderIds,
   getDelayDays,
-  getDeliveryStatusBadge,
   handleOpenCogsModal,
   onUpdateDeliveryStatus,
   onAddCustomerTag,
@@ -62,7 +57,7 @@ export const OrderRow: React.FC<OrderRowProps> = ({
     if (onAddCustomerTag && order.customerId) {
       onAddCustomerTag(order.customerId, 'no-cod');
     } else if (!order.customerId) {
-      alert('Customer ID not found for this order');
+      toast.error('Customer ID not found for this order');
     }
   };
   const handleAcknowledge = () => {
@@ -76,189 +71,109 @@ export const OrderRow: React.FC<OrderRowProps> = ({
     }
   };
 
-  return (
-    <tr
-      key={order.id}
-      ref={rowRef}
-      data-index={index}
-      className={isSelected ? styles.selected : ''}
-    >
-      <td className={styles['checkbox-cell']}>
-        <input
-          type="checkbox"
-          checked={isSelected}
-          onChange={() => onSelectOrder(order.id)}
-          className={styles['table-checkbox']}
-        />
-      </td>
-      <td className={styles['order-name']}>
-        <div className={styles['order-name-wrapper']}>
-          <span className={`${styles['payment-dot']} ${styles[order.paymentMethod?.toLowerCase() || 'prepaid']}`}></span>
-          <span className={styles['order-number']}>{order.name}</span>
-          {(() => {
-            const isUnfulfilled = !order.fulfillmentStatus || order.fulfillmentStatus.toLowerCase() === 'unfulfilled';
-            const hasDeliveryStatus = !!order.deliveryStatus;
-            
-            // Show red dot ONLY if it is fulfilled but we don't have a valid delivery status AND no shipping charge.
-            // (If we have a valid delivery status like 'failure', it means shiprocket gave us a status, and the charge is just legitimately 0).
-            const isMissingData = !isUnfulfilled && !order.cancelledAt && (order.shippingCharge ?? 0) === 0 && !hasDeliveryStatus;
-            
-            return isMissingData ? (
-              <span className={styles['missing-charge-dot']} title="Fulfillment exists but delivery data is missing"></span>
-            ) : null;
-          })()}
-        </div>
+  const isPrepaid = order.paymentMethod?.toLowerCase() === 'prepaid';
+  const isUnfulfilled = !order.fulfillmentStatus || order.fulfillmentStatus.toLowerCase() === 'unfulfilled';
+  // Fulfilled, but Shiprocket has sent neither a status nor a charge. (A valid status like
+  // 'failure' means Shiprocket answered, and a zero charge is then real.)
+  const isMissingData = !isUnfulfilled && !order.cancelledAt && (order.shippingCharge ?? 0) === 0 && !order.deliveryStatus;
+  const delayDays = getDelayDays(order);
+  const isRTO = rtoOrderIds.has(order.id);
+  const hasTicket = order.hasTicket || ticketRaisedOrderIds.has(order.id);
+  const isAcknowledged = acknowledgedOrderIds.has(order.id);
+  const awb = order.awbCode || (order.trackingUrl ? order.trackingUrl.split('/').filter(Boolean).pop() : null);
 
+  // P/L counts once the order is final (delivered or failed), or straight away when prepaid.
+  const deliveryStatus = order.deliveryStatus?.toLowerCase() || '';
+  const isFinal = deliveryStatus === 'delivered' || isRTO ||
+    deliveryStatus === 'failure' ||
+    deliveryStatus.includes('failed') ||
+    deliveryStatus.includes('rto');
+
+  const placedAt = new Date(order.createdAt).toLocaleString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone: STORE_TIMEZONE,
+  });
+
+  const menuItems: MenuItem[] = [
+    { label: 'Mark delivery status', icon: 'circle-check', onSelect: handleMarkDeliveryStatus },
+    { label: 'Tag customer no-COD', icon: 'tag', onSelect: handleMarkNoCOD },
+  ];
+  if (!hasTicket) menuItems.push({ label: 'Mark ticket raised', icon: 'life-buoy', onSelect: handleMarkTicket });
+  if (!isAcknowledged) menuItems.push({ label: 'Acknowledge', icon: 'bookmark', onSelect: handleAcknowledge });
+
+  return (
+    <tr ref={rowRef} data-index={index} className={isSelected ? 'is-selected' : undefined}>
+      <td className="pbx-table__check">
+        <Checkbox aria-label={`Select ${order.name}`} checked={isSelected} onChange={() => onSelectOrder(order.id)} />
       </td>
-      <td className={styles['line-items']}>
-        {order.lineItems && order.lineItems.length > 0 ? (
-          <div className={styles['items-list']}>
-            {order.lineItems.map((item, idx) => (
-              <div key={idx} className={styles.item}>
-                {item.quantity}x {item.title}
-                {item.variantTitle && ` (${item.variantTitle})`}
-              </div>
-            ))}
-          </div>
-        ) : (
-          '—'
-        )}
-      </td>
-      {showAWBColumn && (
-        <td className={styles['awb-cell']}>
-          {(() => {
-            const displayAWB = order.awbCode || (order.trackingUrl ? order.trackingUrl.split('/').filter(Boolean).pop() : null);
-            return displayAWB ? (
-              <span className={styles['awb-badge']}>
-                {displayAWB}
-              </span>
-            ) : (
-              <span className={styles['no-awb']}>—</span>
-            );
-          })()}
-        </td>
-      )}
-      <td className={styles['order-tags']}>
-        <div className={styles['tags-wrapper']}>
-          {(() => {
-            const delayDays = getDelayDays(order);
-            if (delayDays) {
-              return (
-                <span className={`${styles['tag-badge']} ${styles['delay-tag']}`}>
-                  {delayDays} day{delayDays > 1 ? 's' : ''} delay
-                </span>
-              );
-            }
-            return null;
-          })()}
-          {(() => {
-            const deliveryBadge = getDeliveryStatusBadge(order.deliveryStatus);
-            return deliveryBadge.text !== '—' && (
-              <span className={`${styles['tag-badge']} ${styles[`delivery-${deliveryBadge.className}`]}`}>
-                {deliveryBadge.text}
-              </span>
-            );
-          })()}
-          {rtoOrderIds.has(order.id) && (
-            <span className={`${styles['tag-badge']} ${styles.rto}`}>RTO</span>
-          )}
-          {(order.hasTicket || ticketRaisedOrderIds.has(order.id)) && (
-            <span 
-              className={`${styles['tag-badge']}`} 
-              style={{ backgroundColor: '#e0f2fe', color: '#0369a1', cursor: 'pointer' }}
-              onClick={() => navigate('/admin/analysis/tickets')}
-            >
-              Ticket
-            </span>
-          )}
-          {acknowledgedOrderIds.has(order.id) && (
-            <span className={`${styles['tag-badge']}`} style={{ backgroundColor: '#dcfce7', color: '#166534' }}>
-              Acknowledged
-            </span>
-          )}
+      <td>
+        <div className={styles.orderCell}>
+          <span className={styles.orderName}>{order.name}</span>
+          <Badge size="sm" dot={false} tone={isPrepaid ? 'info' : 'neutral'}>{isPrepaid ? 'Prepaid' : 'COD'}</Badge>
         </div>
       </td>
-      <td className={styles['profit-loss-cell']}>
-        {(() => {
-          const deliveryStatus = order.deliveryStatus?.toLowerCase() || '';
-          const isDelivered = deliveryStatus === 'delivered';
-          const isFailed = rtoOrderIds.has(order.id) ||
-            deliveryStatus === 'failure' ||
-            deliveryStatus.includes('failed') ||
-            deliveryStatus.includes('rto');
-          const isPrepaid = order.paymentMethod?.toLowerCase() === 'prepaid';
-          if (!isDelivered && !isFailed && !isPrepaid) {
-            return <span className={styles['profit-loss-pending']}>—</span>;
-          }
-          const profitLoss = orderProfitLoss.get(order.id) || 0;
-          const isProfit = profitLoss > 0;
-          const isLoss = profitLoss < 0;
-          return (
-            <span className={`${styles['profit-loss-value']} ${isProfit ? styles.profit : isLoss ? styles.loss : styles.neutral}`}>
-              {isProfit ? '+' : ''}₹{profitLoss.toFixed(0)}
-            </span>
-          );
-        })()}
+      <td className={styles.items}>
+        {order.lineItems && order.lineItems.length > 0
+          ? order.lineItems.map((item, idx) => (
+              <div key={idx}>
+                {item.quantity}× {item.title}
+                {item.variantTitle ? <span className={styles.variant}> · {item.variantTitle}</span> : null}
+              </div>
+            ))
+          : '—'}
       </td>
-      <td className={styles['actions-cell']}>
-        <div className={styles['action-buttons']}>
-          {order.trackingUrl && (
+      {showAWBColumn && <td className="pbx-mono">{awb || '—'}</td>}
+      <td>
+        <div className={styles.badges}>
+          {order.deliveryStatus ? (
+            <DeliveryBadge status={order.deliveryStatus} size="sm" />
+          ) : isUnfulfilled ? (
+            <Badge size="sm">Unfulfilled</Badge>
+          ) : null}
+          {delayDays ? (
+            <Badge size="sm" tone="caution" dot={false}>{delayDays} day{delayDays > 1 ? 's' : ''} delay</Badge>
+          ) : null}
+          {isMissingData && <Badge size="sm" tone="caution" dot={false} icon="triangle-alert">No tracking data</Badge>}
+          {isRTO && <Badge size="sm" tone="negative" dot={false}>RTO</Badge>}
+          {hasTicket && (
+            <button type="button" className={styles.badgeLink} onClick={() => navigate('/admin/analysis/tickets')} title="Open tickets">
+              <Badge size="sm" tone="info" dot={false} icon="life-buoy">Ticket</Badge>
+            </button>
+          )}
+          {isAcknowledged && <Badge size="sm" dot={false} icon="check">Acknowledged</Badge>}
+        </div>
+      </td>
+      <td className="pbx-num" style={{ textAlign: 'right' }}>
+        {isFinal || isPrepaid ? <Amount value={orderProfitLoss.get(order.id) || 0} signed pill /> : <span className="pbx-amount--none">—</span>}
+      </td>
+      <td className={styles.date}>{placedAt}</td>
+      <td>
+        <div className={styles.rowActions}>
+          {order.trackingUrl ? (
             <a
               href={order.trackingUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className={styles['action-btn']}
-              title="Open tracking link"
+              className="pbx-btn pbx-btn--ghost pbx-btn--sm pbx-btn--icon"
+              title="Track shipment"
+              aria-label={`Track ${order.name}`}
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                <polyline points="15 3 21 3 21 9" />
-                <line x1="10" y1="14" x2="21" y2="3" />
-              </svg>
+              <Icon name="external-link" size={14} />
             </a>
+          ) : (
+            <span className={styles.actionGap} aria-hidden="true" />
           )}
-          <button
-            onClick={() => handleOpenCogsModal(order)}
-            className={styles['action-btn']}
-            title="View Breakdown"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
-          </button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                className={styles['action-btn']}
-                title="More actions"
-                style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
-              >
-                <MoreVertical style={{ width: '18px', height: '18px' }} />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className={cn("font-sans", styles['dropdown-content'])}>
-              <DropdownMenuItem onClick={handleMarkDeliveryStatus} className={styles['action-dropdown-item']}>
-                <CheckCircle />
-                <span>Mark Delivery Status</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleMarkNoCOD} className={styles['action-dropdown-item']}>
-                <Tag />
-                <span>Mark as no-cod</span>
-              </DropdownMenuItem>
-              {!ticketRaisedOrderIds.has(order.id) && !order.hasTicket && (
-                <DropdownMenuItem onClick={handleMarkTicket} className={styles['action-dropdown-item']}>
-                  <LifeBuoy />
-                  <span>Ticket Raised</span>
-                </DropdownMenuItem>
-              )}
-              {!acknowledgedOrderIds.has(order.id) && (
-                <DropdownMenuItem onClick={handleAcknowledge} className={styles['action-dropdown-item']}>
-                  <Bookmark />
-                  <span>Acknowledge</span>
-                </DropdownMenuItem>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <Button size="sm" variant="ghost" iconOnly icon="file-text" title="P/L breakdown" onClick={() => handleOpenCogsModal(order)}>
+            {`P/L breakdown for ${order.name}`}
+          </Button>
+          <Menu
+            label={`Actions for ${order.name}`}
+            trigger={<Button size="sm" variant="ghost" iconOnly icon="ellipsis-vertical" title="More actions">{`More actions for ${order.name}`}</Button>}
+            items={menuItems}
+          />
         </div>
       </td>
     </tr>

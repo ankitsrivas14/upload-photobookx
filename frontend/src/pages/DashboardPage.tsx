@@ -1137,7 +1137,7 @@ export function DashboardPage() {
         description="Last 30 days, from the order distribution"
       >
         <Suspense fallback={<Skeleton lines={6} />}>
-          <SalesPage initialFilter={salesModalFilter} />
+          <SalesPage initialFilter={salesModalFilter} embedded />
         </Suspense>
       </Dialog>
     </div>

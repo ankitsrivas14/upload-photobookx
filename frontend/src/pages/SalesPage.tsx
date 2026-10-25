@@ -2,6 +2,26 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
 import styles from './SalesPage.module.css';
+import {
+  Amount,
+  Button,
+  Card,
+  Checkbox,
+  DataList,
+  Dialog,
+  Drawer,
+  EmptyState,
+  Menu,
+  PageHeader,
+  SegmentedControl,
+  Select,
+  Skeleton,
+  StatCard,
+  StatStrip,
+  Switch,
+  Toast,
+} from '../components/ui/pbx';
+import { cx, formatINR } from '../components/ui/format';
 import { OrdersTableBody } from './SalesPage/OrdersTableBody';
 
 import { type ShopifyOrder } from '../services/api';
@@ -66,36 +86,17 @@ function getCogsVersionForDate(dateKey: string, versions: COGSVersionEntry[]): C
   return result;
 }
 
-// Helper function to format numbers with Indian comma notation
-const formatIndianNumber = (num: number, decimals: number = 2): string => {
-  const [integerPart, decimalPart] = num.toFixed(decimals).split('.');
-
-  // Indian numbering system: First 3 digits, then groups of 2
-  let lastThree = integerPart.substring(integerPart.length - 3);
-  const otherNumbers = integerPart.substring(0, integerPart.length - 3);
-
-  if (otherNumbers !== '') {
-    lastThree = ',' + lastThree;
-  }
-
-  let result = otherNumbers.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + lastThree;
-
-  if (decimals > 0 && decimalPart) {
-    result += '.' + decimalPart;
-  }
-
-  return result;
-};
-
 export interface SalesPageProps {
   initialFilter?: {
     type: 'status' | 'payment';
     value: string;
     period?: string;
   };
+  /** Shown inside another page (the Dashboard's orders dialog): no page title. */
+  embedded?: boolean;
 }
 
-export function SalesPage({ initialFilter }: SalesPageProps = {}) {
+export function SalesPage({ initialFilter, embedded = false }: SalesPageProps = {}) {
   const [isLoading, setIsLoading] = useState(true);
   const [orders, setOrders] = useState<ShopifyOrder[]>([]);
   const [discardedOrderIds, setDiscardedOrderIds] = useState<Set<number>>(new Set());
@@ -108,7 +109,6 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
   const [availableMonthsList, setAvailableMonthsList] = useState<string[]>([]);
   // Client-side cache of orders per month filter, so prefetched months switch instantly.
   const monthOrdersCache = useRef<Map<string, ShopifyOrder[]>>(new Map());
-  const [showBulkMenu, setShowBulkMenu] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshStatus, setRefreshStatus] = useState<string | null>(null);
@@ -174,7 +174,6 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
   const [pendingFilterCOD, setPendingFilterCOD] = useState(false);
   const [pendingFilterPaid, setPendingFilterPaid] = useState(false);
   const [pendingFilterDelayDays, setPendingFilterDelayDays] = useState<Set<number>>(new Set());
-  const [showDelayDropdown, setShowDelayDropdown] = useState(false);
 
   // COGS Calculator Modal State
   const [showCogsModal, setShowCogsModal] = useState(false);
@@ -187,6 +186,16 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
   const [showDeliveryStatusModal, setShowDeliveryStatusModal] = useState(false);
   const [selectedOrderForStatus, setSelectedOrderForStatus] = useState<{ id: number; name: string } | null>(null);
   const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [statusChoice, setStatusChoice] = useState<'Delivered' | 'Failed'>('Delivered');
+
+  // A confirmation waiting in a Dialog (discard orders, tag customers, acknowledge)
+  const [confirmAction, setConfirmAction] = useState<{
+    title: string;
+    description: string;
+    confirmLabel: string;
+    danger?: boolean;
+    run: () => void;
+  } | null>(null);
 
   // Per-order P/L cache (orderId -> profit/loss)
   const [orderProfitLoss, setOrderProfitLoss] = useState<Map<number, number>>(new Map());
@@ -294,19 +303,6 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       setIsPredicting(false);
     }
   };
-
-  // Close delay dropdown when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      const target = event.target as HTMLElement;
-      if (showDelayDropdown && !target.closest(`.${styles['dropdown-container']}`)) {
-        setShowDelayDropdown(false);
-      }
-    };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showDelayDropdown]);
 
   const loadStaticData = async () => {
     try {
@@ -649,7 +645,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
     }
 
     // Apply status filters (works with month filter via AND, multiple status filters use OR)
-    if (showUnfulfilled || showDelivered || showFailed || showAttemptedDelivery || showInTransit || showOutForDelivery || showConfirmed || showNotAcknowledged) {
+    if (showUnfulfilled || showDelivered || showFailed || showAttemptedDelivery || showInTransit || showOutForDelivery || showConfirmed || showNotAcknowledged || showTicketRaised) {
       filtered = filtered.filter(order => {
         const { isFailed, isDelivered, isUnfulfilled, isAttemptedDelivery, isInTransit, isOutForDelivery, isConfirmed } = getOrderStatus(order);
         const conditions = [];
@@ -679,6 +675,36 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
 
   const hasStatusFilter =
     showUnfulfilled || showDelivered || showFailed || showAttemptedDelivery || showInTransit || showOutForDelivery || showConfirmed || showNotAcknowledged || showTicketRaised;
+
+  // How many orders in the period each filter would match, with the prepaid/COD split
+  const filterCounts = useMemo(() => {
+    const blank = () => ({ total: 0, prepaid: 0, cod: 0 });
+    const counts = {
+      unfulfilled: blank(), confirmed: blank(), inTransit: blank(), outForDelivery: blank(), attempted: blank(),
+      delivered: blank(), failed: blank(), notAcknowledged: blank(), ticket: blank(), prepaid: blank(), cod: blank(),
+    };
+    for (const order of ordersForStats) {
+      const s = getOrderStatus(order);
+      const isPrepaid = order.paymentMethod?.toLowerCase() === 'prepaid';
+      const add = (c: { total: number; prepaid: number; cod: number }) => {
+        c.total++;
+        if (isPrepaid) c.prepaid++;
+        else c.cod++;
+      };
+      if (s.isUnfulfilled) add(counts.unfulfilled);
+      if (s.isConfirmed) add(counts.confirmed);
+      if (s.isInTransit) add(counts.inTransit);
+      if (s.isOutForDelivery) add(counts.outForDelivery);
+      if (s.isAttemptedDelivery) add(counts.attempted);
+      if (s.isDelivered) add(counts.delivered);
+      if (s.isFailed) add(counts.failed);
+      if (!acknowledgedOrderIds.has(order.id)) add(counts.notAcknowledged);
+      if (ticketRaisedOrderIds.has(order.id) || order.hasTicket) add(counts.ticket);
+      if (isPrepaid) add(counts.prepaid);
+      else if (order.paymentMethod?.toLowerCase() === 'cod') add(counts.cod);
+    }
+    return counts;
+  }, [ordersForStats, acknowledgedOrderIds, ticketRaisedOrderIds, rtoOrderIds]);
 
   // Whether a date (YYYY-MM-DD) falls within the selected month filter
   const isDateInSelectedMonth = (dateKey: string): boolean => {
@@ -1185,7 +1211,6 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
         setDiscardedOrderIds(new Set([...discardedOrderIds, ...orderIds]));
         setSelectedOrders(new Set());
         setSelectAll(false);
-        setShowBulkMenu(false);
       }
     } catch (err) {
       console.error('Failed to discard orders:', err);
@@ -1212,7 +1237,6 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
         setRTOOrderIds(new Set([...rtoOrderIds, ...orderIds]));
         setSelectedOrders(new Set());
         setSelectAll(false);
-        setShowBulkMenu(false);
       }
     } catch (err) {
       console.error('Failed to mark orders as RTO:', err);
@@ -1236,7 +1260,6 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
         setRTOOrderIds(newRTO);
         setSelectedOrders(new Set());
         setSelectAll(false);
-        setShowBulkMenu(false);
       }
     } catch (err) {
       console.error('Failed to unmark RTO orders:', err);
@@ -1250,34 +1273,6 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
     const [year, month] = monthKey.split('-');
     const date = new Date(parseInt(year), parseInt(month) - 1);
     return date.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
-  };
-
-  const getDeliveryStatusBadge = (status?: string | null) => {
-    if (!status) {
-      return { text: '—', className: 'none' };
-    }
-
-    switch (status.toLowerCase()) {
-      case 'delivered':
-        return { text: 'Delivered', className: 'delivered' };
-      case 'in_transit':
-        return { text: 'In transit', className: 'in-transit' };
-      case 'out_for_delivery':
-        return { text: 'Out for delivery', className: 'out-for-delivery' };
-      case 'attempted_delivery':
-        return { text: 'Attempted delivery', className: 'attempted' };
-      case 'ready_for_pickup':
-        return { text: 'Ready for pickup', className: 'ready-pickup' };
-      case 'confirmed':
-        return { text: 'Confirmed', className: 'confirmed' };
-      case 'label_printed':
-      case 'label_purchased':
-        return { text: 'Label created', className: 'label-created' };
-      case 'failure':
-        return { text: 'Failed', className: 'failed' };
-      default:
-        return { text: status.replace(/_/g, ' '), className: 'default' };
-    }
   };
 
   // Calculate delay days for unfulfilled orders
@@ -1507,6 +1502,7 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
 
   const handleUpdateDeliveryStatus = (orderId: number, orderName: string) => {
     setSelectedOrderForStatus({ id: orderId, name: orderName });
+    setStatusChoice('Delivered');
     setShowDeliveryStatusModal(true);
   };
 
@@ -1534,22 +1530,27 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
     }
   };
 
-  const handleAddCustomerTag = async (customerId: number, tag: string) => {
-    if (window.confirm(`Add "${tag}" tag to customer?`)) {
-      try {
-        const response = await api.addCustomerTag(customerId, tag);
-        if (response.success) {
-          await api.clearOrdersCache();
-          await loadOrders(selectedMonthFilter, true);
-          toast.success('Tag added successfully');
-        } else {
-          toast.error(`Error: ${response.error || 'Failed to add tag'}`);
+  const handleAddCustomerTag = (customerId: number, tag: string) => {
+    setConfirmAction({
+      title: `Add the "${tag}" tag to this customer?`,
+      description: 'The tag goes on the customer of this order.',
+      confirmLabel: 'Add tag',
+      run: async () => {
+        try {
+          const response = await api.addCustomerTag(customerId, tag);
+          if (response.success) {
+            await api.clearOrdersCache();
+            await loadOrders(selectedMonthFilter, true);
+            toast.success('Tag added successfully');
+          } else {
+            toast.error(`Error: ${response.error || 'Failed to add tag'}`);
+          }
+        } catch (error) {
+          console.error('Error adding customer tag:', error);
+          toast.error('Failed to add tag');
         }
-      } catch (error) {
-        console.error('Error adding customer tag:', error);
-        toast.error('Failed to add tag');
-      }
-    }
+      },
+    });
   };
 
   const handleAcknowledgeOrder = async (orderId: number, orderName: string) => {
@@ -1598,31 +1599,35 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       return;
     }
 
-    if (!window.confirm(`Add "no-cod" tag to ${customerIds.length} customer(s)?`)) return;
-
-    setIsProcessing(true);
-    try {
-      const response = await api.bulkAddCustomerTags(customerIds, 'no-cod');
-      if (response.success) {
-        await api.clearOrdersCache();
-        await loadOrders(selectedMonthFilter, true);
-        setSelectedOrders(new Set());
-        setSelectAll(false);
-        setShowBulkMenu(false);
-        if (response.summary) {
-          toast.success(`Successfully updated ${response.summary.successful} customers. Failed: ${response.summary.failed}.`);
-        } else {
-          toast.success('Customers updated successfully');
+    setConfirmAction({
+      title: `Add the "no-cod" tag to ${customerIds.length} ${customerIds.length === 1 ? 'customer' : 'customers'}?`,
+      description: 'The tag goes on the customers of the selected orders.',
+      confirmLabel: 'Add tag',
+      run: async () => {
+        setIsProcessing(true);
+        try {
+          const response = await api.bulkAddCustomerTags(customerIds, 'no-cod');
+          if (response.success) {
+            await api.clearOrdersCache();
+            await loadOrders(selectedMonthFilter, true);
+            setSelectedOrders(new Set());
+            setSelectAll(false);
+            if (response.summary) {
+              toast.success(`Successfully updated ${response.summary.successful} customers. Failed: ${response.summary.failed}.`);
+            } else {
+              toast.success('Customers updated successfully');
+            }
+          } else {
+            toast.error(`Error: ${response.error || 'Failed to update customers'}`);
+          }
+        } catch (err) {
+          console.error('Failed to add bulk customer tags:', err);
+          toast.error('An error occurred during bulk operation');
+        } finally {
+          setIsProcessing(false);
         }
-      } else {
-        toast.error(`Error: ${response.error || 'Failed to update customers'}`);
-      }
-    } catch (err) {
-      console.error('Failed to add bulk customer tags:', err);
-      toast.error('An error occurred during bulk operation');
-    } finally {
-      setIsProcessing(false);
-    }
+      },
+    });
   };
 
   const handleBulkAcknowledge = async () => {
@@ -1635,26 +1640,30 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       
     const orderNames = selectedOrdersData.map(o => o.name);
 
-    if (!window.confirm(`Acknowledge ${selectedOrderIds.length} order(s)?`)) return;
-
-    setIsProcessing(true);
-    try {
-      const response = await api.acknowledgeOrders(selectedOrderIds, orderNames);
-      if (response.success) {
-        setAcknowledgedOrderIds(new Set([...Array.from(acknowledgedOrderIds), ...selectedOrderIds]));
-        setSelectedOrders(new Set());
-        setSelectAll(false);
-        setShowBulkMenu(false);
-        toast.success(`Successfully acknowledged ${selectedOrderIds.length} orders`);
-      } else {
-        toast.error(`Error: ${response.error || 'Failed to acknowledge orders'}`);
-      }
-    } catch (err) {
-      console.error('Failed to acknowledge orders:', err);
-      toast.error('An error occurred during bulk operation');
-    } finally {
-      setIsProcessing(false);
-    }
+    setConfirmAction({
+      title: `Acknowledge ${selectedOrderIds.length} ${selectedOrderIds.length === 1 ? 'order' : 'orders'}?`,
+      description: 'Acknowledged orders drop out of the Not acknowledged filter.',
+      confirmLabel: 'Acknowledge',
+      run: async () => {
+        setIsProcessing(true);
+        try {
+          const response = await api.acknowledgeOrders(selectedOrderIds, orderNames);
+          if (response.success) {
+            setAcknowledgedOrderIds(new Set([...Array.from(acknowledgedOrderIds), ...selectedOrderIds]));
+            setSelectedOrders(new Set());
+            setSelectAll(false);
+            toast.success(`Successfully acknowledged ${selectedOrderIds.length} orders`);
+          } else {
+            toast.error(`Error: ${response.error || 'Failed to acknowledge orders'}`);
+          }
+        } catch (err) {
+          console.error('Failed to acknowledge orders:', err);
+          toast.error('An error occurred during bulk operation');
+        } finally {
+          setIsProcessing(false);
+        }
+      },
+    });
   };
 
   const calculateCogsBreakdown = (
@@ -1736,1129 +1745,514 @@ export function SalesPage({ initialFilter }: SalesPageProps = {}) {
       .reduce((sum, item) => sum + item.calculatedCost, 0);
   };
 
+  const periodOptions = [
+    { value: 'current', label: 'This month' },
+    { value: 'last30', label: 'Last 30 days' },
+    { value: 'all', label: 'All time' },
+    ...(availableMonths.length > 0 ? [{ divider: true as const }] : []),
+    ...availableMonths.map((monthKey) => ({ value: monthKey, label: getMonthLabel(monthKey) })),
+  ];
+
+  const headerActions = (
+    <>
+      <Select
+        label="Period"
+        inlineLabel
+        size="sm"
+        value={selectedMonthFilter}
+        onChange={(e) => {
+          setSelectedMonthFilter(e.target.value);
+          setSelectedOrders(new Set());
+          setSelectAll(false);
+        }}
+        options={periodOptions}
+        disabled={isLoading}
+      />
+      <Button size="sm" variant="secondary" icon="clipboard-list" onClick={() => setShowPendingDrawer(true)} disabled={isLoading}>
+        Pending products
+      </Button>
+      <Button size="sm" variant="primary" icon="refresh-cw" onClick={handleRefresh} loading={isRefreshing} disabled={isLoading}>
+        {isRefreshing ? 'Syncing…' : 'Sync from Shopify'}
+      </Button>
+    </>
+  );
+
+  const header = embedded ? (
+    <div className={styles.embeddedBar}>{headerActions}</div>
+  ) : (
+    <PageHeader title="Sales management" description="Every order with its delivery status and profit or loss." actions={headerActions} />
+  );
+
   if (isLoading) {
     return (
-      <div className={styles['sales-page']}>
-        <div className={styles['content-section']}>
-          <div className={styles['section-header']}>
-            <div className={styles['header-content']}>
-              <div />
-              <div className={styles['header-actions']}>
-                <span className={styles['loading-skeleton']} style={{ width: 110 }} />
-                <span className={styles['loading-skeleton']} style={{ width: 90 }} />
-                <span className={styles['loading-skeleton']} style={{ width: 180 }} />
-              </div>
-            </div>
-          </div>
-
-          <div className={styles['stats-section']}>
-            {[1, 2, 3, 4].map((i) => (
-              <div key={i} className={styles['stat-card']}>
-                <div className={`${styles['loading-skeleton']} ${styles['skeleton-label']}`} />
-                <div className={`${styles['loading-skeleton']} ${styles['skeleton-value']}`} />
-              </div>
-            ))}
-            <div className={styles['stat-card-combined']}>
-              <div className={`${styles['loading-skeleton']} ${styles['skeleton-label']}`} />
-              <div className={styles['status-row']}>
-                {[1, 2, 3, 4, 5, 6].map((i) => (
-                  <div key={i} className={`${styles['loading-skeleton']} ${styles['skeleton-chip']}`} />
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div className={styles['loading-filters']}>
-            {[1, 2, 3, 4, 5].map((i) => (
-              <span key={i} className={`${styles['loading-skeleton']} ${styles['skeleton-filter']}`} />
-            ))}
-          </div>
-
-          <div className={styles['orders-table-container']}>
-            <table className={styles['orders-table']}>
-              <thead>
-                <tr>
-                  <th className={styles['checkbox-cell']} />
-                  <th>Order</th>
-                  <th>Items</th>
-                  {showAWBColumn && <th>AWB</th>}
-                  <th>Tags</th>
-                  <th>P/L</th>
-                  <th>Date</th>
-                  <th className={styles['actions-header']}>Details</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
-                  <tr key={i}>
-                    <td><span className={`${styles['loading-skeleton']} ${styles['skeleton-check']}`} /></td>
-                    <td><span className={`${styles['loading-skeleton']} ${styles['skeleton-order']}`} /></td>
-                    <td><span className={`${styles['loading-skeleton']} ${styles['skeleton-items']}`} /></td>
-                    {showAWBColumn && <td><span className={`${styles['loading-skeleton']} ${styles['skeleton-awb']}`} /></td>}
-                    <td><span className={`${styles['loading-skeleton']} ${styles['skeleton-tags']}`} /></td>
-                    <td><span className={`${styles['loading-skeleton']} ${styles['skeleton-pl']}`} /></td>
-                    <td><span className={`${styles['loading-skeleton']} ${styles['skeleton-date']}`} /></td>
-                    <td><span className={`${styles['loading-skeleton']} ${styles['skeleton-details']}`} /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <div className={styles['loading-hint']}>Loading orders…</div>
-        </div>
+      <div className={embedded ? styles.embedded : styles.page} aria-busy="true">
+        {header}
+        <StatStrip>
+          {[1, 2, 3, 4].map((i) => <StatCard key={i} label="" value="" loading />)}
+        </StatStrip>
+        <Skeleton height={56} />
+        <Skeleton lines={8} />
       </div>
     );
   }
 
+  // Total P/L: final and prepaid orders, ad spend on days without orders, then fixed costs
+  const ordersCountedInPnl = ordersForStats.filter(o => {
+    const deliveryStatus = o.deliveryStatus?.toLowerCase() || '';
+    const isDelivered = deliveryStatus === 'delivered';
+    const isFailed = rtoOrderIds.has(o.id) ||
+      deliveryStatus === 'failure' ||
+      deliveryStatus.includes('failed') ||
+      deliveryStatus.includes('rto');
+    return isDelivered || isFailed || (o.paymentMethod?.toLowerCase() === 'prepaid');
+  });
+  let totalPL = ordersCountedInPnl.reduce((sum, o) => sum + (orderProfitLoss.get(o.id) ?? 0), 0);
+  const datesWithOrders = new Set(ordersForStats.map(o => getOrderDateKey(o.createdAt)));
+  Object.entries(adSpendByDate).forEach(([dateKey, amount]) => {
+    if (!isDateInSelectedMonth(dateKey)) return;
+    if (!datesWithOrders.has(dateKey)) totalPL -= amount;
+  });
+  totalPL -= fixedMonthlyTotal;
+
+  const toneOf = (v: number) => (v > 0 ? 'positive' : v < 0 ? 'negative' : 'neutral');
+
+  // Status buttons double as the period's status breakdown; flags and payment narrow further.
+  const statusFilters = [
+    { key: 'unfulfilled', label: 'Unfulfilled', on: showUnfulfilled, set: setShowUnfulfilled, count: filterCounts.unfulfilled },
+    { key: 'confirmed', label: 'Confirmed', on: showConfirmed, set: setShowConfirmed, count: filterCounts.confirmed },
+    { key: 'inTransit', label: 'In transit', on: showInTransit, set: setShowInTransit, count: filterCounts.inTransit },
+    { key: 'outForDelivery', label: 'Out for delivery', on: showOutForDelivery, set: setShowOutForDelivery, count: filterCounts.outForDelivery },
+    { key: 'attempted', label: 'Attempted delivery', on: showAttemptedDelivery, set: setShowAttemptedDelivery, count: filterCounts.attempted },
+    { key: 'delivered', label: 'Delivered', on: showDelivered, set: setShowDelivered, count: filterCounts.delivered },
+    { key: 'failed', label: 'Failed', on: showFailed, set: setShowFailed, count: filterCounts.failed },
+  ];
+  const otherFilters = [
+    { key: 'notAcknowledged', label: 'Not acknowledged', on: showNotAcknowledged, set: setShowNotAcknowledged, count: filterCounts.notAcknowledged.total },
+    { key: 'ticket', label: 'Ticket raised', on: showTicketRaised, set: setShowTicketRaised, count: filterCounts.ticket.total },
+  ];
+  const paymentFilters = [
+    { key: 'prepaid', label: 'Prepaid', on: showPrepaid, set: setShowPrepaid, count: filterCounts.prepaid.total },
+    { key: 'cod', label: 'COD', on: showCOD, set: setShowCOD, count: filterCounts.cod.total },
+  ];
+  const matchedConditions = [...statusFilters, ...otherFilters].filter((f) => f.on).length;
+  const anyFilter = hasStatusFilter || showPrepaid || showCOD;
+  const clearFilters = () => {
+    [...statusFilters, ...otherFilters, ...paymentFilters].forEach((f) => f.set(false));
+  };
+
+  const order = selectedOrderForCogs;
+  const orderAdCost = order ? (adCostPerOrderByDate[getOrderDateKey(order.createdAt)] ?? 0) : 0;
+  const orderTotalCosts = order ? calculateTotalCogs() + orderAdCost + calculateActualShippingCharge(order) : 0;
+  const orderProfit = order ? (order.totalPrice || 0) - orderTotalCosts : 0;
+  const shippingItems = (() => {
+    if (!order || !order.shippingCharge || order.shippingCharge <= 0) return [];
+    const b = order.shippingBreakdown;
+    if (!b) return [{ label: 'Shipping charge', sub: 'Shiprocket', value: formatINR(order.shippingCharge, { decimals: 2 }) }];
+    const rows: Array<{ label: string; sub: string; value: string; tone?: 'positive' }> = [];
+    if (b.freightForward > 0) rows.push({ label: 'Base freight', sub: 'Shiprocket', value: formatINR(b.freightForward, { decimals: 2 }) });
+    if (b.freightCOD !== 0) {
+      // COD is only reversed when the order is RTO (listed, RTO/failed status, or RTO charges) and paid by COD
+      const isRTO = rtoOrderIds.has(order.id) ||
+        order.deliveryStatus?.toLowerCase().includes('rto') ||
+        order.deliveryStatus?.toLowerCase().includes('failed') ||
+        (b.freightRTO || 0) > 0;
+      const isCODPayment = order.paymentMethod?.toLowerCase() === 'cod';
+      rows.push({ label: 'Freight COD', sub: 'applied', value: formatINR(Math.abs(b.freightCOD), { decimals: 2 }) });
+      if (isRTO && isCODPayment && b.freightCOD > 0) {
+        rows.push({ label: 'Freight COD reversal', sub: 'RTO refund', value: formatINR(-Math.abs(b.freightCOD), { decimals: 2 }), tone: 'positive' });
+      }
+    }
+    if (b.freightRTO > 0) rows.push({ label: 'Freight RTO', sub: 'return', value: formatINR(b.freightRTO, { decimals: 2 }) });
+    if (b.whatsappCharges > 0) rows.push({ label: 'WhatsApp charges', sub: 'communication', value: formatINR(b.whatsappCharges, { decimals: 2 }) });
+    if (b.otherCharges > 0) rows.push({ label: 'Other charges', sub: 'misc', value: formatINR(b.otherCharges, { decimals: 2 }) });
+    return rows;
+  })();
+  const pendingProducts = getPendingProducts();
+  const delayDayOptions = getAvailableDelayDays();
+
   return (
-    <div className={styles['sales-page']}>
-      <div className={styles['content-section']}>
-        <div className={styles['section-header']}>
-          <div className={styles['header-content']}>
-            <div>
-            </div>
-            <div className={styles['header-actions']}>
-              <button
-                onClick={() => setShowPendingDrawer(true)}
-                className={styles['pending-btn']}
-                title="Show pending products to fulfill"
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                  <path d="M9 12h6m-6 4h6" />
-                </svg>
-                Show Pending
-              </button>
-              <button
-                onClick={handleRefresh}
-                disabled={isRefreshing}
-                className={styles['refresh-btn']}
-                title="Refresh orders from Shopify"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  className={isRefreshing ? styles.spinning : ''}
-                >
-                  <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2" />
-                </svg>
-                {isRefreshing ? 'Refreshing...' : 'Refresh'}
-              </button>
-              <div className={styles['month-filter']}>
-                <label htmlFor="month-select">Period:</label>
-                <select
-                  id="month-select"
-                  value={selectedMonthFilter}
-                  onChange={(e) => {
-                    setSelectedMonthFilter(e.target.value);
-                    setSelectedOrders(new Set());
-                    setSelectAll(false);
-                  }}
-                  className={styles['filter-select']}
-                >
-                  <option value="all">All Time</option>
-                  <option value="last30">Last 30 Days</option>
-                  <option value="current">This Month</option>
-                  {availableMonths.length > 0 && <option disabled>───────────</option>}
-                  {availableMonths.map(monthKey => (
-                    <option key={monthKey} value={monthKey}>
-                      {getMonthLabel(monthKey)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              {selectedOrders.size > 0 && (
-                <div className={styles['bulk-actions']}>
-                  <span className={styles['selected-count']}>{selectedOrders.size} selected</span>
-                  <div className={styles['bulk-action-dropdown']}>
-                    <button
-                      className={styles['bulk-action-btn']}
-                      onClick={() => setShowBulkMenu(!showBulkMenu)}
-                      disabled={isProcessing}
-                    >
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M12 5v14" />
-                        <path d="M19 12l-7 7-7-7" />
-                      </svg>
-                      {isProcessing ? 'Processing...' : 'Actions'}
-                    </button>
-                    {showBulkMenu && (
-                      <div className={styles['bulk-menu']}>
-                        <button
-                          className={`${styles['bulk-menu-item']} ${styles.rto}`}
-                          onClick={handleMarkAsRTO}
-                        >
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path d="M9 11l-6 6v-6h6z" />
-                            <path d="M20 12h-8" />
-                            <path d="M20 12l-4-4" />
-                            <path d="M20 12l-4 4" />
-                          </svg>
-                          Mark as RTO
-                        </button>
-                        <button
-                          className={`${styles['bulk-menu-item']} ${styles['unmark-rto']}`}
-                          onClick={handleUnmarkRTO}
-                        >
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path d="M18 6L6 18" />
-                            <path d="M6 6l12 12" />
-                          </svg>
-                          Unmark RTO
-                        </button>
-                        <div className={styles['menu-divider']}></div>
-                        <button
-                          className={`${styles['bulk-menu-item']} ${styles['acknowledge']}`}
-                          onClick={handleBulkAcknowledge}
-                        >
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
-                          </svg>
-                          Acknowledge
-                        </button>
-                        <div className={styles['menu-divider']}></div>
-                        <button
-                          className={`${styles['bulk-menu-item']} ${styles['mark-no-cod']}`}
-                          onClick={handleBulkAddNoCOD}
-                        >
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
-                            <line x1="7" y1="7" x2="7.01" y2="7" />
-                          </svg>
-                          Mark as no-cod
-                        </button>
-                        <div className={styles['menu-divider']}></div>
-                        <button
-                          className={`${styles['bulk-menu-item']} ${styles.discard}`}
-                          onClick={handleDiscardOrders}
-                        >
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <circle cx="12" cy="12" r="10" />
-                            <path d="M15 9l-6 6" />
-                            <path d="M9 9l6 6" />
-                          </svg>
-                          Discard Orders
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
+    <div className={embedded ? styles.embedded : styles.page}>
+      {header}
+
+      <StatStrip>
+        <StatCard
+          label="Total orders"
+          value={stats.totalOrders.toLocaleString('en-IN')}
+          sub={`${stats.prepaidCount.toLocaleString('en-IN')} prepaid · ${stats.codCount.toLocaleString('en-IN')} COD`}
+        />
+        <StatCard
+          label="NDR rate"
+          value={`${stats.ndrRate.toFixed(1)}%`}
+          tone={stats.ndrRate > 15 ? 'caution' : 'neutral'}
+          sub={`${stats.ndrCount.toLocaleString('en-IN')} of ${stats.finalStatusCount.toLocaleString('en-IN')} final`}
+        />
+        <StatCard
+          label="Total P/L"
+          value={formatINR(totalPL, { signed: true })}
+          tone={toneOf(totalPL)}
+          sub={cogsVersions.length > 0
+            ? fixedMonthlyTotal > 0
+              ? `incl. ${formatINR(fixedMonthlyTotal)} fixed costs`
+              : 'delivered, failed and prepaid orders + ad-only days'
+            : 'configure COGS to calculate'}
+        />
+        {expectedProfit && (
+          <StatCard
+            label={expectedProfit.isCurrentMonth ? 'Expected month-end P/L' : 'Projected P/L'}
+            value={formatINR(expectedProfit.expectedPL, { signed: true })}
+            tone={toneOf(expectedProfit.expectedPL)}
+            sub={expectedProfit.isCurrentMonth
+              ? `day ${expectedProfit.daysElapsed} of ${expectedProfit.totalDays} · ${expectedProfit.pendingOrdersCount.toLocaleString('en-IN')} pending`
+              : `${expectedProfit.pendingOrdersCount.toLocaleString('en-IN')} pending orders`}
+          >
+            <span className={styles.statNote} title={`Average per delivered order ${formatINR(expectedProfit.avgPLPerDeliveredOrder)}`}>
+              {`now ${formatINR(expectedProfit.currentPL, { signed: true, compact: true })} · pending ${formatINR(expectedProfit.expectedPendingPL, { signed: true, compact: true })} · rest ${formatINR(expectedProfit.expectedFuturePL, { signed: true, compact: true })}`}
+            </span>
+          </StatCard>
+        )}
+      </StatStrip>
+
+      {selectedMonthFilter !== 'all' && expectedProfit && (
+        <Card
+          title="AI forecast"
+          eyebrow={aiPrediction
+            ? `analysed ${new Date(aiPrediction.lastUpdated).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}, ${new Date(aiPrediction.lastUpdated).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}`
+            : 'not analysed yet'}
+          actions={
+            <Button size="sm" variant="secondary" icon="sparkles" onClick={runAiPrediction} loading={isPredicting}>
+              {isPredicting ? 'Analysing…' : 'Refresh AI'}
+            </Button>
+          }
+        >
+          <div className={styles.ai}>
+            <DataList
+              items={[
+                { label: 'Orders by month-end', value: aiPrediction?.predictedOrders ? Number(aiPrediction.predictedOrders).toLocaleString('en-IN') : '—' },
+                {
+                  label: 'Expected NDR',
+                  sub: 'projected final rate',
+                  value: aiPrediction?.predictedNDR ? `${Number(aiPrediction.predictedNDR).toFixed(1)}%` : '—',
+                  tone: aiPrediction?.predictedNDR ? (aiPrediction.predictedNDR > 15 ? 'negative' : 'positive') : undefined,
+                },
+                {
+                  label: 'Predicted P/L',
+                  value: aiPrediction?.predictedFinalProfit ? formatINR(aiPrediction.predictedFinalProfit, { signed: true }) : '—',
+                  tone: aiPrediction?.predictedFinalProfit ? (aiPrediction.predictedFinalProfit > 0 ? 'positive' : 'negative') : undefined,
+                },
+              ]}
+            />
+            <div className={styles.insight}>
+              <p className={styles.insightText}>{aiPrediction?.insight || 'Refresh AI to get an actionable insight for this month.'}</p>
+              {aiPrediction?.reasoning && <p className={styles.reasoning}>{aiPrediction.reasoning}</p>}
             </div>
           </div>
+        </Card>
+      )}
+
+      <section className={styles.orders} aria-label="Orders">
+        <div className={styles.statusStrip} role="group" aria-label="Filter by delivery status">
+          {statusFilters.map((f) => (
+            <button key={f.key} type="button" className={styles.statusCell} aria-pressed={f.on} onClick={() => f.set(!f.on)}>
+              <span className={styles.statusLabel}>{f.label}</span>
+              <span className={styles.statusCount}>{f.count.total.toLocaleString('en-IN')}</span>
+              <span className={styles.statusSplit}>{`${f.count.prepaid.toLocaleString('en-IN')} prepaid · ${f.count.cod.toLocaleString('en-IN')} COD`}</span>
+            </button>
+          ))}
         </div>
 
-        {/* Stats Section - Line 1: Total Orders, NDR Rate, Total P/L, Expected Profit | Line 2: Order Status */}
-        <div className={styles['stats-section']}>
-          <div className={styles['stat-card']}>
-            <div className={styles['stat-label']}>Total Orders</div>
-            <div className={styles['stat-value']}>{formatIndianNumber(stats.totalOrders, 0)}</div>
+        <div className={styles.toolbar}>
+          <div className={styles.chips} role="group" aria-label="More filters">
+            {otherFilters.map((f) => (
+              <button key={f.key} type="button" className={styles.chip} aria-pressed={f.on} onClick={() => f.set(!f.on)}>
+                {f.label}<span className={styles.chipCount}>{f.count.toLocaleString('en-IN')}</span>
+              </button>
+            ))}
+            <span className={styles.chipRule} aria-hidden="true" />
+            {paymentFilters.map((f) => (
+              <button key={f.key} type="button" className={styles.chip} aria-pressed={f.on} onClick={() => f.set(!f.on)}>
+                {f.label}<span className={styles.chipCount}>{f.count.toLocaleString('en-IN')}</span>
+              </button>
+            ))}
           </div>
+          {matchedConditions >= 2 && (
+            <SegmentedControl
+              size="sm"
+              label="Match"
+              value={filterOperator}
+              onChange={(v) => setFilterOperator(v as 'AND' | 'OR')}
+              options={[{ value: 'OR', label: 'Match any' }, { value: 'AND', label: 'Match all' }]}
+            />
+          )}
+          {anyFilter && <Button size="sm" variant="ghost" icon="x" onClick={clearFilters}>Clear filters</Button>}
+          <span className={styles.toolbarEnd}>
+            <span className={styles.count}>{`${filteredOrders.length.toLocaleString('en-IN')} ${filteredOrders.length === 1 ? 'order' : 'orders'}`}</span>
+            <Switch label="AWB column" checked={showAWBColumn} onChange={(e) => setShowAWBColumn(e.target.checked)} />
+          </span>
+        </div>
 
-          <div className={styles['stat-card']}>
-            <div className={styles['stat-label']}>NDR Rate</div>
-            <div className={`${styles['stat-value']} ${stats.ndrRate > 15 ? styles['ndr-high'] : styles['ndr-normal']}`}>
-              {formatIndianNumber(stats.ndrRate, 1)}%
-            </div>
-            <div className={styles['stat-subtext']}>{formatIndianNumber(stats.ndrCount, 0)} / {formatIndianNumber(stats.finalStatusCount, 0)} final status</div>
-          </div>
-
-          <div className={styles['stat-card']}>
-            <div className={styles['stat-label']}>Total P/L</div>
-            {(() => {
-              const ordersCountedInPnl = ordersForStats.filter(o => {
-                const deliveryStatus = o.deliveryStatus?.toLowerCase() || '';
-                const isDelivered = deliveryStatus === 'delivered';
-                const isFailed = rtoOrderIds.has(o.id) ||
-                  deliveryStatus === 'failure' ||
-                  deliveryStatus.includes('failed') ||
-                  deliveryStatus.includes('rto');
-                return isDelivered || isFailed || (o.paymentMethod?.toLowerCase() === 'prepaid');
-              });
-              let totalPL = ordersCountedInPnl.reduce((sum, o) => sum + (orderProfitLoss.get(o.id) ?? 0), 0);
-              const datesWithOrders = new Set(ordersForStats.map(o => getOrderDateKey(o.createdAt)));
-              Object.entries(adSpendByDate).forEach(([dateKey, amount]) => {
-                if (!isDateInSelectedMonth(dateKey)) return;
-                if (!datesWithOrders.has(dateKey)) totalPL -= amount;
-              });
-              totalPL -= fixedMonthlyTotal;
-              return (
-                <>
-                  <div className={`${styles['stat-value']} ${totalPL > 0 ? styles.profit : totalPL < 0 ? styles.loss : ''}`}>
-                    {`${totalPL > 0 ? '+' : ''}₹${formatIndianNumber(totalPL, 0)}`}
-                  </div>
-                  <div className={styles['stat-subtext']}>
-                    {cogsVersions.length > 0
-                      ? fixedMonthlyTotal > 0
-                        ? `Incl. ₹${formatIndianNumber(fixedMonthlyTotal, 0)} fixed expenses`
-                        : 'Delivered, failed & prepaid orders + ad-spend-only days'
-                      : 'Configure COGS to calculate'}
-                  </div>
-                </>
-              );
-            })()}
-          </div>
-
-          {expectedProfit && (
-            <div className={styles['stat-card']}>
-              <div className={styles['stat-label']}>
-                {expectedProfit.isCurrentMonth ? 'Expected Profit' : 'Projected Profit'}
+        <div className={cx('pbx-table', styles.table)}>
+          {selectedOrders.size > 0 && (
+            <div className="pbx-table__bulk" role="region" aria-label="Selection">
+              <span><strong>{selectedOrders.size.toLocaleString('en-IN')}</strong> selected</span>
+              <div className="pbx-table__bulk-actions">
+                <Button size="sm" variant="secondary" icon="bookmark" onClick={handleBulkAcknowledge} disabled={isProcessing}>Acknowledge</Button>
+                <Button size="sm" variant="secondary" icon="truck" onClick={handleMarkAsRTO} disabled={isProcessing}>Mark RTO</Button>
+                <Menu
+                  label="More bulk actions"
+                  trigger={<Button size="sm" variant="secondary" iconRight="chevron-down" loading={isProcessing}>More</Button>}
+                  items={[
+                    { label: 'Unmark RTO', icon: 'x', onSelect: handleUnmarkRTO },
+                    { label: 'Tag customers no-COD', icon: 'tag', onSelect: handleBulkAddNoCOD },
+                    { divider: true },
+                    {
+                      label: 'Discard orders',
+                      icon: 'trash-2',
+                      tone: 'negative',
+                      onSelect: () => setConfirmAction({
+                        title: `Discard ${selectedOrders.size} ${selectedOrders.size === 1 ? 'order' : 'orders'}?`,
+                        description: 'They leave the orders list and every figure on this page.',
+                        confirmLabel: 'Discard',
+                        danger: true,
+                        run: handleDiscardOrders,
+                      }),
+                    },
+                  ]}
+                />
               </div>
-              <div className={`${styles['stat-value']} ${expectedProfit.expectedPL > 0 ? styles.profit : expectedProfit.expectedPL < 0 ? styles.loss : ''}`}>
-                {expectedProfit.expectedPL > 0 ? '+' : ''}₹{formatIndianNumber(expectedProfit.expectedPL, 0)}
-              </div>
-              <div className={styles['stat-subtext']} title={`Current P/L: ₹${formatIndianNumber(expectedProfit.currentPL, 0)} | Pending (${expectedProfit.pendingOrdersCount} orders): +₹${formatIndianNumber(expectedProfit.expectedPendingPL, 0)} | Future (${expectedProfit.remainingDays}d): +₹${formatIndianNumber(expectedProfit.expectedFuturePL, 0)} | Avg per order: ₹${formatIndianNumber(expectedProfit.avgPLPerDeliveredOrder, 0)}`}>
-                {expectedProfit.isCurrentMonth
-                  ? `Day ${expectedProfit.daysElapsed}/${expectedProfit.totalDays} • ${formatIndianNumber(expectedProfit.pendingOrdersCount, 0)} pending`
-                  : `${formatIndianNumber(expectedProfit.pendingOrdersCount, 0)} pending orders`
-                }
-              </div>
+              <Button variant="ghost" size="sm" onClick={() => { setSelectedOrders(new Set()); setSelectAll(false); }}>Clear</Button>
             </div>
           )}
-
-          <div className={styles['stat-card-combined']}>
-            <div className={styles['stat-label']}>Order Status</div>
-            <div className={styles['status-breakdown']}>
-              <div className={styles['status-row']}>
-                <div className={styles['status-item']}>
-                  <span className={styles['status-label']}>Delivered</span>
-                  <span className={styles['status-value']}>{formatIndianNumber(stats.deliveredCount, 0)}</span>
-                  <span className={styles['status-detail']}>
-                    {formatIndianNumber(stats.deliveredPrepaidCount, 0)}p · {formatIndianNumber(stats.deliveredCODCount, 0)}c
-                  </span>
-                </div>
-                <div className={styles['status-item']}>
-                  <span className={styles['status-label']}>Failed</span>
-                  <span className={styles['status-value']}>{formatIndianNumber(stats.failedCount, 0)}</span>
-                  <span className={styles['status-detail']}>
-                    {formatIndianNumber(stats.failedPrepaidCount, 0)}p · {formatIndianNumber(stats.failedCODCount, 0)}c
-                  </span>
-                </div>
-                <div className={styles['status-item']}>
-                  <span className={styles['status-label']}>Attempted Delivery</span>
-                  <span className={styles['status-value']}>{formatIndianNumber(stats.attemptedDeliveryCount, 0)}</span>
-                  <span className={styles['status-detail']}>
-                    {formatIndianNumber(stats.attemptedDeliveryPrepaidCount, 0)}p · {formatIndianNumber(stats.attemptedDeliveryCODCount, 0)}c
-                  </span>
-                </div>
-                <div className={styles['status-item']}>
-                  <span className={styles['status-label']}>In Transit</span>
-                  <span className={styles['status-value']}>{formatIndianNumber(stats.inTransitCount, 0)}</span>
-                  <span className={styles['status-detail']}>
-                    {formatIndianNumber(stats.inTransitPrepaidCount, 0)}p · {formatIndianNumber(stats.inTransitCODCount, 0)}c
-                  </span>
-                </div>
-                <div className={styles['status-item']}>
-                  <span className={styles['status-label']}>Out for Delivery</span>
-                  <span className={styles['status-value']}>{formatIndianNumber(stats.outForDeliveryCount, 0)}</span>
-                  <span className={styles['status-detail']}>
-                    {formatIndianNumber(stats.outForDeliveryPrepaidCount, 0)}p · {formatIndianNumber(stats.outForDeliveryCODCount, 0)}c
-                  </span>
-                </div>
-                <div className={styles['status-item']}>
-                  <span className={styles['status-label']}>Unfulfilled</span>
-                  <span className={styles['status-value']}>{formatIndianNumber(stats.unfulfilledCount, 0)}</span>
-                  <span className={styles['status-detail']}>
-                    {formatIndianNumber(stats.unfulfilledPrepaidCount, 0)}p · {formatIndianNumber(stats.unfulfilledCODCount, 0)}c
-                  </span>
-                </div>
-              </div>
-            </div>
+          <div className={styles.tableScroll}>
+            <table>
+              <thead>
+                <tr>
+                  <th className="pbx-table__check">
+                    <Checkbox
+                      aria-label="Select all orders"
+                      checked={selectAll}
+                      indeterminate={selectedOrders.size > 0 && !selectAll}
+                      onChange={handleSelectAll}
+                    />
+                  </th>
+                  <th scope="col">Order</th>
+                  <th scope="col">Items</th>
+                  {showAWBColumn && <th scope="col">AWB</th>}
+                  <th scope="col">Status</th>
+                  <th scope="col" style={{ textAlign: 'right' }}>P/L</th>
+                  <th scope="col">Placed</th>
+                  <th scope="col"><span className="pbx-sr">Actions</span></th>
+                </tr>
+              </thead>
+              <OrdersTableBody
+                hasStatusFilter={hasStatusFilter}
+                filteredOrders={filteredOrders}
+                ordersGroupedByDate={ordersGroupedByDate}
+                selectedOrders={selectedOrders}
+                onSelectOrder={handleSelectOrder}
+                orderProfitLoss={orderProfitLoss}
+                rtoOrderIds={rtoOrderIds}
+                getDelayDays={getDelayDays}
+                handleOpenCogsModal={handleOpenCogsModal}
+                avgPnlPerFinalOrder={avgPnlPerFinalOrder}
+                globalNdrRate={globalNdrRate}
+                onUpdateDeliveryStatus={handleUpdateDeliveryStatus}
+                onAddCustomerTag={handleAddCustomerTag}
+                onAcknowledgeOrder={handleAcknowledgeOrder}
+                acknowledgedOrderIds={acknowledgedOrderIds}
+                onMarkTicketRaised={handleMarkTicketRaised}
+                ticketRaisedOrderIds={ticketRaisedOrderIds}
+                showAWBColumn={showAWBColumn}
+              />
+            </table>
           </div>
         </div>
+      </section>
 
-        {/* Dedicated AI Prediction Row */}
-        {selectedMonthFilter !== 'all' && expectedProfit && (
-          <div className={styles['ai-prediction-row']}>
-            <div className={styles['ai-row-header']}>
-              <div className={styles['ai-row-title']}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a10 10 0 1 0 10 10H12V2z"></path><path d="M12 2a10 10 0 0 1 10 10"></path></svg>
-                AI Performance Forecast
-              </div>
-              <button 
-                className={styles['refresh-btn']}
-                onClick={runAiPrediction}
-                disabled={isPredicting}
-              >
-                <svg className={isPredicting ? styles.spinning : ''} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"></path></svg>
-                {isPredicting ? 'Analyzing...' : 'Refresh AI'}
-              </button>
+      <Drawer
+        open={showPendingDrawer}
+        onClose={() => setShowPendingDrawer(false)}
+        title="Pending products"
+        description="Unfulfilled orders, counted by product and variant"
+        footer={pendingProducts.length > 0 ? (
+          <>
+            <span>{`${pendingProducts.length} ${pendingProducts.length === 1 ? 'product' : 'products'}`}</span>
+            <span className="pbx-num">{`${pendingProducts.reduce((s, p) => s + p.count, 0).toLocaleString('en-IN')} to fulfil`}</span>
+          </>
+        ) : undefined}
+      >
+        <div className={styles.pendingFilters}>
+          <div className={styles.filterRow}>
+            <span className={styles.filterLabel}>Payment</span>
+            <button type="button" className={styles.chip} aria-pressed={pendingFilterCOD} onClick={() => setPendingFilterCOD(!pendingFilterCOD)}>COD</button>
+            <button type="button" className={styles.chip} aria-pressed={pendingFilterPaid} onClick={() => setPendingFilterPaid(!pendingFilterPaid)}>Paid</button>
+          </div>
+          {delayDayOptions.length > 0 && (
+            <div className={styles.filterRow}>
+              <span className={styles.filterLabel}>Waiting</span>
+              {delayDayOptions.map((days) => (
+                <button
+                  key={days}
+                  type="button"
+                  className={styles.chip}
+                  aria-pressed={pendingFilterDelayDays.has(days)}
+                  onClick={() => {
+                    const next = new Set(pendingFilterDelayDays);
+                    if (next.has(days)) next.delete(days);
+                    else next.add(days);
+                    setPendingFilterDelayDays(next);
+                  }}
+                >
+                  {days === 0 ? 'Today' : `${days} day${days > 1 ? 's' : ''}`}
+                </button>
+              ))}
             </div>
-
-            <div className={styles['ai-stat-card']}>
-              <div className={styles['stat-label']}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"></path><path d="M3 6h18"></path><path d="M16 10a4 4 0 0 1-8 0"></path></svg>
-                AI Total Orders
-              </div>
-              <div className={styles['stat-value']}>
-                {aiPrediction?.predictedOrders ? formatIndianNumber(aiPrediction.predictedOrders, 0) : '—'}
-              </div>
-              <div className={styles['stat-subtext']}>Predicted for Month-end</div>
-            </div>
-
-            <div className={styles['ai-stat-card']}>
-              <div className={styles['stat-label']}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m3 9 2.45-4.9A2 2 0 0 1 7.24 3h9.52a2 2 0 0 1 1.8 1.1L21 9"></path><path d="M12 3v6"></path><path d="M5 9v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9"></path><path d="M9 9h6"></path></svg>
-                Expected NDR
-              </div>
-              <div className={`${styles['stat-value']} ${aiPrediction?.predictedNDR > 15 ? styles.loss : styles.profit}`}>
-                {aiPrediction?.predictedNDR ? `${formatIndianNumber(aiPrediction.predictedNDR, 1)}%` : '—'}
-              </div>
-              <div className={styles['stat-subtext']}>Projected final rate</div>
-            </div>
-
-            <div className={styles['ai-stat-card']}>
-              <div className={styles['stat-label']}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path></svg>
-                Predicted Profit
-              </div>
-              <div className={`${styles['stat-value']} ${aiPrediction?.predictedFinalProfit > 0 ? styles.profit : styles.loss}`}>
-                {aiPrediction?.predictedFinalProfit ? `₹${formatIndianNumber(aiPrediction.predictedFinalProfit, 0)}` : '—'}
-              </div>
-              <div className={styles['stat-subtext']}>Estimated P/L</div>
-            </div>
-
-            <div className={styles['ai-stat-card']}>
-              <div className={styles['stat-label']}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-                Daily Trend
-              </div>
-              <div className={styles['stat-value']}>
-                {aiPrediction ? 'Trend-Aware' : '—'}
-              </div>
-              <div className={styles['stat-subtext']}>Growth Analysis</div>
-            </div>
-
-            <div className={styles['ai-insight-card']}>
-              <div className={styles['insight-header']}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m12 14 4-4"></path><path d="M3.34 19a10 10 0 1 1 17.32 0"></path></svg>
-                Strategic AI Insight
-              </div>
-              <div className={styles['insight-text']}>
-                {aiPrediction?.insight || "Refresh AI to get an actionable insight for this month."}
-              </div>
-              {aiPrediction?.reasoning && (
-                <div className={styles['ai-reasoning']}>
-                  {aiPrediction.reasoning}
+          )}
+          {(pendingFilterCOD || pendingFilterPaid || pendingFilterDelayDays.size > 0) && (
+            <Button
+              size="sm"
+              variant="ghost"
+              icon="x"
+              onClick={() => {
+                setPendingFilterCOD(false);
+                setPendingFilterPaid(false);
+                setPendingFilterDelayDays(new Set());
+              }}
+            >
+              Clear filters
+            </Button>
+          )}
+        </div>
+        {pendingProducts.length === 0 ? (
+          <EmptyState size="sm" icon="circle-check" title="No pending products" description="Every order here is fulfilled." />
+        ) : (
+          <ul className={styles.pendingList}>
+            {pendingProducts.map((product, idx) => (
+              <li key={idx} className={styles.pendingItem}>
+                <div className={styles.pendingText}>
+                  <span className={styles.pendingTitle}>{product.title}</span>
+                  {product.variantTitle && <span className={styles.pendingVariant}>{product.variantTitle}</span>}
+                  <span className={styles.pendingOrders}>{product.orderNumbers.join(', ')}</span>
                 </div>
+                <span className={styles.pendingCount}>{product.count}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Drawer>
+
+      <Dialog
+        open={showCogsModal && !!order}
+        onClose={() => setShowCogsModal(false)}
+        size="lg"
+        title={order ? `P/L breakdown · ${order.name}` : 'P/L breakdown'}
+        description={order ? `${selectedVariant === 'small' ? 'Small' : 'Large'} book · ${isOrderDelivered(order) ? 'COGS' : 'NDR'} configuration` : undefined}
+      >
+        {order && (
+          <div className={styles.breakdown}>
+            <div className={styles.breakdownCol}>
+              <DataList
+                title="Order details"
+                items={[
+                  { label: 'Order', value: order.name },
+                  { label: 'Sale price', value: formatINR(order.totalPrice || 0, { decimals: 2 }) },
+                  { label: 'Variant', value: selectedVariant === 'small' ? 'Small book' : 'Large book' },
+                  { label: 'Configuration', value: isOrderDelivered(order) ? 'COGS' : 'NDR' },
+                ]}
+              />
+              {cogsBreakdown.length === 0 ? (
+                <DataList title="COGS configuration" items={[{ label: 'No COGS configuration available', value: '—', tone: 'muted' }]} />
+              ) : (
+                <DataList
+                  title="COGS configuration"
+                  items={cogsBreakdown
+                    .filter((item) => item.fieldName !== 'Ad cost (Meta)') // ad cost is shown on its own
+                    .map((item) => ({
+                      label: item.fieldName,
+                      sub: item.calculationType === 'percentage' ? `${item.value.toFixed(1)}%` : formatINR(item.value, { decimals: 2 }),
+                      value: formatINR(item.calculatedCost, { decimals: 2 }),
+                    }))}
+                />
               )}
-              <div className={styles['ai-footer']}>
-                <div className={styles['ai-timestamp']}>
-                  {aiPrediction ? `Last Analysis: ${new Date(aiPrediction.lastUpdated).toLocaleDateString('en-IN')} ${new Date(aiPrediction.lastUpdated).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}` : 'Not yet analyzed'}
-                </div>
-              </div>
+              <DataList title="Advertisement cost" items={[{ label: 'Ad cost (Meta)', sub: 'per order', value: formatINR(orderAdCost, { decimals: 2 }) }]} />
+            </div>
+            <div className={styles.breakdownCol}>
+              <DataList
+                title="Shipping charges"
+                items={shippingItems.length > 0 ? shippingItems : [{ label: 'No shipping charges available', value: '—', tone: 'muted' }]}
+              />
+              <DataList
+                title="Cost summary"
+                items={[
+                  { label: 'Total COGS', sub: 'from configuration', value: formatINR(calculateTotalCogs(), { decimals: 2 }) },
+                  { label: 'Ad cost', sub: 'Meta ads', value: formatINR(orderAdCost, { decimals: 2 }) },
+                  { label: 'Shipping charge', sub: 'Shiprocket', value: formatINR(calculateActualShippingCharge(order), { decimals: 2 }) },
+                ]}
+                total={{ label: 'Total costs', value: formatINR(orderTotalCosts, { decimals: 2 }) }}
+              />
+              <DataList
+                title="Net result"
+                items={[
+                  { label: 'Sale price', value: formatINR(order.totalPrice || 0, { decimals: 2 }) },
+                  { label: 'Total costs', value: formatINR(-orderTotalCosts, { decimals: 2 }) },
+                ]}
+                total={{ label: orderProfit >= 0 ? 'Profit' : 'Loss', value: <Amount value={orderProfit} signed decimals={2} /> }}
+              />
             </div>
           </div>
         )}
+      </Dialog>
 
-        {/* Status Filters */}
-        <div className={styles['status-filters']}>
-          <span className={styles['filters-label']}>Filter by status:</span>
-          <button
-            onClick={() => setShowUnfulfilled(!showUnfulfilled)}
-            className={`${styles['filter-chip']} ${showUnfulfilled ? styles.active : ''}`}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10" />
-              <path d="M12 6v6l4 2" />
-            </svg>
-            Unfulfilled
-          </button>
-          <button
-            onClick={() => setShowDelivered(!showDelivered)}
-            className={`${styles['filter-chip']} ${showDelivered ? styles.active : ''}`}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
-              <polyline points="22 4 12 14.01 9 11.01" />
-            </svg>
-            Delivered
-          </button>
-          <button
-            onClick={() => setShowFailed(!showFailed)}
-            className={`${styles['filter-chip']} ${showFailed ? styles.active : ''}`}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10" />
-              <line x1="15" y1="9" x2="9" y2="15" />
-              <line x1="9" y1="9" x2="15" y2="15" />
-            </svg>
-            Failed
-          </button>
-          <button
-            onClick={() => setShowAttemptedDelivery(!showAttemptedDelivery)}
-            className={`${styles['filter-chip']} ${showAttemptedDelivery ? styles.active : ''}`}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10" />
-              <line x1="12" y1="8" x2="12" y2="12" />
-              <line x1="12" y1="16" x2="12.01" y2="16" />
-            </svg>
-            Attempted Delivery
-          </button>
-          <button
-            onClick={() => setShowConfirmed(!showConfirmed)}
-            className={`${styles['filter-chip']} ${showConfirmed ? styles.active : ''}`}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
-              <polyline points="22 4 12 14.01 9 11.01" />
-            </svg>
-            Confirmed
-          </button>
-          <button
-            onClick={() => setShowInTransit(!showInTransit)}
-            className={`${styles['filter-chip']} ${showInTransit ? styles.active : ''}`}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="1" y="3" width="15" height="13" />
-              <polygon points="16 8 20 8 23 11 23 16 16 16 16 8" />
-              <circle cx="5.5" cy="18.5" r="2.5" />
-              <circle cx="18.5" cy="18.5" r="2.5" />
-            </svg>
-            In Transit
-          </button>
-          <button
-            onClick={() => setShowOutForDelivery(!showOutForDelivery)}
-            className={`${styles['filter-chip']} ${showOutForDelivery ? styles.active : ''}`}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M9 11l3 3L22 4" />
-              <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
-            </svg>
-            Out for Delivery
-          </button>
-          <button
-            onClick={() => setShowNotAcknowledged(!showNotAcknowledged)}
-            className={`${styles['filter-chip']} ${showNotAcknowledged ? styles.active : ''}`}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
-            </svg>
-            Not Acknowledged
-          </button>
-          <button
-            onClick={() => setShowTicketRaised(!showTicketRaised)}
-            className={`${styles['filter-chip']} ${showTicketRaised ? styles.active : ''}`}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-            </svg>
-            Ticket Created
-          </button>
-          {(showUnfulfilled || showDelivered || showFailed || showAttemptedDelivery || showInTransit || showOutForDelivery || showConfirmed || showNotAcknowledged || showTicketRaised) && (
-            <button
+      <Dialog
+        open={showDeliveryStatusModal && !!selectedOrderForStatus}
+        onClose={() => !updatingStatus && setShowDeliveryStatusModal(false)}
+        size="sm"
+        title="Mark delivery status"
+        description={selectedOrderForStatus ? `Order ${selectedOrderForStatus.name}` : undefined}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setShowDeliveryStatusModal(false)} disabled={updatingStatus}>Cancel</Button>
+            <Button variant={statusChoice === 'Failed' ? 'danger' : 'primary'} loading={updatingStatus} onClick={() => handleMarkDeliveryStatus(statusChoice)}>
+              {`Mark as ${statusChoice.toLowerCase()}`}
+            </Button>
+          </>
+        }
+      >
+        <SegmentedControl
+          label="Delivery status"
+          value={statusChoice}
+          onChange={(v) => setStatusChoice(v as 'Delivered' | 'Failed')}
+          options={[{ value: 'Delivered', label: 'Delivered', icon: 'circle-check' }, { value: 'Failed', label: 'Failed', icon: 'circle-x' }]}
+        />
+      </Dialog>
+
+      <Dialog
+        open={!!confirmAction}
+        onClose={() => setConfirmAction(null)}
+        size="sm"
+        title={confirmAction?.title ?? ''}
+        description={confirmAction?.description}
+        icon={confirmAction?.danger ? 'triangle-alert' : undefined}
+        tone={confirmAction?.danger ? 'negative' : 'neutral'}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setConfirmAction(null)}>Cancel</Button>
+            <Button
+              variant={confirmAction?.danger ? 'danger' : 'primary'}
               onClick={() => {
-                setShowUnfulfilled(false);
-                setShowDelivered(false);
-                setShowFailed(false);
-                setShowAttemptedDelivery(false);
-                setShowInTransit(false);
-                setShowOutForDelivery(false);
-                setShowConfirmed(false);
-                setShowNotAcknowledged(false);
-                setShowTicketRaised(false);
-              }}
-              className={styles['clear-filters-btn']}
-            >
-              Clear filters
-            </button>
-          )}
-          {hasStatusFilter && (
-            <button
-              onClick={() => setFilterOperator(prev => prev === 'OR' ? 'AND' : 'OR')}
-              className={styles['filter-operator-toggle']}
-              title={`Currently showing orders matching ${filterOperator === 'OR' ? 'ANY' : 'ALL'} selected filters`}
-              style={{
-                marginLeft: 'auto',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '6px 12px',
-                borderRadius: '6px',
-                background: filterOperator === 'AND' ? '#3b82f6' : '#e2e8f0',
-                color: filterOperator === 'AND' ? 'white' : '#475569',
-                border: 'none',
-                cursor: 'pointer',
-                fontWeight: 600,
-                fontSize: '0.875rem',
-                transition: 'all 0.2s'
+                const run = confirmAction?.run;
+                setConfirmAction(null);
+                run?.();
               }}
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
-                <path d="M4 12h16M4 6h16M4 18h16" />
-              </svg>
-              {filterOperator === 'OR' ? 'OR' : 'AND'}
-            </button>
-          )}
-        </div>
+              {confirmAction?.confirmLabel}
+            </Button>
+          </>
+        }
+      />
 
-        {/* Filtered Order Count */}
-        <div className={styles['table-settings-row']}>
-          {hasStatusFilter && (
-            <div className={styles['filtered-count']} style={{ margin: 0 }}>
-              {filteredOrders.length} {filteredOrders.length === 1 ? 'order' : 'orders'}
-            </div>
-          )}
-          <div style={{ marginLeft: 'auto' }}>
-            <div 
-              className={`${styles['switch-container']} ${showAWBColumn ? styles.active : ''}`}
-              onClick={() => setShowAWBColumn(!showAWBColumn)}
-            >
-              <span className={styles['switch-label']}>AWB Column</span>
-              <label className={styles['switch']}>
-                <input 
-                  type="checkbox" 
-                  className={styles['switch-input']}
-                  checked={showAWBColumn}
-                  readOnly
-                />
-                <span className={styles['slider']}></span>
-              </label>
-            </div>
-          </div>
-        </div>
-
-        {/* Orders Table */}
-        <div className={styles['orders-table-container']}>
-          <table className={styles['orders-table']}>
-            <thead>
-              <tr>
-                <th className={styles['checkbox-cell']}>
-                  <input
-                    type="checkbox"
-                    checked={selectAll}
-                    onChange={handleSelectAll}
-                    className={styles['table-checkbox']}
-                  />
-                </th>
-                <th>Order</th>
-                <th>Items</th>
-                {showAWBColumn && <th>AWB</th>}
-                <th>Tags</th>
-                <th>P/L</th>
-                <th className={styles['actions-header']}>Details</th>
-              </tr>
-            </thead>
-            <OrdersTableBody
-              hasStatusFilter={hasStatusFilter}
-              filteredOrders={filteredOrders}
-              ordersGroupedByDate={ordersGroupedByDate}
-              selectedOrders={selectedOrders}
-              onSelectOrder={handleSelectOrder}
-              orderProfitLoss={orderProfitLoss}
-              rtoOrderIds={rtoOrderIds}
-              getDelayDays={getDelayDays}
-              getDeliveryStatusBadge={getDeliveryStatusBadge}
-              handleOpenCogsModal={handleOpenCogsModal}
-              formatIndianNumber={formatIndianNumber}
-              avgPnlPerFinalOrder={avgPnlPerFinalOrder}
-              globalNdrRate={globalNdrRate}
-              onUpdateDeliveryStatus={handleUpdateDeliveryStatus}
-              onAddCustomerTag={handleAddCustomerTag}
-              onAcknowledgeOrder={handleAcknowledgeOrder}
-              acknowledgedOrderIds={acknowledgedOrderIds}
-              onMarkTicketRaised={handleMarkTicketRaised}
-              ticketRaisedOrderIds={ticketRaisedOrderIds}
-              showAWBColumn={showAWBColumn}
-            />
-          </table>
-        </div>
-      </div>
-
-      {/* Pending Products Drawer */}
-      {
-        showPendingDrawer && (
-          <div className={styles['drawer-overlay']} onClick={() => setShowPendingDrawer(false)}>
-            <div className={styles['drawer']} onClick={(e) => e.stopPropagation()}>
-              <div className={styles['drawer-header']}>
-                <h3>Pending Products to Fulfill</h3>
-                <button
-                  className={styles['drawer-close']}
-                  onClick={() => setShowPendingDrawer(false)}
-                >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <line x1="18" y1="6" x2="6" y2="18" />
-                    <line x1="6" y1="6" x2="18" y2="18" />
-                  </svg>
-                </button>
-              </div>
-
-              <div className={styles['drawer-filters']}>
-                <div className={styles['drawer-filters-row']}>
-                  <span className={styles['drawer-filters-label']}>Payment:</span>
-                  <button
-                    onClick={() => setPendingFilterCOD(!pendingFilterCOD)}
-                    className={`${styles['drawer-filter-chip']} ${pendingFilterCOD ? styles.active : ''}`}
-                  >
-                    COD
-                  </button>
-                  <button
-                    onClick={() => setPendingFilterPaid(!pendingFilterPaid)}
-                    className={`${styles['drawer-filter-chip']} ${pendingFilterPaid ? styles.active : ''}`}
-                  >
-                    Paid
-                  </button>
-                </div>
-
-                <div className={styles['drawer-filters-row']}>
-                  <span className={styles['drawer-filters-label']}>Delayed:</span>
-                  <div className={styles['dropdown-container']}>
-                    <button
-                      onClick={() => setShowDelayDropdown(!showDelayDropdown)}
-                      className={`${styles['dropdown-trigger']} ${pendingFilterDelayDays.size > 0 ? styles.active : ''}`}
-                    >
-                      {pendingFilterDelayDays.size > 0
-                        ? `${pendingFilterDelayDays.size} selected`
-                        : 'Select delay days'}
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <polyline points="6 9 12 15 18 9" />
-                      </svg>
-                    </button>
-
-                    {showDelayDropdown && (
-                      <div className={styles['dropdown-menu']}>
-                        {getAvailableDelayDays().map(days => (
-                          <label key={days} className={styles['dropdown-item']}>
-                            <input
-                              type="checkbox"
-                              checked={pendingFilterDelayDays.has(days)}
-                              onChange={(e) => {
-                                const newSet = new Set(pendingFilterDelayDays);
-                                if (e.target.checked) {
-                                  newSet.add(days);
-                                } else {
-                                  newSet.delete(days);
-                                }
-                                setPendingFilterDelayDays(newSet);
-                              }}
-                            />
-                            <span>{days === 0 ? 'No Delay' : `${days} day${days > 1 ? 's' : ''} delay`}</span>
-                          </label>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {(pendingFilterCOD || pendingFilterPaid || pendingFilterDelayDays.size > 0) && (
-                  <button
-                    onClick={() => {
-                      setPendingFilterCOD(false);
-                      setPendingFilterPaid(false);
-                      setPendingFilterDelayDays(new Set());
-                    }}
-                    className={styles['drawer-clear-filters']}
-                  >
-                    Clear All
-                  </button>
-                )}
-              </div>
-
-              <div className={styles['drawer-body']}>
-                {getPendingProducts().length === 0 ? (
-                  <div className={styles['drawer-empty']}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                    <p>No pending products</p>
-                    <span>All orders are fulfilled!</span>
-                  </div>
-                ) : (
-                  <div className={styles['pending-products-list']}>
-                    {getPendingProducts().map((product, idx) => (
-                      <div key={idx} className={styles['pending-product-item']}>
-                        <div className={styles['product-info']}>
-                          <div className={styles['product-title']}>{product.title}</div>
-                          {product.variantTitle && (
-                            <div className={styles['product-variant']}>{product.variantTitle}</div>
-                          )}
-                          <div className={styles['product-orders']}>
-                            Orders: {product.orderNumbers.join(', ')}
-                          </div>
-                        </div>
-                        <div className={styles['product-count']}>
-                          <span className={styles['count-badge']}>{product.count}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )
-      }
-
-      {/* COGS Calculator Modal */}
-      {
-        showCogsModal && selectedOrderForCogs && (
-          <div className={styles['modal-overlay']} onClick={() => setShowCogsModal(false)}>
-            <div className={styles['modal-content']} onClick={(e) => e.stopPropagation()}>
-              <div className={styles['modal-header']}>
-                <h3>Profit/Loss Calculator</h3>
-                <button
-                  className={styles['modal-close']}
-                  onClick={() => setShowCogsModal(false)}
-                >
-                  ×
-                </button>
-              </div>
-
-              <div className={styles['modal-body']}>
-                {/* Section 1: Order Details */}
-                <div className={styles['cost-section']}>
-                  <h3 className={styles['section-title']}>Order Details</h3>
-                  <div className={styles['order-info']}>
-                    <div className={styles['info-row']}>
-                      <span className={styles['info-label']}>Order:</span>
-                      <span className={styles['info-value']}>{selectedOrderForCogs.name}</span>
-                    </div>
-                    <div className={styles['info-row']}>
-                      <span className={styles['info-label']}>Sale Price:</span>
-                      <span className={styles['info-value']}>
-                        ₹{formatIndianNumber(selectedOrderForCogs.totalPrice || 0)}
-                      </span>
-                    </div>
-                    <div className={styles['info-row']}>
-                      <span className={styles['info-label']}>Variant:</span>
-                      <span className={styles['info-value']}>
-                        {selectedVariant === 'small' ? 'Small Book' : 'Large Book'}
-                      </span>
-                    </div>
-                    <div className={styles['info-row']}>
-                      <span className={styles['info-label']}>Config Type:</span>
-                      <span className={styles['info-value']}>
-                        {isOrderDelivered(selectedOrderForCogs) ? 'COGS' : 'NDR'}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Section 2: COGS Config Charges */}
-                <div className={styles['cost-section']}>
-                  <h3 className={styles['section-title']}>COGS Configuration</h3>
-                  <div className={styles['breakdown-list']}>
-                    {cogsBreakdown.length === 0 ? (
-                      <p className={styles['no-data']}>No COGS configuration available</p>
-                    ) : (
-                      cogsBreakdown
-                        .filter(item => item.fieldName !== 'Ad cost (Meta)') // Exclude Ad Cost, shown separately
-                        .map((item, idx) => (
-                          <div key={idx} className={styles['breakdown-item']}>
-                            <div className={styles['breakdown-info']}>
-                              <span className={styles['breakdown-name']}>{item.fieldName}</span>
-                              <span className={styles['breakdown-type']}>
-                                {item.calculationType === 'percentage'
-                                  ? `${formatIndianNumber(item.value, 1)}%`
-                                  : `₹${formatIndianNumber(item.value)}`}
-                              </span>
-                            </div>
-                            <span className={styles['breakdown-cost']}>
-                              ₹{formatIndianNumber(item.calculatedCost)}
-                            </span>
-                          </div>
-                        ))
-                    )}
-                  </div>
-                </div>
-
-                {/* Section 3: Ad Cost */}
-                <div className={styles['cost-section']}>
-                  <h3 className={styles['section-title']}>Advertisement Cost</h3>
-                  <div className={styles['breakdown-list']}>
-                    <div className={styles['breakdown-item']}>
-                      <div className={styles['breakdown-info']}>
-                        <span className={styles['breakdown-name']}>Ad Cost (Meta)</span>
-                        <span className={styles['breakdown-type']}>Per Order</span>
-                      </div>
-                      <span className={styles['breakdown-cost']}>
-                        ₹{formatIndianNumber(adCostPerOrderByDate[getOrderDateKey(selectedOrderForCogs.createdAt)] ?? 0)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Section 4: Shipping Charges */}
-                <div className={styles['cost-section']}>
-                  <h3 className={styles['section-title']}>Shipping Charges</h3>
-                  <div className={styles['breakdown-list']}>
-                    {selectedOrderForCogs.shippingCharge && selectedOrderForCogs.shippingCharge > 0 ? (
-                      <>
-                        {selectedOrderForCogs.shippingBreakdown ? (
-                          <>
-                            {/* Detailed breakdown if available */}
-                            {selectedOrderForCogs.shippingBreakdown.freightForward > 0 && (
-                              <div className={styles['breakdown-item']}>
-                                <div className={styles['breakdown-info']}>
-                                  <span className={styles['breakdown-name']}>Base Freight</span>
-                                  <span className={styles['breakdown-type']}>Shiprocket</span>
-                                </div>
-                                <span className={styles['breakdown-cost']}>
-                                  ₹{formatIndianNumber(selectedOrderForCogs.shippingBreakdown.freightForward)}
-                                </span>
-                              </div>
-                            )}
-                            {selectedOrderForCogs.shippingBreakdown.freightCOD !== 0 && (() => {
-                              // COD is only reversed when: order is RTO AND payment method is COD
-                              // Check for RTO: in RTO list, status contains RTO/failed, OR has RTO charges
-                              const isRTO = rtoOrderIds.has(selectedOrderForCogs.id) ||
-                                selectedOrderForCogs.deliveryStatus?.toLowerCase().includes('rto') ||
-                                selectedOrderForCogs.deliveryStatus?.toLowerCase().includes('failed') ||
-                                (selectedOrderForCogs.shippingBreakdown.freightRTO || 0) > 0; // Has RTO charges
-                              const isCODPayment = selectedOrderForCogs.paymentMethod?.toLowerCase() === 'cod';
-                              const shouldReverse = isRTO && isCODPayment && selectedOrderForCogs.shippingBreakdown.freightCOD > 0;
-
-                              // For RTO orders, show both charge and reversal
-                              if (shouldReverse) {
-                                return (
-                                  <>
-                                    {/* Initial COD charge */}
-                                    <div className={styles['breakdown-item']}>
-                                      <div className={styles['breakdown-info']}>
-                                        <span className={styles['breakdown-name']}>Freight COD</span>
-                                        <span className={styles['breakdown-type']}>Applied</span>
-                                      </div>
-                                      <span className={styles['breakdown-cost']}>
-                                        ₹{formatIndianNumber(Math.abs(selectedOrderForCogs.shippingBreakdown.freightCOD))}
-                                      </span>
-                                    </div>
-                                    {/* COD reversal */}
-                                    <div className={styles['breakdown-item']}>
-                                      <div className={styles['breakdown-info']}>
-                                        <span className={styles['breakdown-name']}>Freight COD Reversal</span>
-                                        <span className={styles['breakdown-type']}>RTO Refund</span>
-                                      </div>
-                                      <span className={styles['breakdown-cost']} style={{ color: '#10b981' }}>
-                                        -₹{formatIndianNumber(Math.abs(selectedOrderForCogs.shippingBreakdown.freightCOD))}
-                                      </span>
-                                    </div>
-                                  </>
-                                );
-                              }
-
-                              // For non-RTO orders, show single line
-                              return (
-                                <div className={styles['breakdown-item']}>
-                                  <div className={styles['breakdown-info']}>
-                                    <span className={styles['breakdown-name']}>Freight COD</span>
-                                    <span className={styles['breakdown-type']}>Applied</span>
-                                  </div>
-                                  <span className={styles['breakdown-cost']}>
-                                    ₹{formatIndianNumber(Math.abs(selectedOrderForCogs.shippingBreakdown.freightCOD))}
-                                  </span>
-                                </div>
-                              );
-                            })()}
-                            {selectedOrderForCogs.shippingBreakdown.freightRTO > 0 && (
-                              <div className={styles['breakdown-item']}>
-                                <div className={styles['breakdown-info']}>
-                                  <span className={styles['breakdown-name']}>Freight RTO</span>
-                                  <span className={styles['breakdown-type']}>Return</span>
-                                </div>
-                                <span className={styles['breakdown-cost']}>
-                                  ₹{formatIndianNumber(selectedOrderForCogs.shippingBreakdown.freightRTO)}
-                                </span>
-                              </div>
-                            )}
-                            {selectedOrderForCogs.shippingBreakdown.whatsappCharges > 0 && (
-                              <div className={styles['breakdown-item']}>
-                                <div className={styles['breakdown-info']}>
-                                  <span className={styles['breakdown-name']}>WhatsApp Charges</span>
-                                  <span className={styles['breakdown-type']}>Communication</span>
-                                </div>
-                                <span className={styles['breakdown-cost']}>
-                                  ₹{formatIndianNumber(selectedOrderForCogs.shippingBreakdown.whatsappCharges)}
-                                </span>
-                              </div>
-                            )}
-                            {selectedOrderForCogs.shippingBreakdown.otherCharges > 0 && (
-                              <div className={styles['breakdown-item']}>
-                                <div className={styles['breakdown-info']}>
-                                  <span className={styles['breakdown-name']}>Other Charges</span>
-                                  <span className={styles['breakdown-type']}>Misc</span>
-                                </div>
-                                <span className={styles['breakdown-cost']}>
-                                  ₹{formatIndianNumber(selectedOrderForCogs.shippingBreakdown.otherCharges)}
-                                </span>
-                              </div>
-                            )}
-                          </>
-                        ) : (
-                          /* Simple total if no breakdown */
-                          <div className={styles['breakdown-item']}>
-                            <div className={styles['breakdown-info']}>
-                              <span className={styles['breakdown-name']}>Shipping Charge</span>
-                              <span className={styles['breakdown-type']}>Shiprocket</span>
-                            </div>
-                            <span className={styles['breakdown-cost']}>
-                              ₹{formatIndianNumber(selectedOrderForCogs.shippingCharge)}
-                            </span>
-                          </div>
-                        )}
-                      </>
-                    ) : (
-                      <p className={styles['no-data']}>No shipping charges available</p>
-                    )}
-                  </div>
-                </div>
-
-                {/* Section 5: Total Costs Summary */}
-                <div className={styles['cost-section']}>
-                  <h3 className={styles['section-title']}>Cost Summary</h3>
-                  <div className={styles['breakdown-list']}>
-                    <div className={styles['breakdown-item']}>
-                      <div className={styles['breakdown-info']}>
-                        <span className={styles['breakdown-name']}>Total COGS</span>
-                        <span className={styles['breakdown-type']}>From Configuration</span>
-                      </div>
-                      <span className={styles['breakdown-cost']}>
-                        ₹{formatIndianNumber(calculateTotalCogs())}
-                      </span>
-                    </div>
-                    <div className={styles['breakdown-item']}>
-                      <div className={styles['breakdown-info']}>
-                        <span className={styles['breakdown-name']}>Ad Cost</span>
-                        <span className={styles['breakdown-type']}>Meta Ads</span>
-                      </div>
-                      <span className={styles['breakdown-cost']}>
-                        ₹{formatIndianNumber(adCostPerOrderByDate[getOrderDateKey(selectedOrderForCogs.createdAt)] ?? 0)}
-                      </span>
-                    </div>
-                    <div className={styles['breakdown-item']}>
-                      <div className={styles['breakdown-info']}>
-                        <span className={styles['breakdown-name']}>Shipping Charge</span>
-                        <span className={styles['breakdown-type']}>Shiprocket</span>
-                      </div>
-                      <span className={styles['breakdown-cost']}>
-                        ₹{formatIndianNumber(calculateActualShippingCharge(selectedOrderForCogs))}
-                      </span>
-                    </div>
-                    <div className={styles['breakdown-item']} style={{ borderTop: '2px solid #cbd5e1', paddingTop: '1rem', marginTop: '0.5rem' }}>
-                      <div className={styles['breakdown-info']}>
-                        <span className={styles['breakdown-name']} style={{ fontSize: '1.125rem', fontWeight: '700' }}>Total Costs</span>
-                        <span className={styles['breakdown-type']}>Sum of All Costs</span>
-                      </div>
-                      <span className={styles['breakdown-cost']} style={{ fontSize: '1.125rem' }}>
-                        ₹{formatIndianNumber(calculateTotalCogs() + (adCostPerOrderByDate[getOrderDateKey(selectedOrderForCogs.createdAt)] ?? 0) + calculateActualShippingCharge(selectedOrderForCogs))}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Section 6: Net Profit/Loss */}
-                <div className={styles['cost-section']}>
-                  <h3 className={styles['section-title']}>Net Result</h3>
-                  <div className={styles['cogs-summary']}>
-                    <div className={styles['summary-row']}>
-                      <span className={styles['summary-label']}>Sale Price:</span>
-                      <span className={styles['summary-value']}>
-                        ₹{formatIndianNumber(selectedOrderForCogs.totalPrice || 0)}
-                      </span>
-                    </div>
-                    <div className={styles['summary-row']}>
-                      <span className={styles['summary-label']}>Total Costs:</span>
-                      <span className={styles['summary-value']}>
-                        ₹{formatIndianNumber(calculateTotalCogs() + (adCostPerOrderByDate[getOrderDateKey(selectedOrderForCogs.createdAt)] ?? 0) + calculateActualShippingCharge(selectedOrderForCogs))}
-                      </span>
-                    </div>
-                    <div className={`${styles['summary-row']} ${styles['profit-row']}`}>
-                      {(() => {
-                        const totalCosts = calculateTotalCogs() + (adCostPerOrderByDate[getOrderDateKey(selectedOrderForCogs.createdAt)] ?? 0) + calculateActualShippingCharge(selectedOrderForCogs);
-                        const profit = (selectedOrderForCogs.totalPrice || 0) - totalCosts;
-                        return (
-                          <>
-                            <span className={styles['summary-label']}>
-                              {profit >= 0 ? 'Profit' : 'Loss'}:
-                            </span>
-                            <span className={`${styles['summary-value']} ${profit >= 0 ? styles.profit : styles.loss}`}>
-                              {profit >= 0 ? '+' : ''}₹{formatIndianNumber(Math.abs(profit))}
-                            </span>
-                          </>
-                        );
-                      })()}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )
-      }
-
-      {/* Delivery Status Update Modal */}
-      {
-        showDeliveryStatusModal && selectedOrderForStatus && (
-          <div className={styles['modal-overlay']} onClick={() => !updatingStatus && setShowDeliveryStatusModal(false)}>
-            <div className={styles['modal-content']} style={{ width: '500px', maxWidth: '90vw', height: 'auto' }} onClick={(e) => e.stopPropagation()}>
-              <div className={styles['modal-header']}>
-                <h3>Mark Delivery Status</h3>
-                <button
-                  onClick={() => !updatingStatus && setShowDeliveryStatusModal(false)}
-                  className={styles['modal-close']}
-                  disabled={updatingStatus}
-                >
-                  ×
-                </button>
-              </div>
-              <div className={styles['modal-body']} style={{ padding: '2rem' }}>
-                <p style={{ marginBottom: '1.5rem', color: '#64748b' }}>
-                  Update delivery status for order <strong>{selectedOrderForStatus.name}</strong>
-                </p>
-                <div style={{ display: 'flex', gap: '1rem' }}>
-                  <button
-                    onClick={() => handleMarkDeliveryStatus('Delivered')}
-                    disabled={updatingStatus}
-                    style={{
-                      flex: 1,
-                      padding: '1rem',
-                      background: '#10b981',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '8px',
-                      fontSize: '1rem',
-                      fontWeight: 600,
-                      cursor: updatingStatus ? 'not-allowed' : 'pointer',
-                      opacity: updatingStatus ? 0.6 : 1,
-                      transition: 'all 0.2s',
-                    }}
-                  >
-                    {updatingStatus ? 'Updating...' : 'Mark as Delivered'}
-                  </button>
-                  <button
-                    onClick={() => handleMarkDeliveryStatus('Failed')}
-                    disabled={updatingStatus}
-                    style={{
-                      flex: 1,
-                      padding: '1rem',
-                      background: '#ef4444',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '8px',
-                      fontSize: '1rem',
-                      fontWeight: 600,
-                      cursor: updatingStatus ? 'not-allowed' : 'pointer',
-                      opacity: updatingStatus ? 0.6 : 1,
-                      transition: 'all 0.2s',
-                    }}
-                  >
-                    {updatingStatus ? 'Updating...' : 'Mark as Failed'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )
-      }
-
-      {/* Refresh Status Toast */}
       {refreshStatus && (
-        <div className={styles['refresh-toast']}>
-          <div className={styles['refresh-spinner']}></div>
-          <span>{refreshStatus}</span>
+        <div className={styles.syncToast}>
+          <Toast tone="info" title={refreshStatus} />
         </div>
       )}
     </div>

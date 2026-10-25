@@ -2,6 +2,8 @@ import React, { useMemo } from 'react';
 import { OrderRow } from './OrderRow';
 import styles from '../SalesPage.module.css';
 import { useVirtualRows } from '../../lib/useVirtualRows';
+import { Amount, EmptyState } from '../../components/ui/pbx';
+import { formatINR } from '../../components/ui/format';
 
 import { type ShopifyOrder } from '../../services/api';
 
@@ -19,9 +21,7 @@ interface OrdersTableBodyProps {
   orderProfitLoss: Map<number, number>;
   rtoOrderIds: Set<number>;
   getDelayDays: (order: ShopifyOrder) => number | null;
-  getDeliveryStatusBadge: (status: string | null | undefined) => { text: string; className: string };
   handleOpenCogsModal: (order: ShopifyOrder) => void;
-  formatIndianNumber: (num: number, decimals?: number) => string;
   avgPnlPerFinalOrder: number;
   globalNdrRate: number;
   onUpdateDeliveryStatus?: (orderId: number, orderName: string) => void;
@@ -44,7 +44,6 @@ interface DayHeaderRowProps {
   orderProfitLoss: Map<number, number>;
   avgPnlPerFinalOrder: number;
   globalNdrRate: number;
-  formatIndianNumber: (num: number, decimals?: number) => string;
   colSpan: number;
   rowRef?: React.Ref<HTMLTableRowElement>;
   index?: number;
@@ -56,7 +55,6 @@ const DayHeaderRow: React.FC<DayHeaderRowProps> = ({
   orderProfitLoss,
   avgPnlPerFinalOrder,
   globalNdrRate,
-  formatIndianNumber,
   colSpan,
   rowRef,
   index,
@@ -85,29 +83,15 @@ const DayHeaderRow: React.FC<DayHeaderRowProps> = ({
   const expectedNdr = orders.length > 0 ? Math.ceil(orders.length * globalNdrRate / 100) : 0;
 
   return (
-    <tr className={styles['day-header-row']} ref={rowRef} data-index={index}>
-      <td colSpan={colSpan} className={styles['day-header-cell']}>
-        <div className={styles['day-header-inner']}>
-          <span className={styles['day-header-date']}>{dateLabel}</span>
-          <span className={styles['day-header-ad-spend']}>
-            Ad spend: {adSpend > 0 ? `₹${formatIndianNumber(adSpend)}` : '—'}
-          </span>
-          <span className={styles['day-header-revenue']}>
-            Revenue: {orders.length > 0 ? `₹${formatIndianNumber(dayRevenue)}` : '—'}
-          </span>
-          <span className={`${styles['day-header-pnl']} ${dayPnL > 0 ? styles['pnl-profit'] : dayPnL < 0 ? styles['pnl-loss'] : ''}`}>
-            P/L: {orders.length > 0 || adSpend > 0 ? `${dayPnL >= 0 ? '+' : ''}₹${formatIndianNumber(dayPnL)}` : '—'}
-          </span>
-          {orders.length > 0 && (
-            <span className={`${styles['day-header-est-pnl']} ${estimatedDayPnl > 0 ? styles['pnl-profit'] : estimatedDayPnl < 0 ? styles['pnl-loss'] : ''}`}>
-              Est. P/L: {estimatedDayPnl >= 0 ? '+' : ''}₹{formatIndianNumber(estimatedDayPnl)}
-            </span>
-          )}
-          {orders.length > 0 && (
-            <span className={styles['day-header-expected-ndr']}>
-              Expected NDR: {expectedNdr}
-            </span>
-          )}
+    <tr className={styles.dayRow} ref={rowRef} data-index={index}>
+      <td colSpan={colSpan}>
+        <div className={styles.dayInner}>
+          <span className={styles.dayDate}>{dateLabel}</span>
+          <span>Ad spend <b>{adSpend > 0 ? formatINR(adSpend) : '—'}</b></span>
+          <span>Revenue <b>{orders.length > 0 ? formatINR(dayRevenue) : '—'}</b></span>
+          <span>P/L {orders.length > 0 || adSpend > 0 ? <Amount value={dayPnL} signed /> : <b>—</b>}</span>
+          {orders.length > 0 && <span>Est. P/L <Amount value={estimatedDayPnl} signed /></span>}
+          {orders.length > 0 && <span>Expected NDR <b>{expectedNdr}</b></span>}
         </div>
       </td>
     </tr>
@@ -130,9 +114,7 @@ export const OrdersTableBody: React.FC<OrdersTableBodyProps> = ({
   orderProfitLoss,
   rtoOrderIds,
   getDelayDays,
-  getDeliveryStatusBadge,
   handleOpenCogsModal,
-  formatIndianNumber,
   avgPnlPerFinalOrder,
   globalNdrRate,
   onUpdateDeliveryStatus,
@@ -143,7 +125,7 @@ export const OrdersTableBody: React.FC<OrdersTableBodyProps> = ({
   ticketRaisedOrderIds,
   showAWBColumn = false,
 }) => {
-  const colSpan = showAWBColumn ? 7 : 6;
+  const colSpan = showAWBColumn ? 8 : 7;
 
   // Filtered view: a flat list of orders, no day headers. Grouped view: each day's header,
   // then its orders.
@@ -161,7 +143,7 @@ export const OrdersTableBody: React.FC<OrdersTableBodyProps> = ({
   // Long lists (a busy month, all orders) render only the rows near the viewport.
   const { enabled, listRef, items: visible, paddingTop, paddingBottom, measureRef } = useVirtualRows<HTMLTableSectionElement>(
     items.length,
-    (i) => (items[i].kind === 'day' ? 52 : 84),
+    (i) => (items[i].kind === 'day' ? 30 : 44),
     (i) => {
       const item = items[i];
       return item.kind === 'day' ? `day-${item.group.dateKey}` : item.order.id;
@@ -172,9 +154,8 @@ export const OrdersTableBody: React.FC<OrdersTableBodyProps> = ({
     return (
       <tbody>
         <tr>
-          <td colSpan={colSpan} className={styles['empty-state']}>
-            <div className={styles['empty-icon']}>📦</div>
-            <div className={styles['empty-text']}>No orders found</div>
+          <td colSpan={colSpan} className="pbx-table__empty">
+            <EmptyState size="sm" icon="search" title="No orders found" description="Try another period, or clear the filters." />
           </td>
         </tr>
       </tbody>
@@ -190,7 +171,6 @@ export const OrdersTableBody: React.FC<OrdersTableBodyProps> = ({
         orderProfitLoss={orderProfitLoss}
         avgPnlPerFinalOrder={avgPnlPerFinalOrder}
         globalNdrRate={globalNdrRate}
-        formatIndianNumber={formatIndianNumber}
         colSpan={colSpan}
         rowRef={rowRef}
         index={index}
@@ -204,7 +184,6 @@ export const OrdersTableBody: React.FC<OrdersTableBodyProps> = ({
         orderProfitLoss={orderProfitLoss}
         rtoOrderIds={rtoOrderIds}
         getDelayDays={getDelayDays}
-        getDeliveryStatusBadge={getDeliveryStatusBadge}
         handleOpenCogsModal={handleOpenCogsModal}
         onUpdateDeliveryStatus={onUpdateDeliveryStatus}
         onAddCustomerTag={onAddCustomerTag}

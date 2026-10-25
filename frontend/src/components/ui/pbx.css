@@ -29,6 +29,7 @@ body { margin: 0; background: var(--paper); color: var(--ink); font: 400 13px/18
 
 /* ---------------------------------------------------------------- Button */
 .pbx-btn {
+  position: relative;
   --h: var(--control-md);
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   height: var(--h); padding: 0 var(--space-3); box-sizing: border-box;
@@ -284,7 +285,7 @@ body { margin: 0; background: var(--paper); color: var(--ink); font: 400 13px/18
 
 /* ------------------------------------------------------------- DataTable */
 .pbx-table { min-width: 0; background: var(--paper); border-top: 1px solid var(--rule); }
-.pbx-table__scroll { overflow: auto; }
+.pbx-table__scroll { position: relative; overflow: auto; }
 .pbx-table table { width: 100%; border-collapse: separate; border-spacing: 0; font: 400 12px/16px var(--font-sans); color: var(--ink); }
 .pbx-table th { position: sticky; top: 0; z-index: 1; height: 28px; padding: 0 var(--space-2); background: var(--table-header-bg); border-bottom: 1px solid var(--rule); font: 400 11px/16px var(--font-sans); color: var(--ink-muted); text-align: left; white-space: nowrap; }
 .pbx-table td { height: var(--row); padding: 0 var(--space-2); border-bottom: 1px solid var(--line); vertical-align: middle; }
@@ -298,9 +299,9 @@ body { margin: 0; background: var(--paper); color: var(--ink); font: 400 13px/18
 .pbx-table__check { width: 15px; padding-right: var(--space-2) !important; }
 .pbx-table__empty { padding: 0 !important; }
 .pbx-table tbody tr:hover .pbx-table__empty { background: var(--paper); }
-.pbx-table__bulk { display: flex; align-items: center; gap: var(--space-3); min-height: 36px; padding: 4px 0; box-sizing: border-box; border-bottom: 1px solid var(--line); font: 400 12px/16px var(--font-sans); color: var(--ink); }
+.pbx-table__bulk { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); min-height: 36px; padding: 4px 0; box-sizing: border-box; border-bottom: 1px solid var(--line); font: 400 12px/16px var(--font-sans); color: var(--ink); }
 .pbx-table__bulk strong { font-family: var(--font-mono); font-weight: 500; }
-.pbx-table__bulk-actions { display: flex; align-items: center; gap: var(--space-2); margin-left: auto; }
+.pbx-table__bulk-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-left: auto; }
 .pbx-table__foot { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-height: 32px; border-bottom: 1px solid var(--line); font: 400 11px/16px var(--font-sans); color: var(--ink-muted); }
 
 /* -------------------------------------------------------------- DataList */
