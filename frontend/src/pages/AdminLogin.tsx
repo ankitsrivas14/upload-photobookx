@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
+import { Alert, Button, TextField } from '../components/ui/pbx';
 import styles from './AdminLogin.module.css';
 
+/** Admin sign-in (and first-account registration) on the Ledger components. */
 export function AdminLogin() {
   const navigate = useNavigate();
   const [isLogin, setIsLogin] = useState(true);
@@ -29,12 +31,12 @@ export function AdminLogin() {
     setIsLoading(true);
 
     try {
-      const response = isLogin 
+      const response = isLogin
         ? await api.login(email, password)
         : await api.register(email, password, name);
 
       if (response.success) {
-        navigate('/admin/orders');
+        navigate('/admin/dashboard');
       } else {
         setError(response.error || 'Authentication failed');
       }
@@ -46,71 +48,51 @@ export function AdminLogin() {
   };
 
   return (
-    <div className={styles['admin-login-container']}>
-      <div className={styles['admin-login-card']}>
-        <div className={styles['admin-login-header']}>
-          <img 
-            src="https://photobookx.com/cdn/shop/files/Screenshot_2025-05-18_at_9.30.14_PM-removebg-preview.png?v=1747584052" 
-            alt="PhotoBookX" 
-            className={styles['admin-logo']}
-          />
-          <h1>Admin Portal</h1>
-          <p className={styles.subtitle}>{isLogin ? 'Sign in to manage orders' : 'Create admin account'}</p>
+    <div className={styles.page}>
+      <main className={styles.panel}>
+        <span className="pbx-wordmark">
+          PHOTOBOOKX<span className="pbx-wordmark__suffix">Admin</span>
+        </span>
+
+        <div className={styles.heading}>
+          <h1 className={styles.title}>{isLogin ? 'Sign in' : 'Create an admin account'}</h1>
+          <p className={styles.lead}>{isLogin ? 'Orders, profit and the store tools.' : 'For a new member of the team.'}</p>
         </div>
 
-        <form onSubmit={handleSubmit} className={styles['admin-login-form']}>
+        <form onSubmit={handleSubmit} className={styles.form} noValidate>
           {!isLogin && (
-            <div className={styles['input-group']}>
-              <label htmlFor="name">Name</label>
-              <input
-                type="text"
-                id="name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Your name"
-                autoComplete="name"
-              />
-            </div>
+            <TextField label="Name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" autoComplete="name" />
           )}
+          <TextField
+            label="Email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="admin@photobookx.com"
+            autoComplete="email"
+          />
+          <TextField
+            label="Password"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoComplete={isLogin ? 'current-password' : 'new-password'}
+          />
 
-          <div className={styles['input-group']}>
-            <label htmlFor="email">Email</label>
-            <input
-              type="email"
-              id="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="admin@photobookx.com"
-              autoComplete="email"
-            />
-          </div>
+          {error && <Alert tone="negative" title={error} />}
 
-          <div className={styles['input-group']}>
-            <label htmlFor="password">Password</label>
-            <input
-              type="password"
-              id="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              autoComplete={isLogin ? 'current-password' : 'new-password'}
-            />
-          </div>
-
-          {error && <div className={styles['error-message']}>{error}</div>}
-
-          <button type="submit" className={styles['submit-btn']} disabled={isLoading}>
-            {isLoading ? 'Please wait...' : (isLogin ? 'Sign In' : 'Create Account')}
-          </button>
+          <Button type="submit" variant="primary" size="lg" fullWidth loading={isLoading}>
+            {isLoading ? 'Please wait…' : isLogin ? 'Sign in' : 'Create account'}
+          </Button>
         </form>
 
-        <p className={styles['toggle-mode']}>
-          {isLogin ? "Don't have an account? " : 'Already have an account? '}
-          <button type="button" onClick={() => setIsLogin(!isLogin)}>
-            {isLogin ? 'Register' : 'Sign In'}
-          </button>
+        <p className={styles.switch}>
+          {isLogin ? "Don't have an account?" : 'Already have an account?'}
+          <Button variant="ghost" size="sm" onClick={() => { setIsLogin(!isLogin); setError(''); }}>
+            {isLogin ? 'Register' : 'Sign in'}
+          </Button>
         </p>
-      </div>
+      </main>
     </div>
   );
 }

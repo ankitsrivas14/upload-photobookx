@@ -14,12 +14,11 @@ const SRC = join(dirname(fileURLToPath(import.meta.url)), '..', 'src');
 const TOKENS = 'styles/tokens.css';
 
 const LEGACY = new Set([
+  'pages/UploadPage.tsx',
   'index.css',
   'pages/AdminDashboard.tsx',
-  'pages/AdminLogin.tsx',
   'pages/AnalysisPage.tsx',
   'pages/ExpensesOverview.tsx',
-  'pages/UploadPage.tsx',
   'pages/analysis/Agency.tsx',
   'pages/analysis/ClaudeAnalysis.tsx',
   'pages/analysis/CreateTicketForm.tsx',
