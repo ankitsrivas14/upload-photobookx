@@ -58,12 +58,12 @@ Reference screens: `DashboardPage.tsx` and `SalesPage.tsx`.
 | Analysis | Failed orders | `pages/analysis/FailedOrdersAnalysis` | 238 | To do |
 | Analysis | Pincodes | `pages/analysis/PinCodesAnalysis` | 516 | To do |
 | Analysis | Reels | `pages/analysis/Reels` | 287 | To do |
-| Expenses | Section tabs | `pages/ExpensesPage` | 146 | To do |
+| Expenses | Section tabs | `pages/ExpensesPage` | 146 | Done |
 | Expenses | Overview | `pages/ExpensesOverview` | 106 | To do |
-| Expenses | Meta ads | `pages/MetaAdsPage` | 290 | To do |
-| Expenses | Fixed monthly | `pages/FixedMonthlyPage` | 233 | To do |
-| Expenses | COGS | `pages/COGSPage` | 489 | To do |
-| Expenses | Bank account | `pages/BankAccountPage` | 1,211 | To do |
+| Expenses | Meta ads | `pages/MetaAdsPage` | 290 | Done |
+| Expenses | Fixed monthly | `pages/FixedMonthlyPage` | 233 | Done |
+| Expenses | COGS | `pages/COGSPage` | 489 | Done |
+| Expenses | Bank account | `pages/BankAccountPage` | 1,211 | Done |
 | Tools | Section tabs | `pages/ToolsPage` | 149 | Done |
 | Tools | GST reports | `pages/GSTMonthlyReports` (unrouted `GSTReportsPage` deleted) | 427 | Done |
 | Tools | Products | `pages/tools/ProductsManager` | 480 | Done |
