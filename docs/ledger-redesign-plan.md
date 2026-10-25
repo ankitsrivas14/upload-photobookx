@@ -59,7 +59,7 @@ Reference screens: `DashboardPage.tsx` and `SalesPage.tsx`.
 | Analysis | Pincodes | `pages/analysis/PinCodesAnalysis` | 516 | In progress |
 | Analysis | Reels | `pages/analysis/Reels` | 287 | In progress |
 | Expenses | Section tabs | `pages/ExpensesPage` | 146 | Done |
-| Expenses | Overview | `pages/ExpensesOverview` | 106 | To do |
+| Expenses | Overview | `pages/ExpensesOverview` (not routed or imported anywhere) | 106 | Delete in cleanup |
 | Expenses | Meta ads | `pages/MetaAdsPage` | 290 | Done |
 | Expenses | Fixed monthly | `pages/FixedMonthlyPage` | 233 | Done |
 | Expenses | COGS | `pages/COGSPage` | 489 | Done |
@@ -89,7 +89,8 @@ Reference screens: `DashboardPage.tsx` and `SalesPage.tsx`.
    `PhotoTile`. Customers see this page, so check it on a real phone.
 8. **Cleanup.**
    - Delete the unrouted `pages/AdminDashboard.tsx` and its CSS; nothing else uses them now.
-   - Delete the orphaned `pages/analysis/TaggingLogsAnalysis.module.css`.
+   - Delete the orphaned `pages/analysis/TaggingLogsAnalysis.module.css` and the unused
+     `pages/ExpensesOverview`.
    - Remove Tailwind (nothing uses its classes), the Poppins rules in `index.css`, and the
      `lucide-react`, `@radix-ui/react-dropdown-menu`, `class-variance-authority`,
      `tailwind-merge` and `clsx` packages once nothing imports them.
@@ -119,5 +120,11 @@ More than one session works in this worktree. Before starting a screen, set its 
 progress" here. Stage only your own files (`git add <paths>`, never `git add -A`), and don't edit
 a screen that another session has in progress.
 
+This plan and `frontend/scripts/check-design.mjs` are shared files, so another session may have
+uncommitted edits in them. Before `git add` on either, run `git diff <file>` and stage it only if
+every change is yours; otherwise commit your lines alone (for example, write `git show HEAD:<file>`
+plus your change to a scratch file, then `git update-index --cacheinfo` it).
+
 Current split (2026-10-25): one session works down the sidebar from the top (Backlog first);
-another did the Tools area from the bottom (done) and takes the next area up from there.
+another did Tools, the login and the customer upload page (all done). Cleanup (phase 8) waits until
+Analysis has landed, because it removes packages the old Analysis screens still import.
