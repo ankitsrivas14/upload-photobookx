@@ -16,6 +16,7 @@ import abandonedCheckoutsRoutes from './routes/abandonedCheckouts';
 import attendanceRoutes from './routes/attendance';
 import reelsRoutes from './routes/reels';
 import agencyRoutes from './routes/agency';
+import claudeAnalysisRoutes from './routes/claudeAnalysis';
 
 /**
  * The configured Express app — no `listen`, no DB connect at import time. Used by both the
@@ -80,6 +81,7 @@ app.use('/api/admin/abandoned-checkouts', abandonedCheckoutsRoutes);
 app.use('/api/admin/attendance', attendanceRoutes);
 app.use('/api/admin/reels', reelsRoutes);
 app.use('/api/admin/agency', agencyRoutes);
+app.use('/api/admin/claude-analysis', claudeAnalysisRoutes);
 app.use('/api/upload', uploadRoutes);
 
 // 404 handler

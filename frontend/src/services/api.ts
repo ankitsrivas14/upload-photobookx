@@ -105,6 +105,40 @@ export interface BacklogOrder {
   lineItems: { title: string; quantity: number; variantTitle: string | null }[];
 }
 
+// Claude Code's daily ad set review (Analysis → Claude Analysis)
+export interface ClaudeWindow {
+  spend: number;
+  purchases: number;
+  roas: number;
+  cpa: number;
+}
+
+export interface ClaudeCall {
+  adsetId: string;
+  adsetName: string;
+  campaignName?: string;
+  decision: string; // SCALE | DUPLICATE | CONTINUE | MONITOR | CLOSE
+  budgetBefore?: number | null;
+  budgetAfter?: number | null;
+  statusAfter?: string;
+  reason: string;
+  metrics?: Record<string, ClaudeWindow>; // yesterday, last3, active7, active30
+  applied?: { at: string; confirmed: boolean; change: string } | null;
+}
+
+export interface ClaudeReview {
+  date: string;
+  dataAsOf?: string;
+  summary?: string;
+  breakeven?: { metaRoas: number; realisedRoas: number; deliveryRatePct: number; marginPerOrder: number; window?: string };
+  account?: { budgetBefore?: number; budgetAfter?: number };
+  previousGrading?: Array<{ adsetName: string; decision: string; outcome: string }>;
+  calls: ClaudeCall[];
+  checks?: string[];
+  notes?: string[];
+  publishedAt?: string;
+}
+
 // Shopify Order Types
 interface ShopifyOrder {
   id: number;
@@ -1111,6 +1145,15 @@ class ApiService {
       method: 'PUT',
       body: JSON.stringify({ namePrefixes }),
     });
+  }
+
+  // ─── Claude Analysis (daily ad set reviews published from Claude Code) ──────
+  async getClaudeAnalysisDates(): Promise<{ success: boolean; dates?: string[]; error?: string }> {
+    return this.request('/api/admin/claude-analysis/dates');
+  }
+
+  async getClaudeAnalysis(date: string): Promise<{ success: boolean; review?: ClaudeReview; error?: string }> {
+    return this.request(`/api/admin/claude-analysis/${date}`);
   }
 
   async getTickets(): Promise<{ success: boolean; tickets?: any[]; error?: string }> {

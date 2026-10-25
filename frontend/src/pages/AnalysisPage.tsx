@@ -8,6 +8,7 @@ import { StuckOrdersAnalysis } from './analysis/StuckOrdersAnalysis';
 import { TicketsAnalysis } from './analysis/TicketsAnalysis';
 import { CreateTicketForm } from './analysis/CreateTicketForm';
 import { AdsAnalysis } from './analysis/AdsAnalysis';
+import { ClaudeAnalysis } from './analysis/ClaudeAnalysis';
 import { Reels } from './analysis/Reels';
 import { Agency } from './analysis/Agency';
 import styles from './AnalysisPage.module.css';
@@ -24,6 +25,7 @@ export function AnalysisPage() {
     const isStuckOrders = currentPath.includes('/admin/analysis/stuck-orders');
     const isTickets = currentPath.includes('/admin/analysis/tickets');
     const isAds = currentPath.includes('/admin/analysis/ads');
+    const isClaude = currentPath.includes('/admin/analysis/claude');
     const isReels = currentPath.includes('/admin/analysis/reels');
     const isAgency = currentPath.includes('/admin/analysis/agency');
 
@@ -102,6 +104,12 @@ export function AnalysisPage() {
                         Ads Analysis
                     </Link>
                     <Link
+                        to="/admin/analysis/claude"
+                        className={`${styles['analysis-nav-item']} ${isClaude ? styles.active : ''}`}
+                    >
+                        Claude Analysis
+                    </Link>
+                    <Link
                         to="/admin/analysis/failed-orders"
                         className={`${styles['analysis-nav-item']} ${isFailedOrders ? styles.active : ''}`}
                     >
@@ -141,6 +149,7 @@ export function AnalysisPage() {
 
                 <Routes>
                     <Route path="ads" element={<AdsAnalysis />} />
+                    <Route path="claude" element={<ClaudeAnalysis />} />
                     <Route path="failed-orders" element={<FailedOrdersAnalysis />} />
                     <Route path="pin-codes" element={<PinCodesAnalysis />} />
                     <Route path="stuck-orders" element={<StuckOrdersAnalysis />} />

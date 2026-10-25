@@ -13,6 +13,10 @@ export const dailyRoasStore = keyedStore<any>('dailyRoas', 'dateKey');
 /** Breakeven snapshot singleton (doc id 'latest'). */
 export const breakevenStore = keyedStore<any>('breakevenSnapshot', 'key');
 
+/** Claude Code's ad set reviews, one doc per IST date ('YYYY-MM-DD'). Written by the
+ *  photobookx-ads publish script, read by Analysis → Claude Analysis. */
+export const claudeDecisionStore = keyedStore<any>('claudeAdDecisions', 'date');
+
 /** Read a daily store over an optional [start,end] dateKey range, sorted ascending. */
 export async function readDailyRange(
   store: { rangeByField: (f: 'dateKey', s?: string, e?: string) => Promise<any[]> },
