@@ -1403,11 +1403,9 @@ router.get('/daily-roas', requireAdmin, async (req: AuthenticatedRequest, res: R
   try {
     const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
 
-    // Pure read — DailyROAS is kept up to date on the WRITE paths instead:
-    //  • ad-spend create/delete → recomputeForDate(dateKey)      (expenses.ts)
-    //  • order-cache refresh    → scheduleRoasRecompute()        (shopifyService.updateCache)
-    // Revenue and ad spend can only change through those two writers, so
-    // recomputing here on every FE load was pure wasted work.
+    // Pure read — DailyROAS is kept up to date on the WRITE paths instead: order and
+    // ad-spend writes mark their days, and the scheduled jobs recompute those days
+    // (see aggregatesService), so recomputing here on every FE load would be wasted work.
     const records = await readDailyRange(dailyRoasStore, startDate, endDate);
 
     res.json({ success: true, records: roasRecordsOf(records) });
@@ -1523,23 +1521,6 @@ router.post('/daily-order-stats/backfill', requireAdmin, async (_req: Authentica
   } catch (error) {
     console.error('Error backfilling order stats:', error);
     res.status(500).json({ success: false, error: 'Backfill failed' });
-  }
-});
-
-/**
- * POST /api/admin/sales/firestore-backfill-orders
- * Phase 1: copy the current Mongo order cache into Firestore (one doc per order).
- * Idempotent — safe to re-run. Seeds Firestore without waiting on the scheduled sync.
- */
-router.post('/firestore-backfill-orders', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
-  try {
-    const orders = await shopifyService.getAllOrders(10000);
-    const { saveAll } = await import('../db/ordersRepo');
-    const written = await saveAll(orders);
-    res.json({ success: true, written, total: orders.length });
-  } catch (error) {
-    console.error('Firestore orders backfill failed:', error);
-    res.status(500).json({ success: false, error: String((error as any)?.message || error) });
   }
 });
 

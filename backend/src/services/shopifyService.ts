@@ -1,7 +1,5 @@
 import config from '../config';
 import type { ShopifyOrder, ShopifyOrdersResponse } from '../types';
-import ShopifyOrderCache from '../models/ShopifyOrderCache';
-import { scheduleRoasRecompute } from './roasService';
 
 /**
  * Simplified Shopify Admin API Service
@@ -12,20 +10,6 @@ class ShopifyService {
   private accessToken: string;
   private apiVersion: string;
   private printedPhotosProductId: number;
-  // Cache is now infinite - only cleared by explicit refresh button click
-  // Coalesces concurrent cache-miss fetches per cacheKey so a cold cache doesn't
-  // trigger one full Shopify fetch per waiting request (thundering herd).
-  private inFlightOrderFetches: Map<string, Promise<ShopifyOrder[]>> = new Map();
-  // Short-lived in-memory copy of the parsed orders per cacheKey, so repeated reads
-  // on a warm instance don't re-fetch and re-parse the ~16MB cache doc from Mongo.
-  // Invalidated whenever the cache is written or an order is patched.
-  private memOrders: Map<string, { orders: ShopifyOrder[]; at: number }> = new Map();
-  private static readonly MEM_ORDERS_TTL_MS = 3 * 60 * 1000;
-
-  private invalidateMemOrders(): void {
-    this.memOrders.clear();
-  }
-
   constructor() {
     this.storeDomain = config.shopify.storeDomain;
     this.accessToken = config.shopify.accessToken;
@@ -153,29 +137,6 @@ class ShopifyService {
   }
 
   /**
-   * Determine if an order has reached a terminal state (cannot change further)
-   */
-  private isOrderTerminal(order: ShopifyOrder): boolean {
-    if (order.cancelled_at) return true;
-    if (order.fulfillment_status === 'restocked') return true;
-
-    if (order.fulfillments && order.fulfillments.length > 0) {
-      const latest = order.fulfillments[order.fulfillments.length - 1];
-      const status = latest.shipment_status?.toLowerCase();
-      
-      // Common terminal shipment statuses
-      const terminalStatuses = ['delivered', 'failure', 'rto', 'cancelled', 'returned'];
-      if (status && terminalStatuses.includes(status)) return true;
-    }
-
-    // Check tags for failure markers
-    const tags = (order.tags || '').toLowerCase();
-    if (tags.includes('rto') || tags.includes('failed') || tags.includes('delivery failed')) return true;
-
-    return false;
-  }
-
-  /**
    * Find order by order number
    */
   async findOrderByNumber(orderNumber: string): Promise<ShopifyOrder | null> {
@@ -204,83 +165,6 @@ class ShopifyService {
     } catch (error) {
       console.error('Error finding order:', error);
       throw error;
-    }
-  }
-
-  /**
-   * Check if cached data exists (infinite cache - no expiry check)
-   */
-  private async getCachedOrders(cacheKey: string): Promise<ShopifyOrder[] | null> {
-    try {
-      // .lean() returns a plain object straight from BSON, skipping Mongoose's
-      // hydration/change-tracking — which is very slow for a ~16MB orders array.
-      const cached = await ShopifyOrderCache.findOne({ cacheKey }, { orders: 1, cachedAt: 1 }).lean();
-
-      if (cached && (cached as any).orders) {
-        console.log(`Cache hit for ${cacheKey}, cached at ${(cached as any).cachedAt}`);
-        return (cached as any).orders as ShopifyOrder[];
-      }
-
-      console.log(`Cache miss for ${cacheKey}`);
-      return null;
-    } catch (error) {
-      console.error('Error fetching from cache:', error);
-      return null;
-    }
-  }
-
-  /**
-   * Update cache with fresh data (infinite cache)
-   */
-  private async updateCache(cacheKey: string, orders: ShopifyOrder[]): Promise<void> {
-    try {
-      const now = new Date();
-      // Set expiresAt to 100 years in the future (effectively infinite)
-      const expiresAt = new Date(now.getTime() + (100 * 365 * 24 * 60 * 60 * 1000));
-
-      // Trim orders to keep only necessary fields to avoid MongoDB 16MB document limit
-      const trimmedOrders = orders.map(order => this.trimOrderForCache(order));
-
-      await ShopifyOrderCache.findOneAndUpdate(
-        { cacheKey },
-        {
-          orders: trimmedOrders,
-          cachedAt: now,
-          expiresAt,
-        },
-        { upsert: true, new: true }
-      );
-
-      // Keep the in-memory copy in step with the freshly written data.
-      if (cacheKey.startsWith('all_orders_')) {
-        this.memOrders.set(cacheKey, { orders: trimmedOrders, at: Date.now() });
-      }
-
-      // Rebuild the small per-month partitions the SalesPage reads, so a month load
-      // never has to pull the whole ~15MB doc. Only from the canonical full key.
-      if (cacheKey === 'all_orders_10000') {
-        await this.rebuildMonthPartitions(trimmedOrders);
-        // Phase 1: dual-write orders to Firestore (one doc per order). Tolerant so a
-        // missing/disabled Firestore never breaks the Mongo write.
-        try {
-          const { saveAll } = await import('../db/ordersRepo');
-          const n = await saveAll(trimmedOrders);
-          console.log(`[Firestore] upserted ${n} orders`);
-        } catch (e) {
-          console.error('[Firestore] order dual-write failed (non-fatal):', e);
-        }
-      }
-
-      // Order data is the revenue source for DailyROAS — refresh it in the
-      // background whenever the all_orders cache changes (the only event that
-      // can change any day's revenue). Reads of /daily-roas never recompute.
-      if (cacheKey.startsWith('all_orders_')) {
-        scheduleRoasRecompute(`order cache ${cacheKey} updated`);
-      }
-
-    } catch (error) {
-      console.error('Error updating cache:', error);
-      // Don't throw - caching is not critical
     }
   }
 
@@ -345,206 +229,13 @@ class ShopifyService {
 
 
   /**
-   * Clear all cached orders
-   * Useful for forcing a refresh of Shopify data
-   */
-  async clearOrdersCache(): Promise<void> {
-    try {
-      await ShopifyOrderCache.deleteMany({});
-      this.invalidateMemOrders();
-      console.log('All order caches cleared');
-    } catch (error) {
-      console.error('Error clearing cache:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Clear specific cache entry
-   */
-  async clearSpecificCache(cacheKey: string): Promise<void> {
-    try {
-      await ShopifyOrderCache.deleteOne({ cacheKey });
-      console.log(`Cache cleared for ${cacheKey}`);
-    } catch (error) {
-      console.error('Error clearing specific cache:', error);
-      throw error;
-    }
-  }
-
-  /** IST 'YYYY-MM' for an order's creation date. */
-  private orderMonthKey(order: any): string | null {
-    if (!order?.created_at) return null;
-    return new Date(order.created_at).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }).substring(0, 7);
-  }
-
-  /**
-   * Split the (already-trimmed) orders into one small `orders_month_<YYYY-MM>` doc per
-   * month. The SalesPage reads a single month doc (~1MB) instead of the full ~15MB doc.
-   */
-  private async rebuildMonthPartitions(orders: ShopifyOrder[]): Promise<void> {
-    try {
-      const byMonth = new Map<string, any[]>();
-      for (const o of orders as any[]) {
-        const month = this.orderMonthKey(o);
-        if (!month) continue;
-        if (!byMonth.has(month)) byMonth.set(month, []);
-        byMonth.get(month)!.push(o);
-      }
-      const now = new Date();
-      const expiresAt = new Date(now.getTime() + 100 * 365 * 24 * 60 * 60 * 1000);
-      for (const [month, monthOrders] of byMonth) {
-        const cacheKey = `orders_month_${month}`;
-        await ShopifyOrderCache.findOneAndUpdate(
-          { cacheKey },
-          { orders: monthOrders, cachedAt: now, expiresAt },
-          { upsert: true }
-        );
-        this.memOrders.set(cacheKey, { orders: monthOrders, at: Date.now() });
-      }
-    } catch (error) {
-      console.error('Error rebuilding month partitions:', error);
-    }
-  }
-
-  /**
-   * Orders for a single IST month ('YYYY-MM'), read from the small per-month partition.
-   * Falls back to building the partitions from the full cache if missing (one-time cost).
-   */
-  async getOrdersForMonth(monthKey: string): Promise<ShopifyOrder[]> {
-    const cacheKey = `orders_month_${monthKey}`;
-    const mem = this.memOrders.get(cacheKey);
-    if (mem && Date.now() - mem.at < ShopifyService.MEM_ORDERS_TTL_MS) return mem.orders;
-
-    const cached = await this.getCachedOrders(cacheKey);
-    if (cached) {
-      this.memOrders.set(cacheKey, { orders: cached, at: Date.now() });
-      return cached;
-    }
-
-    // Partition not built yet — filter the full cache this once (slow), WITHOUT
-    // writing partitions on the request path. The scheduled sync builds them.
-    const all = await this.getAllOrders(10000);
-    return (all as any[]).filter((o) => this.orderMonthKey(o) === monthKey);
-  }
-
-  /** Available months ('YYYY-MM', newest first) from the partition keys — a tiny query. */
-  async listAvailableMonths(): Promise<string[]> {
-    const docs = await ShopifyOrderCache.find(
-      { cacheKey: { $regex: /^orders_month_/ } },
-      { cacheKey: 1 }
-    ).lean();
-    return (docs as any[])
-      .map((d) => String(d.cacheKey).replace('orders_month_', ''))
-      .sort()
-      .reverse();
-  }
-
-  /**
-   * The IST creation-date key ('YYYY-MM-DD') of an order, read from the cache.
-   * The dashboards key each P&L day by order creation date, so this is the day to
-   * recompute after a status change. Returns null if the order isn't cached.
-   */
-  async getOrderCreationDateKey(orderNumber: string): Promise<string | null> {
-    const bare = orderNumber.replace(/^#/, '');
-    const docs = await ShopifyOrderCache.find({ cacheKey: { $regex: /^all_orders_/ } }, { orders: 1 }).lean();
-    for (const doc of docs as any[]) {
-      for (const o of (doc.orders as any[])) {
-        if (o?.name && (o.name === orderNumber || o.name.replace(/^#/, '') === bare) && o.created_at) {
-          return new Date(o.created_at).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
-        }
-      }
-    }
-    return null;
-  }
-
-  /**
-   * Optimistically patch a single order's delivery status inside the cached order
-   * lists, instead of wiping the whole cache. Wiping forced the next read to refetch
-   * every order from Shopify (slow); patching keeps the cache warm and lets the
-   * dashboards reflect the change immediately. The next full sync reconciles with
-   * Shopify's real state. `shipmentStatus` should be 'delivered' or 'failure'.
-   */
-  async patchCachedOrderDeliveryStatus(orderNumber: string, shipmentStatus: string): Promise<void> {
-    try {
-      const bare = orderNumber.replace(/^#/, '');
-      const matches = (name: string) => name === orderNumber || name.replace(/^#/, '') === bare;
-
-      const docs = await ShopifyOrderCache.find({ cacheKey: { $regex: /^all_orders_/ } });
-      for (const doc of docs) {
-        let changed = false;
-        for (const o of (doc.orders as any[])) {
-          if (!o?.name || !matches(o.name)) continue;
-          const now = new Date().toISOString();
-          if (Array.isArray(o.fulfillments) && o.fulfillments.length > 0) {
-            o.fulfillments[o.fulfillments.length - 1].shipment_status = shipmentStatus;
-            o.fulfillments[o.fulfillments.length - 1].updated_at = now;
-          } else {
-            o.fulfillments = [{ shipment_status: shipmentStatus, updated_at: now }];
-          }
-          changed = true;
-        }
-        if (changed) {
-          doc.markModified('orders');
-          await doc.save();
-        }
-      }
-      // The in-memory copy is now stale — drop it so the next read reflects the patch.
-      this.invalidateMemOrders();
-    } catch (error) {
-      console.error('Error patching cached order status:', error);
-      // Non-fatal: the Shopify write already succeeded; a later sync will reconcile.
-    }
-  }
-
-  /**
-   * Get orders that contain the printed photos product
-   * Fetches more orders and filters to only those with the product
-   * Uses caching with 5-minute TTL
-   */
-  async getOrdersWithPrintedPhotos(limit: number = 50): Promise<ShopifyOrder[]> {
-    try {
-      const cacheKey = `printed_photos_${limit}`;
-
-      // Try to get from cache first
-      const cachedOrders = await this.getCachedOrders(cacheKey);
-      if (cachedOrders) {
-        return cachedOrders;
-      }
-
-      // Cache miss - fetch from Shopify
-      console.log('Fetching orders from Shopify API...');
-
-      // Fetch more orders than needed since we'll filter them
-      const fetchLimit = Math.min(limit * 3, 250); // Shopify max is 250
-
-      const data = await this.makeRequest<ShopifyOrdersResponse>(
-        `/orders.json?status=any&limit=${fetchLimit}`
-      );
-
-      const allOrders = data.orders || [];
-
-      // Filter to only orders containing the printed photos product
-      const filteredOrders = allOrders.filter(order => this.orderContainsPrintedPhotos(order));
-
-      // Return up to the requested limit
-      const result = filteredOrders.slice(0, limit);
-
-      // Update cache
-      await this.updateCache(cacheKey, result);
-
-      return result;
-    } catch (error) {
-      console.error('Error fetching orders:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Get recent orders (for admin to browse) - DEPRECATED, use getOrdersWithPrintedPhotos
+   * Most recent orders that contain the printed photos product, newest first, from the
+   * Firestore orders the syncs keep current.
    */
   async getRecentOrders(limit: number = 50): Promise<ShopifyOrder[]> {
-    return this.getOrdersWithPrintedPhotos(limit);
+    const { getAll } = await import('../db/ordersRepo');
+    const orders = (await getAll()) as ShopifyOrder[];
+    return orders.filter((order) => this.orderContainsPrintedPhotos(order)).slice(0, limit);
   }
 
   /**
@@ -575,281 +266,6 @@ class ShopifyService {
       if (!pageInfo || orders.length < perPage) break;
     }
     return all.map((o) => this.trimOrderForCache(o));
-  }
-
-  /**
-   * Get ALL recent orders (not filtered by product)
-   * For sales tracking and general order management
-   * Uses caching with 5-minute TTL
-   */
-  async getAllOrders(limit: number = 50, createdAtMin?: string): Promise<ShopifyOrder[]> {
-    const cacheKey = createdAtMin ? `all_orders_${limit}_${createdAtMin}` : `all_orders_${limit}`;
-
-    // Warm in-memory copy first — avoids re-reading/parsing the ~16MB doc from Mongo
-    // on every request within the TTL.
-    const mem = this.memOrders.get(cacheKey);
-    if (mem && Date.now() - mem.at < ShopifyService.MEM_ORDERS_TTL_MS) {
-      console.log(`[PERF] getAllOrders ${cacheKey}: MEM hit (${mem.orders.length})`);
-      return mem.orders;
-    }
-
-    // Then the DB cache
-    const _t0 = Date.now();
-    const cachedOrders = await this.getCachedOrders(cacheKey);
-    if (cachedOrders) {
-      console.log(`[PERF] getAllOrders ${cacheKey}: DB cache read ${Date.now() - _t0}ms (${cachedOrders.length} orders)`);
-      this.memOrders.set(cacheKey, { orders: cachedOrders, at: Date.now() });
-      return cachedOrders;
-    }
-
-    // Cache miss. If another request is already fetching this same set, wait on it
-    // instead of launching a second full Shopify fetch (which would compound rate limits).
-    const existing = this.inFlightOrderFetches.get(cacheKey);
-    if (existing) {
-      console.log(`Reusing in-flight order fetch for ${cacheKey}`);
-      return existing;
-    }
-    const fetchPromise = this.fetchAndCacheAllOrders(cacheKey, limit, createdAtMin);
-    this.inFlightOrderFetches.set(cacheKey, fetchPromise);
-    try {
-      const orders = await fetchPromise;
-      this.memOrders.set(cacheKey, { orders, at: Date.now() });
-      return orders;
-    } finally {
-      this.inFlightOrderFetches.delete(cacheKey);
-    }
-  }
-
-  private async fetchAndCacheAllOrders(cacheKey: string, limit: number, createdAtMin?: string): Promise<ShopifyOrder[]> {
-    try {
-      // Fetch from Shopify with pagination using Link header
-      console.log(`Fetching up to ${limit} orders from Shopify API${createdAtMin ? ` since ${createdAtMin}` : ''}...`);
-
-      const allOrders: ShopifyOrder[] = [];
-      const perPage = 250; // Shopify max per request
-      let page = 1;
-      let pageInfo: string | null = null;
-
-      // Build initial request URL with filters
-      // IMPORTANT: Filters (created_at_min) must be in the FIRST request only
-      // Subsequent requests with page_info cannot include other params
-      let initialParams = new URLSearchParams({
-        status: 'any',
-        limit: perPage.toString(),
-      });
-
-      if (createdAtMin) {
-        // Shopify expects ISO 8601 format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS
-        initialParams.append('created_at_min', createdAtMin);
-      }
-
-      // Fetch pages using cursor-based pagination with Link header
-      while (allOrders.length < limit) {
-        let url: string;
-
-        if (page === 1) {
-          // First request: use filters
-          url = `/orders.json?${initialParams.toString()}`;
-          console.log(`Fetching page ${page}: limit=${perPage}, created_at_min=${createdAtMin || 'none'}`);
-        } else if (pageInfo) {
-          // Subsequent requests: use page_info token from Link header
-          // Can only include limit, no other params allowed
-          url = `/orders.json?page_info=${pageInfo}&limit=${perPage}`;
-          console.log(`Fetching page ${page}: using page_info token`);
-        } else {
-          // No more pages
-          console.log('No page_info found, reached end');
-          break;
-        }
-
-        const { data, linkHeader } = await this.makeRequestWithHeaders<ShopifyOrdersResponse>(url);
-        const orders = data.orders || [];
-
-        console.log(`Fetched page ${page}: ${orders.length} orders (total so far: ${allOrders.length + orders.length})`);
-
-        if (orders.length === 0) {
-          break; // No more orders
-        }
-
-        allOrders.push(...orders);
-
-        // Parse page_info for next page from Link header
-        pageInfo = this.parseNextPageInfo(linkHeader);
-
-        if (pageInfo) {
-          console.log(`Found next page_info token: ${pageInfo.substring(0, 20)}...`);
-        } else {
-          console.log('No next page_info found in Link header, reached end');
-          break;
-        }
-
-        // If we got less than requested, we've reached the end
-        if (orders.length < perPage) {
-          console.log('Reached end of orders (got less than limit)');
-          break;
-        }
-
-        // If we've collected enough orders, stop
-        if (allOrders.length >= limit) {
-          console.log(`Collected ${allOrders.length} orders, reached requested limit`);
-          break;
-        }
-
-        page++;
-
-        // Safety: max pages based on limit
-        const maxPages = Math.ceil(limit / perPage);
-        if (page > maxPages || page > 40) { // Hard limit 40 pages (10000 orders)
-          console.log(`Reached max pages limit (${page-1})`);
-          break;
-        }
-      }
-
-      console.log(`Total fetched: ${allOrders.length} orders`);
-
-      // Debug: Log date range of orders
-      if (allOrders.length > 0) {
-        const dates = allOrders.map(o => new Date(o.created_at).toISOString().split('T')[0]);
-        const uniqueDates = [...new Set(dates)].sort();
-        console.log(`Order dates range: ${uniqueDates[0]} to ${uniqueDates[uniqueDates.length - 1]}`);
-        console.log(`Total unique dates: ${uniqueDates.length}`);
-
-        // Count orders per date
-        const dateCounts: Record<string, number> = {};
-        dates.forEach(d => {
-          dateCounts[d] = (dateCounts[d] || 0) + 1;
-        });
-        console.log('Orders per date:', JSON.stringify(dateCounts, null, 2));
-      }
-
-      // Update cache
-      await this.updateCache(cacheKey, allOrders);
-
-      return allOrders;
-    } catch (error) {
-      console.error('Error fetching all orders:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Sync orders using the "Head + Pending" strategy.
-   * 1. Fetches "Head": New orders created since the last known order.
-   * 2. Fetches "Pending": Updates for existing in-flight orders that aren't terminal.
-   */
-  async syncOrders(limit: number = 5000): Promise<number> {
-    try {
-      const cacheKey = `all_orders_${limit}`;
-      // Read-only (we rewrite via updateCache below), so .lean() to skip hydration.
-      const cachedData = await ShopifyOrderCache.findOne({ cacheKey }, { orders: 1 }).lean() as { orders: ShopifyOrder[] } | null;
-
-      if (!cachedData || !cachedData.orders || cachedData.orders.length === 0) {
-        console.log(`[Sync] No cache found, performing full fetch...`);
-        const orders = await this.getAllOrders(limit);
-        return orders.length;
-      }
-
-      const existingOrders: ShopifyOrder[] = cachedData.orders;
-      
-      // Find the order with the highest ID to use as since_id
-      // Don't assume index 0 is the latest ID, although it should be if sorted by date
-      let maxId = BigInt(0);
-      existingOrders.forEach(o => {
-        try {
-          const id = BigInt(o.id);
-          if (id > maxId) maxId = id;
-        } catch (e) { /* ignore NaN */ }
-      });
-      
-      // Step 1: Identify "Pending" orders to re-sync
-      const pendingIds = existingOrders
-        .filter(order => !this.isOrderTerminal(order))
-        .map(order => order.id.toString());
-      
-      console.log(`[Sync] Identified ${pendingIds.length} pending orders to update.`);
-
-      const updatedOrders: ShopifyOrder[] = [];
-
-      // Step 2: Fetch "Head" (New orders)
-      // We use since_id to get orders created AFTER the latest one we have
-      // Loop to fetch all new orders if there are more than 250
-      if (maxId > 0n) {
-        let lastIdFetched = maxId.toString();
-        let hasMore = true;
-        let headCount = 0;
-
-        console.log(`[Sync] Fetching new orders since ID ${lastIdFetched}...`);
-        
-        while (hasMore) {
-          const { data } = await this.makeRequestWithHeaders<ShopifyOrdersResponse>(
-            `/orders.json?since_id=${lastIdFetched}&status=any&limit=250`
-          );
-          
-          if (data.orders && data.orders.length > 0) {
-            console.log(`[Sync] Found ${data.orders.length} new orders in this batch.`);
-            updatedOrders.push(...data.orders);
-            headCount += data.orders.length;
-            
-            // Get the last ID from this batch to use for next since_id
-            lastIdFetched = data.orders[data.orders.length - 1].id.toString();
-            
-            // If we got less than 250, we've reached the end
-            if (data.orders.length < 250) {
-              hasMore = false;
-            }
-          } else {
-            hasMore = false;
-          }
-
-          // Safety: max 10 batches (2500 new orders)
-          if (updatedOrders.length > 2500) break;
-        }
-        
-        if (headCount > 0) {
-          console.log(`[Sync] Total new orders fetched: ${headCount}`);
-        }
-      }
-
-      // Step 3: Fetch "Pending" updates by ID list
-      // Shopify allows a strict maximum of 50 IDs in one request via the ids parameter
-      if (pendingIds.length > 0) {
-        for (let i = 0; i < pendingIds.length; i += 50) {
-          const batch = pendingIds.slice(i, i + 50);
-          console.log(`[Sync] Fetching batch of ${batch.length} pending updates...`);
-          const { data } = await this.makeRequestWithHeaders<ShopifyOrdersResponse>(
-            `/orders.json?ids=${batch.join(',')}&status=any`
-          );
-          if (data.orders) {
-            updatedOrders.push(...data.orders);
-          }
-        }
-      }
-
-      // Step 4: Merge results back into cache
-      if (updatedOrders.length > 0) {
-        const existingMap = new Map<string, ShopifyOrder>();
-        existingOrders.forEach(o => existingMap.set(o.id.toString(), o));
-
-        updatedOrders.forEach(order => {
-          existingMap.set(order.id.toString(), order);
-        });
-
-        const mergedOrdersList = Array.from(existingMap.values());
-        mergedOrdersList.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-
-        const finalOrders = mergedOrdersList.slice(0, limit);
-        await this.updateCache(cacheKey, finalOrders);
-        console.log(`[Sync] Successfully updated ${updatedOrders.length} orders in cache (Final count: ${finalOrders.length}).`);
-        return updatedOrders.length;
-      }
-
-      console.log(`[Sync] No updates found.`);
-      return 0;
-
-    } catch (error) {
-      console.error('Error syncing orders:', error);
-      throw error;
-    }
   }
 
   // Products change rarely, so serve them from memory for a while instead of calling Shopify on
@@ -1093,11 +509,9 @@ class ShopifyService {
         }
       );
 
-      // Reflect the change in the cache WITHOUT wiping it — wiping forced the next
-      // read to refetch every order from Shopify (slow). Patch the one order instead.
+      // Reflect the change in Firestore, which the pages read, without waiting for the
+      // next order sync.
       const shipmentStatus = status === 'Delivered' ? 'delivered' : 'failure';
-      await this.patchCachedOrderDeliveryStatus(orderNumber, shipmentStatus);
-      // And in Firestore, which the SalesPage now reads from.
       try {
         const { patchStatusByName } = await import('../db/ordersRepo');
         await patchStatusByName(orderNumber, shipmentStatus);
@@ -1257,11 +671,11 @@ class ShopifyService {
 
       const existingTags = customer.tags || '';
       const tagsArray = existingTags.split(',').map((t: string) => t.trim()).filter((t: string) => t !== '');
+      const hadTag = tagsArray.includes(tag);
+      if (!hadTag) tagsArray.push(tag);
+      const newTags = tagsArray.join(', ');
 
-      if (!tagsArray.includes(tag)) {
-        tagsArray.push(tag);
-        const newTags = tagsArray.join(', ');
-
+      if (!hadTag) {
         await this.makeRequest<{ customer: any }>(
           `/customers/${customerId}.json`,
           {
@@ -1274,6 +688,15 @@ class ShopifyService {
             }
           }
         );
+      }
+
+      // Orders keep a copy of their customer's tags; update it so the Sales page shows the
+      // tag now instead of after those orders next change in Shopify.
+      try {
+        const { setCustomerTags } = await import('../db/ordersRepo');
+        await setCustomerTags(customerId, hadTag ? existingTags : newTags);
+      } catch (e) {
+        console.error('[Firestore] customer tag patch failed (non-fatal):', e);
       }
 
       return { success: true };

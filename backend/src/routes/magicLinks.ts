@@ -14,10 +14,7 @@ import { getS3Client } from '../services/s3';
 import { Ticket } from '../models';
 import archiver from 'archiver';
 import { recomputeShippingForDate, getOrderDateKey as getShippingOrderDateKey, backfillShippingStats } from '../services/shippingStatsService';
-import { backfillOrderStats } from '../services/orderStatsService';
 import { recomputeDates } from '../services/aggregatesService';
-import { refreshBreakevenSnapshot } from '../services/breakevenService';
-import { backfillDailyPnl } from '../services/dailyPnlService';
 
 const router = Router();
 
@@ -301,25 +298,20 @@ router.delete('/:token', requireAdmin, async (req: AuthenticatedRequest, res: Re
 
 /**
  * POST /api/admin/shopify/orders/clear-cache
- * Trigger an incremental sync of orders from Shopify to fetch changes
+ * Pull the orders that changed in Shopify since the last sync into Firestore (the name is
+ * historical: this used to resync the Mongo order cache, which stopped updating on
+ * 2026-09-22). Writing the orders marks their days for the aggregate recompute.
  */
 router.post('/shopify/orders/clear-cache', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
   try {
-    // Instead of completely dropping the cache, incrementally sync newly updated orders
-    // The explicit fetch limit requested by the UI is 10000 so we must sync the same cache key
-    const syncedCount = await shopifyService.syncOrders(10000);
+    const { syncChangedOrders } = await import('../services/orderSyncService');
+    const { written: syncedCount } = await syncChangedOrders();
 
     res.json({
       success: true,
       message: `Orders synced successfully (${syncedCount} updated).`,
       syncedCount
     });
-
-    // Async full recompute of order stats, P&L and the breakeven snapshot after sync.
-    backfillOrderStats()
-      .then(() => refreshBreakevenSnapshot())
-      .catch(console.error);
-    backfillDailyPnl().catch(console.error);
   } catch (error) {
     console.error('Error syncing orders:', error);
     res.status(500).json({ success: false, error: 'Failed to sync orders' });
@@ -376,7 +368,7 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
         orders = allFetchedOrders.filter((o: any) => new Date(o.created_at) >= thirtyDaysAgo);
       }
     } else {
-      // Non-'all' fetch (printed-photos flow) — unchanged, still Mongo.
+      // Non-'all' fetch (printed-photos flow), from Firestore.
       orders = await shopifyService.getRecentOrders(limit);
       const availableMonthsSet = new Set<string>();
       orders.forEach((o: any) => {
@@ -551,7 +543,9 @@ router.get('/shopify/gst-summary', requireAdmin, async (req: AuthenticatedReques
       return res.status(400).json({ success: false, error: 'month (MM) and year (YYYY) are required' });
     }
 
-    const allOrders = await shopifyService.getAllOrders(10000);
+    // Orders from Firestore (the Mongo order cache stopped updating on 2026-09-22).
+    const { getAll } = await import('../db/ordersRepo');
+    const allOrders = await getAll();
 
     // Delivery dates from DB (CSV-imported), keyed with and without the leading '#'.
     const orderNumbers = allOrders.map((o: any) => o.name);

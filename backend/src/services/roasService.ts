@@ -76,47 +76,6 @@ async function getSingleDayAdSpend(dateKey: string): Promise<number> {
   return adSpendByDate[dateKey] || 0;
 }
 
-// ─── write-path trigger ──────────────────────────────────────────────────────
-// DailyROAS has exactly two inputs: the all_orders_* Shopify cache (revenue) and
-// DailyAdSpend (spend). Reads never recompute; instead the writers of those two
-// inputs call the hooks below, keeping the stored records permanently fresh.
-
-let roasRecomputeInFlight = false;
-let roasRecomputeQueued = false;
-
-/**
- * Fire-and-forget full recompute, coalesced: if one is already running, remember
- * to run once more when it finishes (the re-run sees the newest data) instead of
- * stacking parallel recomputes.
- *
- * On Cloud Functions (Cloud Run sets `K_SERVICE`) this is a no-op: background work
- * kicked off after the HTTP response isn't guaranteed to finish, so freshness there is
- * owned by the scheduled jobs, which recompute ROAS with the other daily aggregates for
- * every date whose orders or ad spend changed (see aggregatesService). On the
- * local/Render server (`K_SERVICE` unset) this in-process fast path still runs and keeps
- * ROAS near-instant.
- */
-export function scheduleRoasRecompute(reason: string): void {
-  if (process.env.K_SERVICE) return; // handled by the scheduled function on Cloud Functions
-  if (roasRecomputeInFlight) {
-    roasRecomputeQueued = true;
-    return;
-  }
-  roasRecomputeInFlight = true;
-  (async () => {
-    do {
-      roasRecomputeQueued = false;
-      try {
-        const { upserted } = await backfillAllDates();
-        console.log(`ROAS recompute (${reason}): ${upserted} dates refreshed`);
-      } catch (err) {
-        console.error(`ROAS recompute (${reason}) failed:`, err);
-      }
-    } while (roasRecomputeQueued);
-    roasRecomputeInFlight = false;
-  })();
-}
-
 /**
  * Backfill DailyROAS for all dates that have either ad spend or order revenue.
  * Safe to run multiple times (upserts).

@@ -146,6 +146,19 @@ export async function search(query: string, limit = 50): Promise<any[]> {
   return Array.from(map.values()).slice(0, limit);
 }
 
+/** Copy a customer's current tags onto their orders (each order embeds `customer.tags`). */
+export async function setCustomerTags(customerId: number, tags: string): Promise<number> {
+  invalidateAll();
+  const db = getFirestore();
+  const snap = await db.collection(COLLECTION).where('customer.id', '==', customerId).get();
+  for (let i = 0; i < snap.docs.length; i += 450) {
+    const batch = db.batch();
+    for (const d of snap.docs.slice(i, i + 450)) batch.set(d.ref, { customer: { tags } }, { merge: true });
+    await batch.commit();
+  }
+  return snap.size;
+}
+
 /** IST creation day of the order with this name ('#1234' or '1234'), or null if unknown. */
 export async function getDateKeyByName(orderName: string): Promise<string | null> {
   const snap = await getFirestore().collection(COLLECTION).where('nameBare', '==', bare(orderName)).limit(1).get();
