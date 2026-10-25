@@ -20,7 +20,7 @@ export const bankCategoryStore = docStore('bankCategories');
 export const bankTransactionStore = docStore('bankTransactions');
 export const bankNarrationRuleStore = docStore('bankNarrationRules');
 
-// Smaller features, moved from Mongo. Reels, strategies and predictions keep their Mongo ids;
+// Smaller features, moved from Mongo. Reels and strategies keep their Mongo ids;
 // the others are keyed by their unique field (template name, settings key, pin code,
 // URI-encoded city, or a hash of phone and date for abandoned checkouts).
 export const whatsAppTemplateStore = docStore('whatsAppTemplates');
@@ -29,5 +29,4 @@ export const blockedPinCodeStore = docStore('blockedPinCodes');
 export const codAddedCityStore = docStore('codAddedCities');
 export const reelStore = docStore('reels');
 export const reelStrategyStore = docStore('reelStrategies');
-export const profitPredictionStore = docStore('profitPredictions');
 export const agencySettingsStore = docStore('agencySettings');
