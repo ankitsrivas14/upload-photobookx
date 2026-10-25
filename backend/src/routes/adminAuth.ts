@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import config from '../config';
-import { SuperUser, ISuperUser } from '../models';
+import * as superUsers from '../db/superUsersRepo';
 import type { AdminJwtPayload, AuthenticatedRequest } from '../types';
 
 const router = Router();
@@ -50,15 +50,15 @@ router.post('/login', async (req: Request, res: Response) => {
     }
 
     // Find user
-    const user = await SuperUser.findOne({ email: email.toLowerCase(), isActive: true });
+    const user = await superUsers.findByEmail(email);
     
-    if (!user) {
+    if (!user || !user.isActive) {
       res.status(401).json({ success: false, error: 'Invalid email or password' });
       return;
     }
 
     // Check password
-    const isMatch = await user.comparePassword(password);
+    const isMatch = await superUsers.checkPassword(user, password);
     
     if (!isMatch) {
       res.status(401).json({ success: false, error: 'Invalid email or password' });
@@ -67,7 +67,7 @@ router.post('/login', async (req: Request, res: Response) => {
 
     // Generate JWT token
     const payload: AdminJwtPayload = {
-      userId: user._id.toString(),
+      userId: user.id,
       email: user.email,
     };
 
@@ -79,7 +79,7 @@ router.post('/login', async (req: Request, res: Response) => {
       success: true,
       token,
       user: {
-        id: user._id,
+        id: user.id,
         email: user.email,
         name: user.name,
       },
@@ -96,7 +96,7 @@ router.post('/login', async (req: Request, res: Response) => {
  */
 router.get('/me', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const user = await SuperUser.findById(req.user?.userId).select('-password');
+    const user = await superUsers.findById(req.user?.userId);
     
     if (!user || !user.isActive) {
       res.status(401).json({ success: false, error: 'User not found' });
@@ -106,7 +106,7 @@ router.get('/me', requireAdmin, async (req: AuthenticatedRequest, res: Response)
     res.json({
       success: true,
       user: {
-        id: user._id,
+        id: user.id,
         email: user.email,
         name: user.name,
       },
@@ -136,7 +136,7 @@ router.post('/register', async (req: Request, res: Response) => {
     }
 
     // Check if any admins exist
-    const existingAdmins = await SuperUser.countDocuments();
+    const existingAdmins = await superUsers.count();
     
     // If admins exist, require admin secret (set in env)
     if (existingAdmins > 0) {
@@ -148,25 +148,18 @@ router.post('/register', async (req: Request, res: Response) => {
     }
 
     // Check if email already exists
-    const existingUser = await SuperUser.findOne({ email: email.toLowerCase() });
+    const existingUser = await superUsers.findByEmail(email);
     if (existingUser) {
       res.status(400).json({ success: false, error: 'Email already registered' });
       return;
     }
 
-    // Create new admin
-    const user = new SuperUser({
-      email: email.toLowerCase(),
-      password,
-      name,
-      isActive: true,
-    });
-
-    await user.save();
+    // Create new admin (the password is stored as a bcrypt hash)
+    const user = await superUsers.create({ email, password, name });
 
     // Generate JWT token
     const payload: AdminJwtPayload = {
-      userId: user._id.toString(),
+      userId: user.id,
       email: user.email,
     };
 
@@ -178,7 +171,7 @@ router.post('/register', async (req: Request, res: Response) => {
       success: true,
       token,
       user: {
-        id: user._id,
+        id: user.id,
         email: user.email,
         name: user.name,
       },
@@ -207,7 +200,7 @@ router.post('/change-password', requireAdmin, async (req: AuthenticatedRequest, 
       return;
     }
 
-    const user = await SuperUser.findById(req.user?.userId);
+    const user = await superUsers.findById(req.user?.userId);
     
     if (!user) {
       res.status(401).json({ success: false, error: 'User not found' });
@@ -215,7 +208,7 @@ router.post('/change-password', requireAdmin, async (req: AuthenticatedRequest, 
     }
 
     // Verify current password
-    const isMatch = await user.comparePassword(currentPassword);
+    const isMatch = await superUsers.checkPassword(user, currentPassword);
     
     if (!isMatch) {
       res.status(401).json({ success: false, error: 'Current password is incorrect' });
@@ -223,8 +216,7 @@ router.post('/change-password', requireAdmin, async (req: AuthenticatedRequest, 
     }
 
     // Update password
-    user.password = newPassword;
-    await user.save();
+    await superUsers.setPassword(user.id, newPassword);
 
     res.json({ success: true, message: 'Password changed successfully' });
   } catch (error) {

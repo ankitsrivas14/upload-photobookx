@@ -73,7 +73,10 @@ app.use('/api/admin', (req: Request, res: Response, next: NextFunction) => {
   requireAdmin(req as AuthenticatedRequest, res, next);
 });
 
-// Ensure Mongo is connected before any route handler runs. On Cloud Functions this connects
+// Admin login and session checks read Firestore only, so they don't wait on Mongo.
+app.use('/api/admin/auth', adminAuthRoutes);
+
+// Ensure Mongo is connected before any route handler below runs. On Cloud Functions this connects
 // once per warm instance and is a no-op thereafter; a cold-start Atlas failure returns 503
 // rather than hanging or crashing the instance.
 app.use((_req: Request, res: Response, next: NextFunction) => {
@@ -84,7 +87,6 @@ app.use((_req: Request, res: Response, next: NextFunction) => {
 });
 
 // Routes
-app.use('/api/admin/auth', adminAuthRoutes);
 app.use('/api/admin/magic-links', magicLinksRoutes);
 app.use('/api/admin/expenses', expensesRoutes);
 app.use('/api/admin/sales', salesRoutes);
