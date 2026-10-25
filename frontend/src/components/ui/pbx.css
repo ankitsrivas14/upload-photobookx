@@ -247,7 +247,7 @@ body { margin: 0; background: var(--canvas); color: var(--ink); font: 400 13px/1
 
 /* --------------------------------------------------- StatStrip, StatCard */
 .pbx-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(var(--strip-min, 160px), 1fr)); background: var(--card-bg); border: 1px solid var(--card-border); border-radius: var(--radius-md); }
-.pbx-stat { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: var(--space-3) var(--card-pad) 14px; box-sizing: border-box; background: transparent; border: 0; border-right: 1px solid var(--line); font: inherit; color: inherit; text-align: left; }
+.pbx-stat { display: flex; flex-direction: column; min-width: 0; padding: 10px var(--card-pad); box-sizing: border-box; background: transparent; border: 0; border-right: 1px solid var(--line); font: inherit; color: inherit; text-align: left; }
 .pbx-strip > .pbx-stat:last-child { border-right: 0; }
 /* When the strip wraps, the cell at each row's end pushes its rule past the edge, where it is clipped. */
 .pbx-strip { overflow: hidden; }

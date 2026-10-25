@@ -1834,8 +1834,9 @@ export function SalesPage({ initialFilter, embedded = false }: SalesPageProps = 
               ? `day ${expectedProfit.daysElapsed} of ${expectedProfit.totalDays} · ${expectedProfit.pendingOrdersCount.toLocaleString('en-IN')} pending`
               : `${expectedProfit.pendingOrdersCount.toLocaleString('en-IN')} pending orders`}
           >
-            <span className={styles.statNote} title={`Average per delivered order ${formatINR(expectedProfit.avgPLPerDeliveredOrder)}`}>
-              {`now ${formatINR(expectedProfit.currentPL, { signed: true, compact: true })} · pending ${formatINR(expectedProfit.expectedPendingPL, { signed: true, compact: true })} · rest ${formatINR(expectedProfit.expectedFuturePL, { signed: true, compact: true })}`}
+            {/* "Now" is the Total P/L beside it, so the note keeps to the two parts still to come */}
+            <span className={styles.statNote} title={`Now ${formatINR(expectedProfit.currentPL, { signed: true })} · average per delivered order ${formatINR(expectedProfit.avgPLPerDeliveredOrder)}`}>
+              {`pending ${formatINR(expectedProfit.expectedPendingPL, { signed: true, compact: true })} · rest ${formatINR(expectedProfit.expectedFuturePL, { signed: true, compact: true })}`}
             </span>
           </StatCard>
         )}
