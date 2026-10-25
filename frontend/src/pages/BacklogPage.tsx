@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, memo } from 'react';
 import { api, type BacklogOrder } from '../services/api';
 import styles from './BacklogPage.module.css';
 import toast from 'react-hot-toast';
@@ -50,6 +50,48 @@ function enrich(order: BacklogOrder): EnrichedOrder {
     _dateLabel: d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }),
   };
 }
+
+/**
+ * One order tile. Its hover card is mounted only while the tile is hovered: rendering a
+ * card for each of thousands of tiles up front made the page slow to open.
+ */
+const OrderTile = memo(function OrderTile({ order }: { order: EnrichedOrder }) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <div
+      className={`${styles['order-box']} ${order._statusClass}`}
+      onClick={() => window.open(`https://admin.shopify.com/store/c3532f-a9/orders/${order.id}`, '_blank')}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      {hovered && (
+        <div className={styles['box-hover-card']}>
+          <div className={styles['card-name']}>{order.name}</div>
+          <div className={styles['card-customer']}>{order.customerName}</div>
+          <div className={styles['card-status']}>{order.deliveryStatus || order.fulfillmentStatus || 'Pending'}</div>
+          <div className={styles['card-items']}>
+            {order.lineItems.length > 0 ? (
+              order.lineItems.map((item, idx) => (
+                <div key={idx} className={styles['item-row']}>
+                  <span className={styles['item-qty']}>{item.quantity}x</span>
+                  <div className={styles['item-details']}>
+                    <span className={styles['item-title']}>{item.title}</span>
+                    {item.variantTitle && (
+                      <span className={styles['item-variant']}>{item.variantTitle}</span>
+                    )}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className={styles['item-row']}>No items listed</div>
+            )}
+          </div>
+          <div className={styles['card-date']}>{order._dateLabel}</div>
+        </div>
+      )}
+    </div>
+  );
+});
 
 export default function BacklogPage() {
   const [orders, setOrders] = useState<EnrichedOrder[]>([]);
@@ -203,35 +245,7 @@ export default function BacklogPage() {
                       <h3 className={styles['week-title']}>{week.label} <span className={styles['week-count']}>({week.orders.length})</span></h3>
                       <div className={styles['orders-grid']}>
                         {week.orders.map(order => (
-                          <div
-                            key={order.id}
-                            className={`${styles['order-box']} ${order._statusClass}`}
-                            onClick={() => window.open(`https://admin.shopify.com/store/c3532f-a9/orders/${order.id}`, '_blank')}
-                          >
-                            <div className={styles['box-hover-card']}>
-                              <div className={styles['card-name']}>{order.name}</div>
-                              <div className={styles['card-customer']}>{order.customerName}</div>
-                              <div className={styles['card-status']}>{order.deliveryStatus || order.fulfillmentStatus || 'Pending'}</div>
-                              <div className={styles['card-items']}>
-                                {order.lineItems.length > 0 ? (
-                                  order.lineItems.map((item, idx) => (
-                                    <div key={idx} className={styles['item-row']}>
-                                      <span className={styles['item-qty']}>{item.quantity}x</span>
-                                      <div className={styles['item-details']}>
-                                        <span className={styles['item-title']}>{item.title}</span>
-                                        {item.variantTitle && (
-                                          <span className={styles['item-variant']}>{item.variantTitle}</span>
-                                        )}
-                                      </div>
-                                    </div>
-                                  ))
-                                ) : (
-                                  <div className={styles['item-row']}>No items listed</div>
-                                )}
-                              </div>
-                              <div className={styles['card-date']}>{order._dateLabel}</div>
-                            </div>
-                          </div>
+                          <OrderTile key={order.id} order={order} />
                         ))}
                       </div>
                     </div>

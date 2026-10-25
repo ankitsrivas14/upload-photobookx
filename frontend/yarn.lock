@@ -1053,6 +1053,18 @@
   dependencies:
     "@tanstack/query-core" "5.104.4"
 
+"@tanstack/react-virtual@3.14.20":
+  version "3.14.20"
+  resolved "https://registry.yarnpkg.com/@tanstack/react-virtual/-/react-virtual-3.14.20.tgz#76779f8093414b37fae3ae8fd95151f6c3ecfbdb"
+  integrity sha512-9hbhFlc0lznjXmWYDB/KEl7PJxEPz0Qnj2FzJFse98miGvXtx7jzjE5jlasmtczmZ6TxXsyI4v7PuyGQm2q1nQ==
+  dependencies:
+    "@tanstack/virtual-core" "3.19.5"
+
+"@tanstack/virtual-core@3.19.5":
+  version "3.19.5"
+  resolved "https://registry.yarnpkg.com/@tanstack/virtual-core/-/virtual-core-3.19.5.tgz#d4d287d519a4b938aa52106a97e3e10b5d147428"
+  integrity sha512-X/wq6DtSK/XClznMM+I4JE63yyIwmyPk4Ts83bD0VKaIbwHNdRsO5QipCPX+3OovqYyr0puQNpbmp8+SPhspNg==
+
 "@tybys/wasm-util@^0.10.1":
   version "0.10.2"
   resolved "https://registry.yarnpkg.com/@tybys/wasm-util/-/wasm-util-0.10.2.tgz#12b3a1b33db1f9cad4ddff1f604ab7dd00bf464e"

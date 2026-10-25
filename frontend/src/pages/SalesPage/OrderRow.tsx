@@ -28,6 +28,9 @@ interface OrderRowProps {
   onMarkTicketRaised?: (orderId: number, orderName: string) => void;
   ticketRaisedOrderIds: Set<number>;
   showAWBColumn?: boolean;
+  /** Set when the table is virtualised, so the row's real height can be measured. */
+  rowRef?: React.Ref<HTMLTableRowElement>;
+  index?: number;
 }
 
 export const OrderRow: React.FC<OrderRowProps> = ({
@@ -46,6 +49,8 @@ export const OrderRow: React.FC<OrderRowProps> = ({
   onMarkTicketRaised,
   ticketRaisedOrderIds,
   showAWBColumn = false,
+  rowRef,
+  index,
 }) => {
   const navigate = useNavigate();
   const handleMarkDeliveryStatus = () => {
@@ -74,6 +79,8 @@ export const OrderRow: React.FC<OrderRowProps> = ({
   return (
     <tr
       key={order.id}
+      ref={rowRef}
+      data-index={index}
       className={isSelected ? styles.selected : ''}
     >
       <td className={styles['checkbox-cell']}>
