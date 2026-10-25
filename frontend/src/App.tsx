@@ -69,8 +69,8 @@ function App() {
             <Route path="tools/*" element={<Page><ToolsPage /></Page>} />
 
             {/* Redirects for moved pages */}
-            <Route path="products" element={<Navigate to="tools/products" replace />} />
-            <Route path="gst-reports/*" element={<Navigate to="tools/gst-reports" replace />} />
+            <Route path="products" element={<Navigate to="/admin/tools/products" replace />} />
+            <Route path="gst-reports/*" element={<Navigate to="/admin/tools/gst-reports" replace />} />
           </Route>
         </Route>
 
