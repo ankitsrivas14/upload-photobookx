@@ -1,8 +1,15 @@
 import { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../../services/api';
+import { Alert, Badge, Button, Card, DataList, Drawer, EmptyState, Skeleton } from '../../components/ui/pbx';
+import { cx } from '../../components/ui/format';
 import styles from '../AnalysisPage.module.css';
+
+interface TicketActivity {
+    activity: string;
+    date: string;
+}
 
 interface Ticket {
     _id: string;
@@ -11,13 +18,22 @@ interface Ticket {
     awb: string;
     courierName: string;
     currentStatus: string;
-    activities: any[];
+    activities: TicketActivity[];
     generatedMessage: string;
     status: string;
     createdAt: string;
 }
 
+const STATUS: Record<string, { label: string; tone: 'info' | 'caution' | 'positive' | 'neutral' }> = {
+    open: { label: 'Open', tone: 'info' },
+    in_progress: { label: 'In progress', tone: 'caution' },
+    resolved: { label: 'Resolved', tone: 'positive' },
+    closed: { label: 'Closed', tone: 'neutral' },
+};
+
 export function TicketsAnalysis() {
+    const navigate = useNavigate();
+    const [copied, setCopied] = useState(false);
     const [tickets, setTickets] = useState<Ticket[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -59,207 +75,121 @@ export function TicketsAnalysis() {
             } else {
                 toast.error(res.error || 'Failed to update status');
             }
-        } catch (err) {
+        } catch {
             toast.error('Error updating ticket status');
         } finally {
             setIsUpdating(false);
         }
     };
 
-    const getStatusColor = (status: string) => {
-        switch (status) {
-            case 'open': return { bg: '#e0f2fe', text: '#0369a1' };
-            case 'in_progress': return { bg: '#fef3c7', text: '#92400e' };
-            case 'resolved': return { bg: '#dcfce7', text: '#15803d' };
-            case 'closed': return { bg: '#f1f5f9', text: '#475569' };
-            default: return { bg: '#f1f5f9', text: '#475569' };
-        }
-    };
-
     if (isLoading) {
-        return (
-            <div className={styles['loading-section']}>
-                <div className={styles.spinner}></div>
-                <p>Loading tickets...</p>
-            </div>
-        );
+        return <Skeleton lines={8} />;
     }
 
     if (error) {
-        return (
-            <div className={`${styles['content-section']} ${styles['error-state']}`}>
-                <p>{error}</p>
-                <button onClick={loadTickets} className={styles['retry-btn']}>Retry</button>
-            </div>
-        );
+        return <Alert tone="negative" action={<Button size="sm" onClick={loadTickets}>Retry</Button>}>{error}</Alert>;
     }
 
+    const statusOf = (status: string) => STATUS[status] ?? { label: status.replace('_', ' '), tone: 'neutral' as const };
+
     return (
-        <div className={styles['analysis-content']} style={{ display: 'grid', gridTemplateColumns: selectedTicket ? '1fr 400px' : '1fr', gap: '2rem' }}>
-            <div style={{ backgroundColor: '#fff', padding: '1.5rem', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)', border: '1px solid #f1f5f9' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-                    <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 600, color: '#1e293b' }}>
-                        Shipment Concern Tickets ({tickets.length})
-                    </h3>
-                    <Link 
-                        to="/admin/analysis/tickets/new" 
-                        style={{ 
-                            backgroundColor: '#0f172a', color: '#fff', padding: '0.6rem 1.2rem', 
-                            borderRadius: '8px', fontSize: '0.875rem', fontWeight: 600, textDecoration: 'none',
-                            display: 'flex', alignItems: 'center', gap: '0.5rem'
-                        }}
-                    >
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                            <line x1="12" y1="5" x2="12" y2="19" />
-                            <line x1="5" y1="12" x2="19" y2="12" />
-                        </svg>
-                        Create Ticket
-                    </Link>
-                </div>
-                
+        <>
+            <Card
+                title="Shipment tickets"
+                eyebrow={`${tickets.length} tickets · click one for its details`}
+                padding="sm"
+                actions={<Button size="sm" variant="primary" icon="plus" onClick={() => navigate('/admin/analysis/tickets/new')}>New ticket</Button>}
+            >
                 {tickets.length === 0 ? (
-                    <div style={{ textAlign: 'center', padding: '3rem' }}>
-                        <div style={{ fontSize: '2.5rem', marginBottom: '1rem' }}>🎫</div>
-                        <p style={{ color: '#64748b' }}>No tickets created yet.</p>
-                    </div>
+                    <EmptyState size="sm" icon="life-buoy" title="No tickets yet" description="Raise one with New ticket, or from Stuck orders." />
                 ) : (
-                    <div style={{ overflowX: 'auto' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-                            <thead>
-                                <tr style={{ borderBottom: '2px solid #f1f5f9', textAlign: 'left' }}>
-                                    <th style={{ padding: '0.75rem', color: '#64748b', fontWeight: 600, width: '40px' }}>#</th>
-                                    <th style={{ padding: '0.75rem', color: '#64748b', fontWeight: 600 }}>AWB Number</th>
-                                    <th style={{ padding: '0.75rem', color: '#64748b', fontWeight: 600 }}>Opened Date</th>
-                                    <th style={{ padding: '0.75rem', color: '#64748b', fontWeight: 600 }}>Customer Name</th>
-                                    <th style={{ padding: '0.75rem', color: '#64748b', fontWeight: 600, width: '100px' }}>Status</th>
-                                    <th style={{ padding: '0.75rem', color: '#64748b', fontWeight: 600 }}>Content Preview</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {tickets.map((ticket, idx) => {
-                                    const colors = getStatusColor(ticket.status);
-                                    const isSelected = selectedTicket?._id === ticket._id;
-                                    
-                                    return (
-                                        <tr 
-                                            key={ticket._id} 
-                                            style={{ 
-                                                borderBottom: '1px solid #f1f5f9',
-                                                backgroundColor: isSelected ? '#f8fafc' : 'transparent',
-                                                cursor: 'pointer'
-                                            }}
-                                            onClick={() => setSelectedTicket(ticket)}
-                                        >
-                                            <td style={{ padding: '0.75rem', color: '#94a3b8', fontSize: '0.75rem' }}>{idx + 1}</td>
-                                            <td style={{ padding: '0.75rem', fontWeight: 600, color: '#1e293b' }}>{ticket.awb}</td>
-                                            <td style={{ padding: '0.75rem', color: '#64748b' }}>
-                                                {new Date(ticket.createdAt).toLocaleDateString()}
-                                            </td>
-                                            <td style={{ padding: '0.75rem', color: '#475569' }}>{ticket.customerName}</td>
-                                            <td style={{ padding: '0.75rem' }}>
-                                                <span style={{ 
-                                                    padding: '0.2rem 0.6rem', borderRadius: '9999px', fontSize: '0.70rem',
-                                                    backgroundColor: colors.bg, color: colors.text, fontWeight: 700,
-                                                    textTransform: 'uppercase'
-                                                }}>
-                                                    {ticket.status.replace('_', ' ')}
-                                                </span>
-                                            </td>
-                                            <td style={{ padding: '0.75rem', maxWidth: '250px' }}>
-                                                <div style={{ color: '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.75rem' }}>
-                                                    {ticket.generatedMessage}
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
+                    <div className="pbx-table">
+                        <div className="pbx-table__scroll">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th scope="col" className={styles.right}>#</th>
+                                        <th scope="col">AWB</th>
+                                        <th scope="col">Opened</th>
+                                        <th scope="col">Customer</th>
+                                        <th scope="col">Status</th>
+                                        <th scope="col">Message</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {tickets.map((ticket, idx) => {
+                                        const status = statusOf(ticket.status);
+                                        return (
+                                            <tr
+                                                key={ticket._id}
+                                                className={cx('is-clickable', selectedTicket?._id === ticket._id && 'is-selected')}
+                                                onClick={() => setSelectedTicket(ticket)}
+                                            >
+                                                <td className={cx('pbx-num', styles.right, styles.muted)}>{idx + 1}</td>
+                                                <td className="pbx-mono">{ticket.awb}</td>
+                                                <td className={styles.date}>{new Date(ticket.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</td>
+                                                <td>{ticket.customerName}</td>
+                                                <td><Badge size="sm" tone={status.tone}>{status.label}</Badge></td>
+                                                <td className={styles.preview}><span>{ticket.generatedMessage}</span></td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 )}
-            </div>
+            </Card>
 
-            {selectedTicket && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                    <div style={{ backgroundColor: '#fff', padding: '1.5rem', borderRadius: '12px', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)', border: '1px solid #f1f5f9' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-                            <h4 style={{ margin: 0, color: '#1e293b' }}>Ticket Details</h4>
-                            <button onClick={() => setSelectedTicket(null)} style={{ background: 'none', border: 'none', fontSize: '1.25rem', cursor: 'pointer', color: '#94a3b8' }}>&times;</button>
-                        </div>
-
-                        <div style={{ marginBottom: '1.25rem', padding: '1rem', backgroundColor: '#f8fafc', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem' }}>
-                                <div style={{ fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 700 }}>Management</div>
-                                {selectedTicket.status !== 'closed' && (
-                                    <button 
-                                        onClick={() => handleUpdateStatus(selectedTicket._id, 'closed')}
-                                        disabled={isUpdating}
-                                        style={{ 
-                                            background: '#fee2e2', color: '#991b1b', border: 'none', 
-                                            padding: '0.3rem 0.8rem', borderRadius: '6px', fontSize: '0.75rem', 
-                                            fontWeight: 700, cursor: 'pointer'
-                                        }}
-                                    >
-                                        {isUpdating ? 'Closing...' : 'Close Ticket'}
-                                    </button>
-                                )}
-                            </div>
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                                <div>
-                                    <div style={{ fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 700 }}>Order</div>
-                                    <div style={{ fontSize: '0.9rem', color: '#1e293b', fontWeight: 600 }}>{selectedTicket.orderNumber}</div>
-                                </div>
-                                <div>
-                                    <div style={{ fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 700 }}>AWB</div>
-                                    <div style={{ fontSize: '0.9rem', color: '#1e293b', fontWeight: 600 }}>{selectedTicket.awb}</div>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div style={{ marginBottom: '1.5rem' }}>
-                            <div style={{ fontSize: '0.75rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.025em', fontWeight: 600 }}>AI Message</div>
-                            <div style={{ 
-                                marginTop: '0.5rem', padding: '1rem', backgroundColor: '#f1f5f9', borderRadius: '8px', 
-                                border: '1px solid #cbd5e1', fontSize: '0.85rem', color: '#1e293b', whiteSpace: 'pre-wrap', lineHeight: 1.5,
-                                maxHeight: '250px', overflowY: 'auto'
-                            }}>
-                                {selectedTicket.generatedMessage}
-                            </div>
-                            <button 
-                                onClick={() => navigator.clipboard.writeText(selectedTicket.generatedMessage)}
-                                style={{ 
-                                    marginTop: '0.5rem', width: '100%', padding: '0.4rem', borderRadius: '6px', 
-                                    backgroundColor: '#fff', border: '1px solid #e2e8f0', color: '#334155', 
-                                    fontSize: '0.75rem', cursor: 'pointer', fontWeight: 600
-                                }}
-                            >
-                                Copy Message
-                            </button>
-                        </div>
-
-                        <div>
-                            <div style={{ fontSize: '0.75rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.025em', fontWeight: 600, marginBottom: '1rem' }}>Tracking Archive</div>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', position: 'relative' }}>
-                                <div style={{ position: 'absolute', left: '7px', top: '10px', bottom: '10px', width: '2px', backgroundColor: '#e2e8f0' }}></div>
-                                {selectedTicket.activities.slice(0, 10).map((activity: any, idx: number) => (
-                                    <div key={idx} style={{ display: 'flex', gap: '0.75rem', position: 'relative', zIndex: 1 }}>
-                                        <div style={{ width: '16px', height: '16px', borderRadius: '50%', backgroundColor: idx === 0 ? '#3b82f6' : '#fff', border: `3px solid ${idx === 0 ? '#3b82f6' : '#cbd5e1'}`, flexShrink: 0, marginTop: '3px' }}></div>
-                                        <div>
-                                            <div style={{ fontWeight: 600, color: '#1e293b', fontSize: '0.8rem' }}>{activity.activity}</div>
-                                            <div style={{ fontSize: '0.7rem', color: '#94a3b8' }}>{activity.date}</div>
-                                        </div>
-                                    </div>
-                                ))}
+            <Drawer
+                open={!!selectedTicket}
+                onClose={() => setSelectedTicket(null)}
+                title="Ticket details"
+                description={selectedTicket ? `${selectedTicket.orderNumber} · AWB ${selectedTicket.awb}` : undefined}
+                footer={selectedTicket && selectedTicket.status !== 'closed' ? (
+                    <Button size="sm" variant="danger" onClick={() => handleUpdateStatus(selectedTicket._id, 'closed')} loading={isUpdating}>Close ticket</Button>
+                ) : undefined}
+            >
+                {selectedTicket && (
+                    <div className={styles.stack}>
+                        <DataList
+                            items={[
+                                { label: 'Order', value: selectedTicket.orderNumber },
+                                { label: 'AWB', value: <span className="pbx-mono">{selectedTicket.awb}</span> },
+                                { label: 'Customer', value: selectedTicket.customerName },
+                                { label: 'Status', value: <Badge size="sm" tone={statusOf(selectedTicket.status).tone}>{statusOf(selectedTicket.status).label}</Badge> },
+                            ]}
+                        />
+                        <Alert
+                            tone="brand"
+                            title="AI message"
+                            action={
+                                <Button size="sm" icon={copied ? 'check' : 'copy'} onClick={() => { navigator.clipboard.writeText(selectedTicket.generatedMessage); setCopied(true); setTimeout(() => setCopied(false), 2000); }}>
+                                    {copied ? 'Copied' : 'Copy'}
+                                </Button>
+                            }
+                        >
+                            <p className={styles.message}>{selectedTicket.generatedMessage}</p>
+                        </Alert>
+                        {selectedTicket.activities.length > 0 && (
+                            <div>
+                                <div className={styles.subHead}><span>Tracking archive</span></div>
+                                <ol className={styles.timeline}>
+                                    {selectedTicket.activities.slice(0, 10).map((activity, idx) => (
+                                        <li key={idx} className={idx === 0 ? styles.timelineNow : undefined}>
+                                            <span className={styles.timelineTitle}>{activity.activity}</span>
+                                            <span className={styles.timelineMeta}>{activity.date}</span>
+                                        </li>
+                                    ))}
+                                </ol>
                                 {selectedTicket.activities.length > 10 && (
-                                    <div style={{ paddingLeft: '1.5rem', fontSize: '0.75rem', color: '#94a3b8', fontStyle: 'italic' }}>
-                                        + {selectedTicket.activities.length - 10} more historic scans
-                                    </div>
+                                    <p className={styles.muted}>{`+ ${selectedTicket.activities.length - 10} more scans`}</p>
                                 )}
                             </div>
-                        </div>
+                        )}
                     </div>
-                </div>
-            )}
-        </div>
+                )}
+            </Drawer>
+        </>
     );
 }

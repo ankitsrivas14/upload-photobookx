@@ -50,14 +50,14 @@ Reference screens: `DashboardPage.tsx` and `SalesPage.tsx`.
 | Sales | Sales management | `pages/SalesManagementPage`, `pages/SalesPage`, `pages/SalesPage/*` | 2,660 | Done |
 | Orders | Backlog | `pages/BacklogPage` | 261 | Done |
 | Orders | Abandoned checkouts | `pages/AbandonedCheckoutsPage` | 263 | Done |
-| Analysis | Section tabs | `pages/AnalysisPage` | 163 | In progress |
-| Analysis | Claude Analysis | `pages/analysis/ClaudeAnalysis` | 247 | In progress |
-| Analysis | Agency | `pages/analysis/Agency` | 540 | In progress |
-| Analysis | Tickets | `pages/analysis/TicketsAnalysis`, `pages/analysis/CreateTicketForm` | 812 | In progress |
-| Analysis | Stuck orders | `pages/analysis/StuckOrdersAnalysis` | 712 | In progress |
-| Analysis | Failed orders | `pages/analysis/FailedOrdersAnalysis` | 238 | In progress |
-| Analysis | Pincodes | `pages/analysis/PinCodesAnalysis` | 516 | In progress |
-| Analysis | Reels | `pages/analysis/Reels` | 287 | In progress |
+| Analysis | Section tabs | `pages/AnalysisPage` | 163 | Done |
+| Analysis | Claude Analysis | `pages/analysis/ClaudeAnalysis` | 247 | Done |
+| Analysis | Agency | `pages/analysis/Agency` | 540 | Done |
+| Analysis | Tickets | `pages/analysis/TicketsAnalysis`, `pages/analysis/CreateTicketForm` | 812 | Done |
+| Analysis | Stuck orders | `pages/analysis/StuckOrdersAnalysis` | 712 | Done |
+| Analysis | Failed orders | `pages/analysis/FailedOrdersAnalysis` | 238 | Done |
+| Analysis | Pincodes | `pages/analysis/PinCodesAnalysis` | 516 | Done |
+| Analysis | Reels | `pages/analysis/Reels` | 287 | Done |
 | Expenses | Section tabs | `pages/ExpensesPage` | 146 | Done |
 | Expenses | Overview | `pages/ExpensesOverview` (not routed or imported anywhere) | 106 | Delete in cleanup |
 | Expenses | Meta ads | `pages/MetaAdsPage` | 290 | Done |

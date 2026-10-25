@@ -1,13 +1,15 @@
 import { useState, useEffect, useMemo } from 'react';
 import { api } from '../../services/api';
+import { Alert, Badge, Button, Card, EmptyState, Skeleton, StatCard, StatStrip } from '../../components/ui/pbx';
+import { cx } from '../../components/ui/format';
 import styles from '../AnalysisPage.module.css';
 
 type StatMap = Record<string, { failed: number; total: number }>;
 
-function verdictColor(rate: number) {
-    if (rate <= 8)  return { bg: '#dcfce7', color: '#15803d', label: 'Good' };
-    if (rate <= 18) return { bg: '#fef3c7', color: '#b45309', label: 'Caution' };
-    return             { bg: '#fee2e2', color: '#b91c1c', label: 'Avoid' };
+function verdict(rate: number): { tone: 'positive' | 'caution' | 'negative'; label: string } {
+    if (rate <= 8)  return { tone: 'positive', label: 'Good' };
+    if (rate <= 18) return { tone: 'caution', label: 'Caution' };
+    return             { tone: 'negative', label: 'Avoid' };
 }
 
 function fmt(n: number) { return n.toLocaleString('en-IN'); }
@@ -91,148 +93,99 @@ export function FailedOrdersAnalysis() {
 
     const overallRate = totalOrders > 0 ? ((failedCount / totalOrders) * 100).toFixed(1) : '0.0';
 
-    if (isLoading) return (
-        <div className={styles['loading-section']}>
-            <div className={styles.spinner} />
-            <p>Analysing orders…</p>
-        </div>
-    );
+    if (isLoading) return <Skeleton lines={8} />;
 
     if (error) return (
-        <div className={`${styles['content-section']} ${styles['error-state']}`}>
-            <p>{error}</p>
-            <button onClick={load} className={styles['retry-btn']}>Retry</button>
-        </div>
+        <Alert tone="negative" action={<Button size="sm" onClick={load}>Retry</Button>}>{error}</Alert>
     );
 
     const blockCities = cities.filter(c => c.failed >= 5 && c.rate >= 20);
     const watchCities = cities.filter(c => !(c.failed >= 5 && c.rate >= 20) && c.failed >= 3 && c.rate >= 25);
+    const rate = parseFloat(overallRate);
+
+    // A city chip: click to mark it added to the COD block list (or undo)
+    const cityChip = (c: (typeof cities)[number], tone: 'negative' | 'caution') => {
+        const done = addedCities.has(c.city);
+        return (
+            <button
+                key={c.city}
+                type="button"
+                className={cx(styles.city, styles[tone], done && styles.cityDone)}
+                aria-pressed={done}
+                onClick={() => markAdded(c.city)}
+            >
+                <span className={styles.cityName}>{c.city}</span>
+                <span className={styles.cityMeta}>{done ? '✓ added' : `${c.rate}% fail · ${c.failed} of ${c.total}`}</span>
+            </button>
+        );
+    };
 
     return (
-        <div className={styles['analysis-content']} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', paddingBottom: '2rem' }}>
+        <>
+            <StatStrip>
+                <StatCard label="Failed orders" value={fmt(failedCount)} tone="negative" />
+                <StatCard label="Total orders" value={fmt(totalOrders)} />
+                <StatCard label="Fail rate" value={`${overallRate}%`} tone={rate > 15 ? 'negative' : rate > 8 ? 'caution' : 'positive'} />
+            </StatStrip>
 
-            {/* ── Summary stats ── */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem' }}>
-                {[
-                    { label: 'Failed Orders', value: fmt(failedCount), color: '#ef4444' },
-                    { label: 'Total Orders',  value: fmt(totalOrders), color: '#1e293b' },
-                    { label: 'Fail Rate',     value: `${overallRate}%`, color: parseFloat(overallRate) > 15 ? '#ef4444' : parseFloat(overallRate) > 8 ? '#d97706' : '#16a34a' },
-                ].map(s => (
-                    <div key={s.label} className={styles['stat-card']}>
-                        <div className={styles['stat-value']} style={{ color: s.color }}>{s.value}</div>
-                        <div className={styles['stat-label']}>{s.label}</div>
-                    </div>
-                ))}
-            </div>
+            <div className={styles.split}>
+                <Card title="Courier performance" eyebrow="sorted by fail rate" padding="sm">
+                    {couriers.length === 0 ? (
+                        <EmptyState size="sm" icon="truck" title="No courier data yet" />
+                    ) : (
+                        <div className="pbx-table">
+                            <div className="pbx-table__scroll">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th scope="col">Courier</th>
+                                            <th scope="col" className={styles.right}>Orders</th>
+                                            <th scope="col" className={styles.right}>Failed</th>
+                                            <th scope="col" className={styles.right}>Fail rate</th>
+                                            <th scope="col">Verdict</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {couriers.map(c => {
+                                            const v = verdict(c.rate);
+                                            return (
+                                                <tr key={c.courier}>
+                                                    <td className={styles.strong}>{c.courier}</td>
+                                                    <td className={cx('pbx-num', styles.right)}>{fmt(c.total)}</td>
+                                                    <td className={cx('pbx-num', styles.right)}>{fmt(c.failed)}</td>
+                                                    <td className={cx('pbx-num', styles.right, styles.strong)}>{`${c.rate}%`}</td>
+                                                    <td><Badge size="sm" tone={v.tone}>{v.label}</Badge></td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    )}
+                </Card>
 
-            {/* ── Two columns ── */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', alignItems: 'start' }}>
-
-                {/* Courier table */}
-                <div className={styles['table-card']}>
-                    <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid #f1f5f9' }}>
-                        <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#1e293b' }}>Courier Performance</div>
-                        <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.125rem' }}>Sorted by fail rate — use Good, avoid Red</div>
-                    </div>
-                    <table className={styles['data-table']}>
-                        <thead>
-                            <tr>
-                                <th>Courier</th>
-                                <th style={{ textAlign: 'right' }}>Orders</th>
-                                <th style={{ textAlign: 'right' }}>Failed</th>
-                                <th style={{ textAlign: 'right' }}>Fail Rate</th>
-                                <th style={{ textAlign: 'center' }}>Verdict</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {couriers.map(c => {
-                                const v = verdictColor(c.rate);
-                                return (
-                                    <tr key={c.courier}>
-                                        <td style={{ fontWeight: 500, color: '#1e293b', fontSize: '0.875rem' }}>{c.courier}</td>
-                                        <td style={{ textAlign: 'right', color: '#64748b', fontSize: '0.875rem' }}>{fmt(c.total)}</td>
-                                        <td style={{ textAlign: 'right', color: '#64748b', fontSize: '0.875rem' }}>{fmt(c.failed)}</td>
-                                        <td style={{ textAlign: 'right', fontWeight: 600, fontSize: '0.875rem', color: v.color }}>{c.rate}%</td>
-                                        <td style={{ textAlign: 'center' }}>
-                                            <span style={{ display: 'inline-block', padding: '0.2rem 0.6rem', borderRadius: '999px', fontSize: '0.7rem', fontWeight: 600, background: v.bg, color: v.color }}>
-                                                {v.label}
-                                            </span>
-                                        </td>
-                                    </tr>
-                                );
-                            })}
-                            {couriers.length === 0 && (
-                                <tr><td colSpan={5} style={{ textAlign: 'center', color: '#94a3b8', padding: '2rem' }}>No data available</td></tr>
+                <Card title="City COD risk" eyebrow="click a city once it is on your COD block list">
+                    {blockCities.length === 0 && watchCities.length === 0 ? (
+                        <EmptyState size="sm" icon="map-pin" title="No high-risk cities" description="No city has enough failed COD orders to flag." />
+                    ) : (
+                        <div className={styles.cityGroups}>
+                            {blockCities.length > 0 && (
+                                <div>
+                                    <div className={styles.groupLabel}>Block COD <span>5+ failed, 20%+ fail rate</span></div>
+                                    <div className={styles.cities}>{blockCities.map(c => cityChip(c, 'negative'))}</div>
+                                </div>
                             )}
-                        </tbody>
-                    </table>
-                </div>
-
-                {/* City COD Risk */}
-                <div className={styles['table-card']}>
-                    <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid #f1f5f9' }}>
-                        <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#1e293b' }}>City COD Risk</div>
-                        <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.125rem' }}>Click a city to mark it as added to your COD block list</div>
-                    </div>
-                    <div style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-
-                        {blockCities.length > 0 && (
-                            <div>
-                                <div style={{ fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#b91c1c', marginBottom: '0.625rem' }}>
-                                    Block COD
+                            {watchCities.length > 0 && (
+                                <div>
+                                    <div className={styles.groupLabel}>Watch <span>3+ failed, 25%+ fail rate</span></div>
+                                    <div className={styles.cities}>{watchCities.map(c => cityChip(c, 'caution'))}</div>
                                 </div>
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                                    {blockCities.map(c => {
-                                        const done = addedCities.has(c.city);
-                                        return (
-                                            <div
-                                                key={c.city}
-                                                onClick={() => markAdded(c.city)}
-                                                style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '0.5rem 0.875rem', background: done ? '#f0fdf4' : '#fff1f2', border: `1px solid ${done ? '#86efac' : '#fecdd3'}`, borderRadius: '8px', gap: '0.1rem', cursor: 'pointer', transition: 'box-shadow 0.15s' }}
-                                                onMouseEnter={e => (e.currentTarget.style.boxShadow = `0 0 0 2px ${done ? '#22c55e' : '#f43f5e'}`)}
-                                                onMouseLeave={e => (e.currentTarget.style.boxShadow = 'none')}
-                                            >
-                                                <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: done ? '#15803d' : '#9f1239' }}>{c.city}</span>
-                                                <span style={{ fontSize: '0.7rem', color: done ? '#16a34a' : '#e11d48' }}>{done ? '✓ added' : `${c.rate}% fail`}</span>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                        )}
-
-                        {watchCities.length > 0 && (
-                            <div>
-                                <div style={{ fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#92400e', marginBottom: '0.625rem' }}>
-                                    Watch
-                                </div>
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                                    {watchCities.map(c => {
-                                        const done = addedCities.has(c.city);
-                                        return (
-                                            <div
-                                                key={c.city}
-                                                onClick={() => markAdded(c.city)}
-                                                style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '0.5rem 0.875rem', background: done ? '#f0fdf4' : '#fffbeb', border: `1px solid ${done ? '#86efac' : '#fde68a'}`, borderRadius: '8px', gap: '0.1rem', cursor: 'pointer', transition: 'box-shadow 0.15s' }}
-                                                onMouseEnter={e => (e.currentTarget.style.boxShadow = `0 0 0 2px ${done ? '#22c55e' : '#f59e0b'}`)}
-                                                onMouseLeave={e => (e.currentTarget.style.boxShadow = 'none')}
-                                            >
-                                                <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: done ? '#15803d' : '#78350f' }}>{c.city}</span>
-                                                <span style={{ fontSize: '0.7rem', color: done ? '#16a34a' : '#b45309' }}>{done ? '✓ added' : `${c.rate}% fail`}</span>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                        )}
-
-                        {blockCities.length === 0 && watchCities.length === 0 && (
-                            <div style={{ textAlign: 'center', color: '#94a3b8', fontSize: '0.875rem', padding: '1.5rem 0' }}>No high-risk cities detected</div>
-                        )}
-                    </div>
-                </div>
-
+                            )}
+                        </div>
+                    )}
+                </Card>
             </div>
-        </div>
+        </>
     );
 }

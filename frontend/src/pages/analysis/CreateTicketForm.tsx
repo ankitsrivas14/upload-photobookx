@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../../services/api';
+import { Badge, Button, Card, Icon, OptionCard, TextField } from '../../components/ui/pbx';
 import styles from '../AnalysisPage.module.css';
 
 interface OrderSuggestion {
@@ -110,7 +111,7 @@ export function CreateTicketForm() {
                     setCustomerPhone(refreshedOrder.customerPhone);
                 }
             }
-        } catch (err) {
+        } catch {
             console.warn('Failed to fetch full order details upon selection');
         }
     };
@@ -138,7 +139,7 @@ export function CreateTicketForm() {
             if (orderNumber.trim().length >= 2) {
                 await handleFetchOrder();
             }
-        } catch (e) {
+        } catch {
             toast.error('Sync failed');
         } finally {
             setIsSearching(false);
@@ -179,7 +180,7 @@ export function CreateTicketForm() {
             } else {
                 toast.error('Failed to generate AI message');
             }
-        } catch (err) {
+        } catch {
             toast.error('Failed to generate AI message');
         } finally {
             setIsGenerating(false);
@@ -221,327 +222,156 @@ export function CreateTicketForm() {
             } else {
                 toast.error(res.error || 'Failed to create ticket');
             }
-        } catch (err) {
+        } catch {
             toast.error('Error creating ticket');
         } finally {
             setIsSubmitting(false);
         }
     };
 
+    const phoneMissing = !customerPhone || customerPhone.includes('x');
+
     return (
-        <div className={styles['analysis-content']} style={{ maxWidth: '700px', margin: '0 auto' }}>
-            <div style={{ backgroundColor: '#fff', padding: '2rem', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)', border: '1px solid #f1f5f9' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '2.5rem' }}>
-                    <Link 
-                        to="/admin/analysis/tickets" 
-                        style={{ 
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            width: '32px', height: '32px', borderRadius: '8px', backgroundColor: '#f1f5f9',
-                            color: '#475569', textDecoration: 'none'
-                        }}
-                    >
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                            <polyline points="15 18 9 12 15 6" />
-                        </svg>
-                    </Link>
-                    <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700, color: '#1e293b' }}>
-                        Raise New Support Ticket
-                    </h3>
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                    {/* Order Selection */}
-                    <div style={{ position: 'relative' }} ref={dropdownRef}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: '#475569', margin: 0 }}>
-                                Order Number
-                            </label>
-                            <button 
-                                onClick={handleSyncOrders}
-                                style={{ background: 'none', border: 'none', color: '#7c3aed', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', padding: 0 }}
-                            >
-                                🔄 Sync from Shopify
-                            </button>
-                        </div>
-                        <div style={{ display: 'flex', gap: '0.5rem', position: 'relative' }}>
-                            <input
-                                type="text"
-                                value={orderNumber}
-                                onChange={(e) => setOrderNumber(e.target.value)}
-                                onKeyDown={(e) => e.key === 'Enter' && handleFetchOrder()}
-                                onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
-                                placeholder="Order Number or Customer Name"
-                                style={{ 
-                                    flex: 1, padding: '0.75rem 1rem', borderRadius: '8px', 
-                                    border: '1px solid #e2e8f0', fontSize: '0.95rem', outline: 'none'
-                                }}
-                            />
-                            <button
-                                onClick={handleFetchOrder}
-                                disabled={isSearching}
-                                style={{
-                                    padding: '0 1.5rem',
-                                    backgroundColor: '#0f172a',
-                                    color: '#fff',
-                                    borderRadius: '8px',
-                                    border: 'none',
-                                    fontWeight: 600,
-                                    fontSize: '0.95rem',
-                                    cursor: isSearching ? 'default' : 'pointer',
-                                    opacity: isSearching ? 0.7 : 1,
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    minWidth: '100px',
-                                    transition: 'background-color 0.2s'
-                                }}
-                                onMouseEnter={(e) => { if(!isSearching) e.currentTarget.style.backgroundColor = '#1e293b' }}
-                                onMouseLeave={(e) => { if(!isSearching) e.currentTarget.style.backgroundColor = '#0f172a' }}
-                            >
-                                {isSearching ? (
-                                    <div className={styles.spinner} style={{ width: '18px', height: '18px', borderTopColor: '#fff', borderWidth: '2px' }}></div>
-                                ) : 'Fetch'}
-                            </button>
-                        </div>
-
-                        {selectedOrder && !showSuggestions && (
-                            <div style={{ 
-                                marginTop: '1.25rem', padding: '1.25rem', 
-                                background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)', 
-                                borderRadius: '12px', border: '1px solid #e2e8f0',
-                                boxShadow: 'inset 0 1px 1px 0 rgba(255, 255, 255, 0.5)',
-                                display: 'flex', flexDirection: 'column', gap: '0.75rem'
-                            }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                                    <div>
-                                        <div style={{ fontSize: '0.7rem', color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.25rem' }}>Selected Customer</div>
-                                        <div style={{ fontWeight: 800, color: '#0f172a', fontSize: '1.1rem' }}>{selectedOrder.customerName}</div>
-                                    </div>
-                                    {customerPhone && !customerPhone.includes('x') ? (
-                                        <span style={{ fontSize: '0.7rem', color: '#047857', fontWeight: 700, backgroundColor: '#d1fae5', padding: '4px 8px', borderRadius: '6px', border: '1px solid #a7f3d0' }}>DATA VERIFIED</span>
-                                    ) : (
-                                        <span style={{ fontSize: '0.7rem', color: '#b45309', fontWeight: 700, backgroundColor: '#ffedd5', padding: '4px 8px', borderRadius: '6px', border: '1px solid #fed7aa' }}>NEEDS PHONE NUMBER</span>
-                                    )}
-                                </div>
-                                
-                                {selectedOrder.shopifyOrderId ? (
-                                    <a 
-                                        href={`https://admin.shopify.com/store/c3532f-a9/orders/${selectedOrder.shopifyOrderId}`}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        style={{ 
-                                            fontSize: '0.8rem', color: '#2563eb', display: 'inline-flex', 
-                                            alignItems: 'center', gap: '0.4rem', textDecoration: 'none',
-                                            fontWeight: 600, width: 'fit-content'
-                                        }}
-                                    >
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                                            <polyline points="15 3 21 3 21 9" />
-                                            <line x1="10" y1="14" x2="21" y2="3" />
-                                        </svg>
-                                        View Order in Shopify Admin
-                                    </a>
-                                ) : (
-                                    <div style={{ fontSize: '0.75rem', color: '#94a3b8', fontStyle: 'italic' }}>Fetching Shopify link...</div>
-                                )}
-
-                                <div style={{ marginTop: '0.25rem' }}>
-                                    <div style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 600, marginBottom: '0.4rem' }}>Verify or Paste Address from Shopify</div>
-                                    <input 
-                                        type="text"
-                                        placeholder="Paste address block here (e.g. from Shopify Admin)"
-                                        value={customerPhone === 'xxxxxxxxxx' ? '' : customerPhone}
-                                        onChange={(e) => handlePhoneChange(e.target.value)}
-                                        style={{ 
-                                            padding: '0.75rem', fontSize: '0.95rem', width: '100%', 
-                                            borderRadius: '8px', border: '2px solid',
-                                            borderColor: customerPhone.includes('x') || !customerPhone ? '#fbbf24' : '#e2e8f0',
-                                            backgroundColor: '#fff',
-                                            transition: 'all 0.2s ease', outline: 'none',
-                                            boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)'
-                                        }}
-                                        onFocus={(e) => (e.target.style.borderColor = '#7c3aed')}
-                                        onBlur={(e) => (e.target.style.borderColor = customerPhone.includes('x') || !customerPhone ? '#fbbf24' : '#e2e8f0')}
-                                    />
-                                </div>
-                            </div>
-                        )}
-
-                        {showSuggestions && (suggestions.length > 0 || isSearching) && (
-                            <div style={{ 
-                                position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50,
-                                backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px',
-                                marginTop: '4px', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)',
-                                maxHeight: '200px', overflowY: 'auto'
-                            }}>
-                                {suggestions.length > 0 ? suggestions.map((s, idx) => (
-                                    <div 
-                                        key={idx}
-                                        onClick={() => handleSelectOrder(s)}
-                                        style={{ 
-                                            padding: '0.75rem 1rem', cursor: 'pointer', borderBottom: '1px solid #f1f5f9',
-                                            display: 'flex', justifyContent: 'space-between'
-                                        }}
-                                        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#f8fafc')}
-                                        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
-                                    >
-                                        <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                            <span style={{ fontWeight: 600, color: '#1e293b' }}>{s.name}</span>
-                                            <span style={{ color: '#64748b', fontSize: '0.8rem' }}>{s.customerName}</span>
-                                        </div>
-                                    </div>
-                                )) : !isSearching && (
-                                    <div style={{ padding: '1.5rem', textAlign: 'center', color: '#64748b', fontSize: '0.85rem' }}>
-                                        No orders found for "{orderNumber}"
-                                    </div>
-                                )}
-                            </div>
-                        )}
+        <Card
+            className={styles.formCard}
+            title="New support ticket"
+            eyebrow="for an order that needs the customer's help"
+            actions={<Button size="sm" variant="ghost" icon="chevron-left" onClick={() => navigate('/admin/analysis/tickets')}>Back to tickets</Button>}
+        >
+            <div className={styles.stack}>
+                <div className={styles.searchWrap} ref={dropdownRef}>
+                    <div className={styles.searchRow}>
+                        <TextField
+                            label="Order"
+                            placeholder="Order number or customer name"
+                            value={orderNumber}
+                            onChange={(e) => setOrderNumber(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && handleFetchOrder()}
+                            onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
+                        />
+                        <Button onClick={handleFetchOrder} loading={isSearching}>Fetch</Button>
+                        <Button variant="ghost" icon="refresh-cw" onClick={handleSyncOrders} disabled={isSearching}>Sync from Shopify</Button>
                     </div>
 
-                    {/* Issue Type */}
-                    <div>
-                        <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: '#475569', marginBottom: '0.5rem' }}>
-                            Issue Type
-                        </label>
-                        <select
-                            value={issueType}
-                            onChange={(e) => setIssueType(e.target.value)}
-                            style={{ 
-                                width: '100%', padding: '0.75rem 1rem', borderRadius: '8px', 
-                                border: '1px solid #e2e8f0', fontSize: '0.95rem', outline: 'none',
-                                backgroundColor: '#fff'
-                            }}
-                        >
-                            <option value="" disabled>Select Issue Type</option>
-                            <option value="incomplete_address">Incomplete Address</option>
-                            <option value="multiple_orders">Multiple Orders</option>
-                        </select>
-                    </div>
-
-                    {/* AI Generator Button */}
-                    <button
-                        onClick={handleGenerateAiMessage}
-                        disabled={!selectedOrder || isGenerating || !issueType}
-                        style={{ 
-                            alignSelf: 'flex-start', padding: '0.6rem 1.2rem', borderRadius: '8px',
-                            backgroundColor: selectedOrder ? '#7c3aed' : '#f1f5f9',
-                            color: selectedOrder ? '#fff' : '#94a3b8',
-                            border: 'none', fontSize: '0.875rem', fontWeight: 600, cursor: selectedOrder ? 'pointer' : 'default',
-                            display: 'flex', alignItems: 'center', gap: '0.5rem', transition: 'all 0.2s'
-                        }}
-                    >
-                        {isGenerating ? (
-                            <div className={styles.spinner} style={{ width: '16px', height: '16px', borderTopColor: '#fff', borderWidth: '2px' }}></div>
-                        ) : '🪄'}
-                        Generate AI Message
-                    </button>
-
-                    {/* AI Message Preview */}
-                    {aiMessage && (
-                        <div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: '#475569', margin: 0 }}>
-                                    WhatsApp Message Preview
-                                </label>
-                                <button
-                                    onClick={() => {
-                                        navigator.clipboard.writeText(aiMessage);
-                                        toast.success('Message copied to clipboard');
-                                    }}
-                                    style={{ 
-                                        background: 'none', border: 'none', color: '#7c3aed', 
-                                        fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', padding: 0,
-                                        display: 'flex', alignItems: 'center', gap: '0.25rem'
-                                    }}
-                                >
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                                    </svg>
-                                    Copy Message
-                                </button>
-                            </div>
-                            <textarea
-                                value={aiMessage}
-                                onChange={(e) => setAiMessage(e.target.value)}
-                                style={{ 
-                                    width: '100%', padding: '1rem', borderRadius: '8px', border: '1px solid #7c3aed', 
-                                    fontSize: '0.9rem', minHeight: '120px', lineHeight: 1.5, resize: 'vertical',
-                                    marginBottom: '0.75rem'
-                                }}
-                            />
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                                <div style={{ 
-                                    display: 'flex', alignItems: 'center', gap: '0.5rem',
-                                    borderRadius: '8px', border: '1px solid #e2e8f0', 
-                                    padding: '0.4rem 0.5rem', backgroundColor: '#f8fafc'
-                                }}>
-                                    <input 
-                                        type="text" 
-                                        readOnly 
-                                        value={getWaLink()}
-                                        style={{ 
-                                            flex: 1, border: 'none', background: 'none', 
-                                            fontSize: '0.8rem', color: '#64748b', outline: 'none'
-                                        }}
-                                    />
-                                    <button 
-                                        onClick={() => handleCopyLink(getWaLink())}
-                                        style={{ 
-                                            backgroundColor: '#fff', border: '1px solid #e2e8f0', 
-                                            borderRadius: '6px', padding: '0.3rem', 
-                                            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center'
-                                        }}
-                                        title="Copy Link"
-                                    >
-                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                                        </svg>
+                    {showSuggestions && (suggestions.length > 0 || isSearching) && (
+                        <ul className={styles.suggest} role="listbox" aria-label="Matching orders">
+                            {suggestions.length > 0 ? suggestions.map((s, idx) => (
+                                <li key={idx}>
+                                    <button type="button" role="option" aria-selected={false} onClick={() => handleSelectOrder(s)}>
+                                        <span className="pbx-mono">{s.name}</span>
+                                        <span className={styles.muted}>{s.customerName}</span>
                                     </button>
-                                </div>
-                                
-                                {selectedOrder?.customerPhone && (
-                                    <a 
-                                        href={`${getWaLink()}?text=${encodeURIComponent(aiMessage)}`}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        style={{ 
-                                            display: 'inline-flex', alignItems: 'center', gap: '0.5rem',
-                                            color: '#16a34a', fontSize: '0.85rem', fontWeight: 600, textDecoration: 'none'
-                                        }}
-                                    >
-                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                                            <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.414 0 .004 5.412.001 12.049a11.82 11.82 0 001.592 5.911L0 24l6.117-1.605a11.794 11.794 0 005.925 1.599h.005c6.637 0 12.046-5.412 12.049-12.05a11.79 11.79 0 00-3.48-8.513z"/>
-                                        </svg>
-                                        Direct WhatsApp Link
-                                    </a>
-                                )}
-                            </div>
-                        </div>
+                                </li>
+                            )) : !isSearching && (
+                                <li className={styles.muted}>{`No orders found for "${orderNumber}"`}</li>
+                            )}
+                        </ul>
                     )}
+                </div>
 
-                    {/* Actions */}
-                    <div style={{ marginTop: '1rem', display: 'flex', gap: '1rem' }}>
-                        <button
-                            onClick={handleSubmit}
-                            disabled={!selectedOrder || !aiMessage || isSubmitting}
-                            style={{ 
-                                flex: 1, padding: '0.875rem', borderRadius: '8px',
-                                backgroundColor: (!selectedOrder || !aiMessage) ? '#f1f5f9' : '#0f172a',
-                                color: (!selectedOrder || !aiMessage) ? '#94a3b8' : '#fff',
-                                border: 'none', fontSize: '1rem', fontWeight: 700, 
-                                cursor: (!selectedOrder || !aiMessage) ? 'default' : 'pointer',
-                                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem'
-                            }}
-                        >
-                            {isSubmitting ? 'Raising Ticket...' : 'Confirm & Create Ticket'}
-                        </button>
+                {selectedOrder && !showSuggestions && (
+                    <div className={styles.customer}>
+                        <div className={styles.customerHead}>
+                            <div>
+                                <div className={styles.metaLabel}>Selected customer</div>
+                                <div className={styles.customerName}>{selectedOrder.customerName}</div>
+                            </div>
+                            {phoneMissing ? (
+                                <Badge tone="caution">Needs phone number</Badge>
+                            ) : (
+                                <Badge tone="positive">Data verified</Badge>
+                            )}
+                        </div>
+                        {selectedOrder.shopifyOrderId ? (
+                            <a
+                                className={styles.link}
+                                href={`https://admin.shopify.com/store/c3532f-a9/orders/${selectedOrder.shopifyOrderId}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                            >
+                                <Icon name="external-link" size={13} />
+                                View the order in Shopify admin
+                            </a>
+                        ) : (
+                            <span className={styles.muted}>Fetching the Shopify link…</span>
+                        )}
+                        <TextField
+                            label="Phone, or the address from Shopify"
+                            placeholder="Paste the address block from Shopify admin"
+                            hint="The phone number is picked out of a pasted address."
+                            value={customerPhone === 'xxxxxxxxxx' ? '' : customerPhone}
+                            onChange={(e) => handlePhoneChange(e.target.value)}
+                            error={phoneMissing ? 'No phone number yet' : undefined}
+                        />
+                    </div>
+                )}
+
+                <div className={styles.field}>
+                    <span className={styles.fieldLabel}>Issue</span>
+                    <div className={styles.options} role="radiogroup" aria-label="Issue">
+                        <OptionCard
+                            name="issueType"
+                            value="incomplete_address"
+                            checked={issueType === 'incomplete_address'}
+                            onChange={() => setIssueType('incomplete_address')}
+                            title="Incomplete address"
+                            description="Ask the customer for the missing parts of the address."
+                        />
+                        <OptionCard
+                            name="issueType"
+                            value="multiple_orders"
+                            checked={issueType === 'multiple_orders'}
+                            onChange={() => setIssueType('multiple_orders')}
+                            title="Multiple orders"
+                            description="Check with a customer who placed more than one order."
+                        />
                     </div>
                 </div>
+
+                <div>
+                    <Button icon="sparkles" onClick={handleGenerateAiMessage} loading={isGenerating} disabled={!selectedOrder || !issueType}>
+                        Generate AI message
+                    </Button>
+                </div>
+
+                {aiMessage && (
+                    <div className={styles.stack}>
+                        <TextField
+                            multiline
+                            rows={6}
+                            label="WhatsApp message"
+                            value={aiMessage}
+                            onChange={(e) => setAiMessage(e.target.value)}
+                        />
+                        <div className={styles.waRow}>
+                            <span className="pbx-input pbx-input--sm">
+                                <input type="text" readOnly aria-label="WhatsApp link" value={getWaLink()} />
+                            </span>
+                            <Button size="sm" icon="copy" onClick={() => handleCopyLink(getWaLink())}>Copy link</Button>
+                            <Button
+                                size="sm"
+                                icon="copy"
+                                onClick={() => {
+                                    navigator.clipboard.writeText(aiMessage);
+                                    toast.success('Message copied to clipboard');
+                                }}
+                            >
+                                Copy message
+                            </Button>
+                        </div>
+                        {selectedOrder?.customerPhone && (
+                            <a className={styles.link} href={`${getWaLink()}?text=${encodeURIComponent(aiMessage)}`} target="_blank" rel="noopener noreferrer">
+                                <Icon name="message-circle" size={13} />
+                                Open in WhatsApp with this message
+                            </a>
+                        )}
+                    </div>
+                )}
+
+                <Button variant="primary" onClick={handleSubmit} loading={isSubmitting} disabled={!selectedOrder || !aiMessage} fullWidth>
+                    {isSubmitting ? 'Creating ticket…' : 'Create ticket'}
+                </Button>
             </div>
-        </div>
+        </Card>
     );
 }

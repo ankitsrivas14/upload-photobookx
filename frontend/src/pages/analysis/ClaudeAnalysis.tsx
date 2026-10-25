@@ -1,14 +1,16 @@
 import { useState, useEffect } from 'react';
 import { api } from '../../services/api';
 import type { ClaudeCall, ClaudeReview, ClaudeWindow } from '../../services/api';
-import { History, Sparkles, CheckCircle2, CircleDashed } from 'lucide-react';
+import { Alert, Badge, Card, DataList, EmptyState, Icon, Select, Skeleton, StatCard, StatStrip } from '../../components/ui/pbx';
+import { cx } from '../../components/ui/format';
+import styles from '../AnalysisPage.module.css';
 
-const DECISION_COLORS: Record<string, { bg: string; text: string }> = {
-    SCALE: { bg: '#e0f2fe', text: '#0369a1' },
-    DUPLICATE: { bg: '#f3e8ff', text: '#6b21a8' },
-    CONTINUE: { bg: '#dcfce7', text: '#166534' },
-    MONITOR: { bg: '#fef3c7', text: '#92400e' },
-    CLOSE: { bg: '#fee2e2', text: '#991b1b' },
+const DECISION_TONES: Record<string, 'info' | 'brand' | 'positive' | 'caution' | 'negative'> = {
+    SCALE: 'info',
+    DUPLICATE: 'brand',
+    CONTINUE: 'positive',
+    MONITOR: 'caution',
+    CLOSE: 'negative',
 };
 
 const WINDOWS: Array<[string, string]> = [
@@ -17,10 +19,6 @@ const WINDOWS: Array<[string, string]> = [
     ['active7', 'Last 7 active days'],
     ['active30', 'Last 30 active days'],
 ];
-
-const card = { backgroundColor: '#fff', border: '1px solid #f1f5f9', borderRadius: '10px', padding: '1rem', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' };
-const label = { margin: 0, fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase' as const, letterSpacing: '0.04em' };
-const list = { margin: '0.5rem 0 0', paddingLeft: '1.1rem', fontSize: '0.85rem', color: '#475569', lineHeight: 1.5 };
 
 const inr = (n?: number | null) => (n == null ? '—' : `₹${Math.round(n).toLocaleString('en-IN')}`);
 const formatDate = (d: string) =>
@@ -76,50 +74,45 @@ export function ClaudeAnalysis() {
     const breakeven = review?.breakeven?.metaRoas;
 
     return (
-        <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <Sparkles size={16} color="#7c3aed" />
-                    <h1 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 600, color: '#1e293b' }}>Claude Analysis</h1>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', backgroundColor: '#fff', border: '1px solid #e2e8f0', padding: '0.4rem 0.75rem', borderRadius: '8px' }}>
-                    <History size={14} color="#94a3b8" />
-                    <select
-                        value={selectedDate}
-                        onChange={(e) => e.target.value && loadReview(e.target.value)}
-                        disabled={dates.length === 0}
-                        style={{ border: 'none', background: 'none', fontSize: '0.825rem', color: '#475569', fontWeight: 600, outline: 'none', cursor: 'pointer' }}
-                    >
-                        {dates.length === 0 && <option value="">No reviews yet</option>}
-                        {dates.map((d) => (
-                            <option key={d} value={d}>{formatDate(d)}</option>
-                        ))}
-                    </select>
-                </div>
+        <>
+            <div className={styles.toolbar}>
+                <Select
+                    label="Review"
+                    inlineLabel
+                    size="sm"
+                    value={selectedDate}
+                    onChange={(e) => e.target.value && loadReview(e.target.value)}
+                    disabled={dates.length === 0}
+                    options={dates.length === 0 ? [{ value: '', label: 'No reviews yet' }] : dates.map((d) => ({ value: d, label: formatDate(d) }))}
+                />
+                {review?.dataAsOf && <span className={styles.meta}>{`data as of ${formatTime(review.dataAsOf)}`}</span>}
             </div>
 
-            {error && <div style={{ ...card, borderColor: '#fecaca', color: '#991b1b', fontSize: '0.85rem' }}>{error}</div>}
+            {error && <Alert tone="negative">{error}</Alert>}
 
             {isLoading ? (
-                <div style={{ padding: '2rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.85rem' }}>Loading Claude analysis...</div>
+                <Skeleton lines={8} />
             ) : !review ? (
                 !error && (
-                    <div style={{ ...card, color: '#64748b', fontSize: '0.85rem' }}>
-                        No Claude reviews yet. Each "ads" review in Claude Code shows up here with the decision and the reason for every ad set.
-                    </div>
+                    <EmptyState
+                        icon="sparkles"
+                        title="No reviews yet"
+                        description={'Each "ads" review in Claude Code shows up here with the decision and the reason for every ad set.'}
+                    />
                 )
             ) : (
                 <>
                     <Summary review={review} />
                     {review.previousGrading && review.previousGrading.length > 0 && (
-                        <div style={card}>
-                            <p style={label}>How the previous calls played out</p>
-                            <ul style={list}>
-                                {review.previousGrading.map((g) => (
-                                    <li key={`${g.adsetName}-${g.decision}`}><strong style={{ color: '#1e293b' }}>{g.adsetName}</strong> ({g.decision}): {g.outcome}</li>
-                                ))}
-                            </ul>
-                        </div>
+                        <Card title="How the previous calls played out">
+                            <DataList
+                                items={review.previousGrading.map((g) => ({
+                                    label: g.adsetName,
+                                    sub: g.outcome,
+                                    value: <Badge size="sm" tone={DECISION_TONES[g.decision] ?? 'neutral'} dot={false}>{g.decision}</Badge>,
+                                }))}
+                            />
+                        </Card>
                     )}
                     {review.calls.map((call) => (
                         <CallCard key={call.adsetId} call={call} breakeven={breakeven} />
@@ -127,56 +120,52 @@ export function ClaudeAnalysis() {
                     <Footnotes checks={review.checks} notes={review.notes} />
                 </>
             )}
-        </div>
+        </>
     );
 }
 
 function Summary({ review }: { review: ClaudeReview }) {
     const be = review.breakeven;
-    const tiles: Array<[string, string]> = [
-        ['Data as of', formatTime(review.dataAsOf) || '—'],
-        ['Breakeven ROAS (Meta)', be ? be.metaRoas.toFixed(2) : '—'],
-        ['Orders delivered', be ? `${be.deliveryRatePct}%` : '—'],
-        ['Margin per order', be ? inr(be.marginPerOrder) : '—'],
-        ['Daily budget', review.account ? `${inr(review.account.budgetBefore)} → ${inr(review.account.budgetAfter)}` : '—'],
-    ];
     return (
-        <div style={card}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '0.75rem' }}>
-                {tiles.map(([title, value]) => (
-                    <div key={title}>
-                        <p style={label}>{title}</p>
-                        <div style={{ marginTop: '0.25rem', fontSize: '0.95rem', fontWeight: 700, color: '#0f172a' }}>{value}</div>
-                    </div>
-                ))}
-            </div>
-            {review.summary && <p style={{ margin: '0.85rem 0 0', fontSize: '0.85rem', color: '#475569', lineHeight: 1.5 }}>{review.summary}</p>}
-        </div>
+        <>
+            <StatStrip>
+                <StatCard label="Breakeven ROAS (Meta)" value={be ? be.metaRoas.toFixed(2) : '—'} />
+                <StatCard label="Orders delivered" value={be ? `${be.deliveryRatePct}%` : '—'} />
+                <StatCard label="Margin per order" value={be ? inr(be.marginPerOrder) : '—'} />
+                <StatCard
+                    label="Daily budget"
+                    value={review.account ? inr(review.account.budgetAfter) : '—'}
+                    sub={review.account && review.account.budgetBefore !== review.account.budgetAfter ? `was ${inr(review.account.budgetBefore)}` : undefined}
+                />
+            </StatStrip>
+            {review.summary && (
+                <Card title={`Review · ${formatDate(review.date)}`}>
+                    <p className={styles.prose}>{review.summary}</p>
+                </Card>
+            )}
+        </>
     );
 }
 
 function Footnotes({ checks = [], notes = [] }: { checks?: string[]; notes?: string[] }) {
     if (checks.length === 0 && notes.length === 0) return null;
     return (
-        <div style={{ ...card, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '1rem' }}>
+        <div className={styles.row}>
             {checks.length > 0 && (
-                <div>
-                    <p style={label}>Check at the next review</p>
-                    <ul style={list}>{checks.map((c) => <li key={c}>{c}</li>)}</ul>
-                </div>
+                <Card title="Check at the next review">
+                    <ul className={styles.list}>{checks.map((c) => <li key={c}>{c}</li>)}</ul>
+                </Card>
             )}
             {notes.length > 0 && (
-                <div>
-                    <p style={label}>Notes</p>
-                    <ul style={list}>{notes.map((n) => <li key={n}>{n}</li>)}</ul>
-                </div>
+                <Card title="Notes">
+                    <ul className={styles.list}>{notes.map((n) => <li key={n}>{n}</li>)}</ul>
+                </Card>
             )}
         </div>
     );
 }
 
 function CallCard({ call, breakeven }: { call: ClaudeCall; breakeven?: number }) {
-    const colors = DECISION_COLORS[call.decision] || { bg: '#f1f5f9', text: '#475569' };
     const budgetChanged = call.budgetBefore != null && call.budgetAfter != null && call.budgetBefore !== call.budgetAfter;
     const paused = call.statusAfter === 'PAUSED';
     const budgetText = paused
@@ -189,57 +178,60 @@ function CallCard({ call, breakeven }: { call: ClaudeCall; breakeven?: number })
         : budgetChanged || paused ? 'Not applied yet' : 'No change needed';
 
     return (
-        <div style={card}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', flexWrap: 'wrap' }}>
-                <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#1e293b', wordBreak: 'break-word' }}>{call.adsetName}</div>
-                    {call.campaignName && <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.15rem' }}>{call.campaignName}</div>}
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexShrink: 0 }}>
-                    <span style={{ padding: '0.2rem 0.6rem', borderRadius: '999px', fontSize: '0.7rem', backgroundColor: colors.bg, color: colors.text, fontWeight: 700, textTransform: 'uppercase' }}>
-                        {call.decision}
-                    </span>
-                    <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#0f172a' }}>{budgetText}</span>
-                </div>
-            </div>
-            <p style={{ margin: '0.7rem 0', fontSize: '0.85rem', color: '#475569', lineHeight: 1.55 }}>{call.reason}</p>
+        <Card
+            title={call.adsetName}
+            eyebrow={call.campaignName}
+            actions={
+                <>
+                    <Badge tone={DECISION_TONES[call.decision] ?? 'neutral'} dot={false}>{call.decision}</Badge>
+                    <span className={styles.budget}>{budgetText}</span>
+                </>
+            }
+            footer={
+                <span className={cx(styles.applied, call.applied?.confirmed && styles.appliedOk)}>
+                    <Icon name={call.applied ? 'circle-check' : 'info'} size={13} />
+                    {appliedText}
+                </span>
+            }
+        >
+            <p className={styles.prose}>{call.reason}</p>
             {call.metrics && <Metrics metrics={call.metrics} breakeven={breakeven} />}
-            <div style={{ marginTop: '0.7rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.35rem', color: call.applied?.confirmed ? '#15803d' : '#94a3b8' }}>
-                {call.applied ? <CheckCircle2 size={13} /> : <CircleDashed size={13} />}
-                {appliedText}
-            </div>
-        </div>
+        </Card>
     );
 }
 
 function Metrics({ metrics, breakeven }: { metrics: Record<string, ClaudeWindow>; breakeven?: number }) {
-    const cell = { padding: '0.35rem 0.5rem', fontSize: '0.78rem', color: '#475569' };
     return (
-        <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '420px' }}>
-                <thead>
-                    <tr style={{ backgroundColor: '#f8fafc', textAlign: 'left' }}>
-                        {['Window', 'Spend', 'Purchases', 'ROAS', 'CPA'].map((h) => (
-                            <th key={h} style={{ ...cell, color: '#94a3b8', fontWeight: 600 }}>{h}</th>
-                        ))}
-                    </tr>
-                </thead>
-                <tbody>
-                    {WINDOWS.filter(([key]) => metrics[key]).map(([key, title]) => {
-                        const w = metrics[key];
-                        const roasColor = !w.spend ? '#94a3b8' : breakeven != null && w.roas >= breakeven ? '#15803d' : '#b91c1c';
-                        return (
-                            <tr key={key} style={{ borderTop: '1px solid #f1f5f9' }}>
-                                <td style={cell}>{title}</td>
-                                <td style={cell}>{inr(w.spend)}</td>
-                                <td style={cell}>{w.purchases}</td>
-                                <td style={{ ...cell, fontWeight: 700, color: roasColor }}>{w.spend ? w.roas.toFixed(2) : '—'}</td>
-                                <td style={cell}>{w.purchases ? inr(w.cpa) : '—'}</td>
-                            </tr>
-                        );
-                    })}
-                </tbody>
-            </table>
+        <div className={cx('pbx-table', styles.metrics)}>
+            <div className="pbx-table__scroll">
+                <table>
+                    <thead>
+                        <tr>
+                            <th scope="col">Window</th>
+                            <th scope="col" className={styles.right}>Spend</th>
+                            <th scope="col" className={styles.right}>Purchases</th>
+                            <th scope="col" className={styles.right}>ROAS</th>
+                            <th scope="col" className={styles.right}>CPA</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {WINDOWS.filter(([key]) => metrics[key]).map(([key, title]) => {
+                            const w = metrics[key];
+                            // ROAS at or above breakeven is good, below is a loss
+                            const roasClass = !w.spend ? styles.muted : breakeven != null && w.roas >= breakeven ? styles.good : styles.bad;
+                            return (
+                                <tr key={key}>
+                                    <td>{title}</td>
+                                    <td className={cx('pbx-num', styles.right)}>{inr(w.spend)}</td>
+                                    <td className={cx('pbx-num', styles.right)}>{w.purchases}</td>
+                                    <td className={cx('pbx-num', styles.right, styles.strong, roasClass)}>{w.spend ? w.roas.toFixed(2) : '—'}</td>
+                                    <td className={cx('pbx-num', styles.right)}>{w.purchases ? inr(w.cpa) : '—'}</td>
+                                </tr>
+                            );
+                        })}
+                    </tbody>
+                </table>
+            </div>
         </div>
     );
 }
