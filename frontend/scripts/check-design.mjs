@@ -35,7 +35,6 @@ const LEGACY = new Set([
   'pages/analysis/StuckOrdersAnalysis.tsx',
   'pages/analysis/TaggingLogsAnalysis.module.css',
   'pages/analysis/TicketsAnalysis.tsx',
-  'pages/tools/Labels.tsx',
 ]);
 
 const RULES = [

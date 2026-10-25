@@ -1,6 +1,9 @@
-import { useState, useRef } from 'react';
+import { useState } from 'react';
+import toast from 'react-hot-toast';
 import * as pdfjsLib from 'pdfjs-dist';
-import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
+import { PDFDocument, StandardFonts, grayscale } from 'pdf-lib';
+import { Alert, Card, DataTable, Dropzone, StatCard, StatStrip, type Column } from '../../components/ui/pbx';
+import styles from './Labels.module.css';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
     'pdfjs-dist/build/pdf.worker.min.mjs',
@@ -10,6 +13,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
 interface Rect { x: number; y: number; w: number; h: number; }
 interface LabelResult { orderNumber: string | null; code: string | null; }
 interface ProcessResult { pageCount: number; labelCount: number; fileName: string; labels: LabelResult[]; }
+interface LabelRow extends LabelResult { index: number; }
 
 function isDark(r: number, g: number, b: number): boolean {
     return (r + g + b) / 3 < 140;
@@ -109,12 +113,13 @@ async function cropLabels(buffer: ArrayBuffer): Promise<{ blob: Blob; pageCount:
             if (info) {
                 const fontSize  = 20;
                 const textWidth = font.widthOfTextAtSize(info.code, fontSize);
+                // Printed in black ink on the label itself, not a screen colour.
                 outPage.drawText(info.code, {
                     x: (rect.w - textWidth) / 2,
                     y: rect.h * 0.12 + 50,
                     size: fontSize,
                     font,
-                    color: rgb(0, 0, 0),
+                    color: grayscale(0),
                 });
             }
 
@@ -127,11 +132,23 @@ async function cropLabels(buffer: ArrayBuffer): Promise<{ blob: Blob; pageCount:
     return { blob: new Blob([outBytes.buffer as ArrayBuffer], { type: 'application/pdf' }), pageCount, labelCount, labels };
 }
 
+const COLUMNS: Column<LabelRow>[] = [
+    { key: 'index', header: '#', numeric: true, width: 40, render: (l) => l.index + 1 },
+    { key: 'orderNumber', header: 'Order', mono: true, render: (l) => l.orderNumber ?? '—' },
+    {
+        key: 'code',
+        header: 'Stamp',
+        render: (l) => (l.code ? <span className={styles.code}>{l.code}</span> : <span className={styles.missing}>No order number found</span>),
+    },
+];
+
+const isPdf = (file: File) => file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+
+/** Labels: crops each shipping label in a PDF to its border and stamps the last 3 digits of its order number. */
 export function Labels() {
     const [processing, setProcessing] = useState(false);
     const [result, setResult]         = useState<ProcessResult | null>(null);
     const [error, setError]           = useState<string | null>(null);
-    const inputRef = useRef<HTMLInputElement>(null);
 
     const handleFile = async (file: File) => {
         setError(null);
@@ -154,116 +171,65 @@ export function Labels() {
         }
     };
 
-    const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (file) handleFile(file);
-        e.target.value = '';
-    };
-
-    const onDrop = (e: React.DragEvent) => {
-        e.preventDefault();
-        const file = e.dataTransfer.files?.[0];
-        if (file?.type === 'application/pdf') handleFile(file);
+    const onFiles = (files: File[]) => {
+        const file = files[0];
+        if (!file) return;
+        if (!isPdf(file)) {
+            toast.error('Choose a PDF file');
+            return;
+        }
+        handleFile(file);
     };
 
     const stamped   = result?.labels.filter(l => l.code).length  ?? 0;
     const unstamped = result?.labels.filter(l => !l.code).length ?? 0;
 
     return (
-        <div style={{ padding: '2rem', maxWidth: '680px' }}>
-            <div style={{ marginBottom: '1.75rem' }}>
-                <h1 style={{ margin: '0 0 0.25rem', fontSize: '1.375rem', fontWeight: 700, color: '#0f172a' }}>Labels</h1>
-                <p style={{ margin: 0, fontSize: '0.875rem', color: '#64748b' }}>
-                    Upload a shipping labels PDF — each label is cropped to its border and stamped with the last 3 digits of its order number.
-                </p>
-            </div>
+        <div className={styles.labels}>
+            <p className={styles.note}>
+                Each label in the PDF is cropped to its border and stamped with the last 3 digits of its order number. The cropped
+                PDF downloads as soon as it is ready; nothing is uploaded.
+            </p>
 
-            <div
-                onClick={() => !processing && inputRef.current?.click()}
-                onDrop={onDrop}
-                onDragOver={e => e.preventDefault()}
-                style={{
-                    border: '2px dashed #e2e8f0', borderRadius: '12px', padding: '3rem 2rem',
-                    textAlign: 'center', cursor: processing ? 'default' : 'pointer',
-                    background: '#f8fafc', transition: 'border-color 0.15s',
-                }}
-                onMouseEnter={e => !processing && (e.currentTarget.style.borderColor = '#94a3b8')}
-                onMouseLeave={e => (e.currentTarget.style.borderColor = '#e2e8f0')}
-            >
-                <input ref={inputRef} type="file" accept=".pdf" onChange={onFileChange} style={{ display: 'none' }} />
-                {processing ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem', color: '#64748b', fontSize: '0.875rem' }}>
-                        <div style={{ width: 36, height: 36, border: '3px solid #e2e8f0', borderTopColor: '#3b82f6', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-                        Cropping and stamping labels…
-                    </div>
-                ) : (
-                    <>
-                        <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📄</div>
-                        <div style={{ fontWeight: 600, color: '#1e293b', fontSize: '0.9375rem', marginBottom: '0.25rem' }}>
-                            {result ? 'Upload another PDF' : 'Click or drag a PDF here'}
-                        </div>
-                        <div style={{ fontSize: '0.8125rem', color: '#94a3b8' }}>Shipping labels PDF</div>
-                    </>
-                )}
-            </div>
-
-            <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+            <Dropzone
+                onFiles={onFiles}
+                accept=".pdf,application/pdf"
+                multiple={false}
+                icon="printer"
+                disabled={processing}
+                title={processing ? 'Cropping and stamping labels…' : result ? 'Drop another labels PDF' : 'Drop a shipping labels PDF'}
+                hint="One PDF of shipping labels"
+                buttonLabel={processing ? 'Working…' : 'Choose PDF'}
+            />
 
             {error && (
-                <div style={{ marginTop: '1rem', padding: '0.75rem 1rem', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', color: '#dc2626', fontSize: '0.875rem' }}>
+                <Alert tone="negative" title="The PDF could not be processed">
                     {error}
-                </div>
+                </Alert>
             )}
 
             {result && !processing && (
-                <div style={{ marginTop: '1.5rem' }}>
-                    <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.25rem', alignItems: 'center' }}>
-                        <div style={{ flex: 1, padding: '0.875rem 1rem', background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: '8px', textAlign: 'center' }}>
-                            <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#0369a1' }}>{result.pageCount}</div>
-                            <div style={{ fontSize: '0.75rem', color: '#0284c7', fontWeight: 500 }}>Pages</div>
-                        </div>
-                        <div style={{ color: '#94a3b8', fontSize: '1.25rem' }}>→</div>
-                        <div style={{ flex: 1, padding: '0.875rem 1rem', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', textAlign: 'center' }}>
-                            <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#15803d' }}>{stamped}</div>
-                            <div style={{ fontSize: '0.75rem', color: '#16a34a', fontWeight: 500 }}>Stamped</div>
-                        </div>
-                        {unstamped > 0 && (
-                            <>
-                                <div style={{ color: '#94a3b8', fontSize: '1.25rem' }}>+</div>
-                                <div style={{ flex: 1, padding: '0.875rem 1rem', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', textAlign: 'center' }}>
-                                    <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#dc2626' }}>{unstamped}</div>
-                                    <div style={{ fontSize: '0.75rem', color: '#ef4444', fontWeight: 500 }}>No order</div>
-                                </div>
-                            </>
-                        )}
-                    </div>
+                <>
+                    <StatStrip label={`Labels from ${result.fileName}`} minWidth={140}>
+                        <StatCard label="Pages" value={result.pageCount.toLocaleString('en-IN')} />
+                        <StatCard label="Labels stamped" value={stamped.toLocaleString('en-IN')} tone="positive" />
+                        <StatCard
+                            label="No order number"
+                            value={unstamped.toLocaleString('en-IN')}
+                            tone={unstamped > 0 ? 'negative' : 'neutral'}
+                            sub={unstamped > 0 ? 'cropped but not stamped' : undefined}
+                        />
+                    </StatStrip>
 
-                    <div style={{ background: 'white', border: '1px solid #e2e8f0', borderRadius: '10px', overflow: 'hidden' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8125rem' }}>
-                            <thead>
-                                <tr style={{ background: '#f8fafc', borderBottom: '1px solid #f1f5f9' }}>
-                                    <th style={{ padding: '0.625rem 1rem', textAlign: 'left', color: '#64748b', fontWeight: 600 }}>#</th>
-                                    <th style={{ padding: '0.625rem 1rem', textAlign: 'left', color: '#64748b', fontWeight: 600 }}>Order</th>
-                                    <th style={{ padding: '0.625rem 1rem', textAlign: 'center', color: '#64748b', fontWeight: 600 }}>Stamped</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {result.labels.map((l, idx) => (
-                                    <tr key={idx} style={{ borderBottom: '1px solid #f8fafc' }}>
-                                        <td style={{ padding: '0.625rem 1rem', color: '#94a3b8', fontWeight: 600 }}>{idx + 1}</td>
-                                        <td style={{ padding: '0.625rem 1rem', color: '#1e293b', fontWeight: 500 }}>{l.orderNumber ?? '—'}</td>
-                                        <td style={{ padding: '0.625rem 1rem', textAlign: 'center' }}>
-                                            {l.code
-                                                ? <span style={{ display: 'inline-block', padding: '0.2rem 0.75rem', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '6px', fontWeight: 800, color: '#15803d', fontSize: '0.9375rem', letterSpacing: '0.05em' }}>{l.code}</span>
-                                                : <span style={{ color: '#ef4444', fontWeight: 500 }}>Not found</span>
-                                            }
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
+                    <Card title="Labels" eyebrow={result.fileName} padding="none">
+                        <DataTable
+                            columns={COLUMNS}
+                            rows={result.labels.map((label, index) => ({ ...label, index }))}
+                            getRowId={(l) => String(l.index)}
+                            caption={`Labels cropped from ${result.fileName}`}
+                        />
+                    </Card>
+                </>
             )}
         </div>
     );

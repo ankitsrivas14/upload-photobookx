@@ -67,7 +67,7 @@ Reference screens: `DashboardPage.tsx` and `SalesPage.tsx`.
 | Tools | Section tabs | `pages/ToolsPage` | 149 | Done |
 | Tools | GST reports | `pages/GSTMonthlyReports` (unrouted `GSTReportsPage` deleted) | 427 | Done |
 | Tools | Products | `pages/tools/ProductsManager` | 480 | Done |
-| Tools | Labels | `pages/tools/Labels` | 270 | In progress |
+| Tools | Labels | `pages/tools/Labels` | 270 | Done |
 | Tools | Variant performance | `pages/tools/VariantPerformance` | 232 | Done |
 | Tools | Profit prediction | `pages/ProfitPredictionCalculator` | 437 | Done |
 | Tools | Stock prediction | `pages/StockPrediction` | 334 | Done |
@@ -120,4 +120,4 @@ progress" here. Stage only your own files (`git add <paths>`, never `git add -A`
 a screen that another session has in progress.
 
 Current split (2026-10-25): one session works down the sidebar from the top (Backlog first);
-another takes the Tools area from the bottom.
+another did the Tools area from the bottom (done) and takes the next area up from there.
