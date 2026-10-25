@@ -44,7 +44,7 @@ Reference screens: `DashboardPage.tsx` and `SalesPage.tsx`.
 
 | Area | Screen | Files (`frontend/src/…`) | Lines | Status |
 |---|---|---|---|---|
-| Shell | Sidebar, topbar, theme switch | `layouts/AdminLayout` | 137 | Done |
+| Shell | Sidebar, topbar, theme switch | `layouts/AdminLayout` | 137 | In progress (section tabs move into the sidebar) |
 | Dashboard | Dashboard | `pages/DashboardPage`, `pages/dashboard/*` | 1,348 | Done |
 | Sales | Sales management | `pages/SalesManagementPage`, `pages/SalesPage`, `pages/SalesPage/*` | 2,660 | Done |
 | Orders | Backlog | `pages/BacklogPage` | 261 | Done |
