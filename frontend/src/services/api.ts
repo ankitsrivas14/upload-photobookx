@@ -1588,6 +1588,29 @@ async getVariantPerformance(days = 30): Promise<{
     return this.request(`/api/admin/sales/ai-prediction-data?startDate=${startDate}`);
   }
 
+  /** Everything the Dashboard shows on open, in one request; each part is shaped like its own route's response. */
+  async getDashboardSummary(params: {
+    month: string;
+    year: string;
+    roasStart: string;
+    roasEnd: string;
+    statsStart: string;
+    statsEnd: string;
+  }): Promise<{
+    success: boolean;
+    error?: string;
+    breakeven: Awaited<ReturnType<ApiService['getBreakevenMetrics']>>;
+    roas: Awaited<ReturnType<ApiService['getDailyROAS']>>;
+    shipping: Awaited<ReturnType<ApiService['getDailyShipping']>>;
+    orderStats: Awaited<ReturnType<ApiService['getDailyOrderStats']>>;
+    pnlMonth: Awaited<ReturnType<ApiService['getDailyPnl']>>;
+    pnlYear: Awaited<ReturnType<ApiService['getDailyPnl']>>;
+    monthlyOrderCounts: Awaited<ReturnType<ApiService['getMonthlyOrderCounts']>>;
+    monthlyRevenue: Awaited<ReturnType<ApiService['getMonthlyRevenue']>>;
+  }> {
+    return this.request(`/api/admin/sales/dashboard-summary?${new URLSearchParams(params).toString()}`);
+  }
+
   async getBreakevenMetrics(): Promise<{
     success: boolean;
     aov?: number;

@@ -27,6 +27,26 @@ const SalesPage = lazy(() => import('./SalesPage').then((m) => ({ default: m.Sal
 
 const STORE_TIMEZONE = 'Asia/Kolkata';
 
+/** ROAS chart range: the picked dates, else the last `days` days (IST). */
+function roasRange(days: number, startDate: string, endDate: string): { start: string; end: string } {
+  if (startDate && endDate) return { start: startDate, end: endDate };
+  const now = new Date();
+  const end = now.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+  const s = new Date(now);
+  s.setDate(s.getDate() - (days - 1));
+  return { start: s.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE }), end };
+}
+
+/** Order-distribution range: the last 30 days (IST), not before Jan 28, 2026. */
+function orderStatsRange(): { start: string; end: string } {
+  const now = new Date();
+  const end = now.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+  const s = new Date(now);
+  s.setDate(s.getDate() - 29);
+  const thirtyDaysAgo = s.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+  return { start: thirtyDaysAgo < '2026-01-28' ? '2026-01-28' : thirtyDaysAgo, end };
+}
+
 
 export function DashboardPage() {
   const navigate = useNavigate();
@@ -114,6 +134,7 @@ export function DashboardPage() {
 
   useEffect(() => {
     loadUser();
+    loadSummary();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount
   }, []);
 
@@ -135,147 +156,191 @@ export function DashboardPage() {
     }
   };
 
+  // Each widget's data comes either from its own route or from the one-request dashboard
+  // summary (same response shapes); these apply a response to state.
+  const applyBreakevenMetrics = useCallback((res: Awaited<ReturnType<typeof api.getBreakevenMetrics>>) => {
+    if (res.success) {
+      setBreakevenDbMetrics({
+        aov: res.aov ?? 0,
+        avgCOGS: res.avgCOGS ?? 0,
+        avgShipping: res.avgShipping ?? 0,
+        avgTotalCost: res.avgTotalCost ?? 0,
+        contributionMargin: res.contributionMargin ?? 0,
+        breakevenROAS: res.breakevenROAS ?? 0,
+        deliveredCount: res.deliveredCount ?? 0,
+        failedCount: res.failedCount ?? 0,
+        totalOrders: res.totalOrders ?? 0,
+        completedDaysCount: res.completedDaysCount ?? 0,
+      });
+    }
+  }, []);
+
+  const applyRoas = useCallback((res: Awaited<ReturnType<typeof api.getDailyROAS>>) => {
+    if (res.success && res.records) {
+      setRoasDbRecords(res.records);
+    }
+  }, []);
+
+  const applyShipping = useCallback((res: Awaited<ReturnType<typeof api.getDailyShipping>>) => {
+    if (res.success && res.records) {
+      setShippingDbRecords(res.records);
+    }
+  }, []);
+
+  const applyOrderStats = useCallback((res: Awaited<ReturnType<typeof api.getDailyOrderStats>>) => {
+    if (res.success && res.stats) {
+      setOrderStatsDb(res.stats);
+    }
+    if (res.success && res.completedDates) {
+      setCompletedDatesDb(new Set(res.completedDates));
+    }
+  }, []);
+
+  const applyPnlChart = useCallback((res: Awaited<ReturnType<typeof api.getDailyPnl>>) => {
+    if (res.success && res.records) {
+      setPnlChartRecords(res.records.map((r) => ({
+        dateKey: r.dateKey,
+        isCompleted: r.isCompleted,
+        barChartProfit: r.barChartProfit,
+      })));
+    }
+  }, []);
+
+  const applyMonthlyOrderCounts = useCallback((res: Awaited<ReturnType<typeof api.getMonthlyOrderCounts>>) => {
+    if (res.success) {
+      setMonthlyOrderCounts(res.months);
+      setOrderPace({ average: res.paceAverage, day: res.paceDay });
+    }
+  }, []);
+
+  const applyMonthlyRevenue = useCallback((res: Awaited<ReturnType<typeof api.getMonthlyRevenue>>) => {
+    if (res.success) {
+      setMonthlyRevenue(res.months);
+      setRevenuePace({ average: res.paceAverage, day: res.paceDay });
+    }
+  }, []);
+
+  const applyHeatmap = useCallback((res: Awaited<ReturnType<typeof api.getDailyPnl>>) => {
+    if (res.success && res.records) {
+      const map: Record<string, number> = {};
+      res.records.forEach((r) => { map[r.dateKey] = r.heatmapProfit; });
+      setHeatmapByDate(map);
+      setYearlyPnlRecords(res.records.map((r) => ({
+        dateKey: r.dateKey,
+        isCompleted: r.isCompleted,
+        barChartProfit: r.barChartProfit,
+      })));
+    }
+  }, []);
+
   const loadBreakevenMetrics = useCallback(async () => {
     try {
-      const res = await api.getBreakevenMetrics();
-      if (res.success) {
-        setBreakevenDbMetrics({
-          aov: res.aov ?? 0,
-          avgCOGS: res.avgCOGS ?? 0,
-          avgShipping: res.avgShipping ?? 0,
-          avgTotalCost: res.avgTotalCost ?? 0,
-          contributionMargin: res.contributionMargin ?? 0,
-          breakevenROAS: res.breakevenROAS ?? 0,
-          deliveredCount: res.deliveredCount ?? 0,
-          failedCount: res.failedCount ?? 0,
-          totalOrders: res.totalOrders ?? 0,
-          completedDaysCount: res.completedDaysCount ?? 0,
-        });
-      }
+      applyBreakevenMetrics(await api.getBreakevenMetrics());
     } catch (err) {
       console.error('Failed to load breakeven metrics:', err);
     }
-  }, []);
+  }, [applyBreakevenMetrics]);
 
   const loadROAS = useCallback(async (days: number, startDate: string, endDate: string) => {
     setRoasLoading(true);
     try {
-      let start: string;
-      let end: string;
-      if (startDate && endDate) {
-        start = startDate;
-        end = endDate;
-      } else {
-        const now = new Date();
-        end = now.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
-        const s = new Date(now);
-        s.setDate(s.getDate() - (days - 1));
-        start = s.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
-      }
-      const res = await api.getDailyROAS(start, end);
-      if (res.success && res.records) {
-        setRoasDbRecords(res.records);
-      }
+      const { start, end } = roasRange(days, startDate, endDate);
+      applyRoas(await api.getDailyROAS(start, end));
     } catch (err) {
       console.error('Failed to load ROAS data:', err);
     } finally {
       setRoasLoading(false);
     }
-  }, []);
+  }, [applyRoas]);
 
   const loadShipping = useCallback(async () => {
     try {
       // Fetch all history — widget aggregates client-side by granularity
-      const res = await api.getDailyShipping();
-      if (res.success && res.records) {
-        setShippingDbRecords(res.records);
-      }
+      applyShipping(await api.getDailyShipping());
     } catch (err) {
       console.error('Failed to load shipping data:', err);
     }
-  }, []);
+  }, [applyShipping]);
 
   const loadOrderStats = useCallback(async () => {
     try {
-      // Last 30 days, not before Jan 28, 2026
-      const now = new Date();
-      const endDate = now.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
-      const s = new Date(now);
-      s.setDate(s.getDate() - 29);
-      const thirtyDaysAgo = s.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
-      const startDate = thirtyDaysAgo < '2026-01-28' ? '2026-01-28' : thirtyDaysAgo;
-      const res = await api.getDailyOrderStats(startDate, endDate);
-      if (res.success && res.stats) {
-        setOrderStatsDb(res.stats);
-      }
-      if (res.success && res.completedDates) {
-        setCompletedDatesDb(new Set(res.completedDates));
-      }
+      const { start, end } = orderStatsRange();
+      applyOrderStats(await api.getDailyOrderStats(start, end));
     } catch (err) {
       console.error('Failed to load order stats:', err);
     }
-  }, []);
+  }, [applyOrderStats]);
 
   const loadPnlChart = useCallback(async (year: number, month: number) => {
     try {
       const monthStr = `${year}-${String(month + 1).padStart(2, '0')}`;
-      const res = await api.getDailyPnl({ month: monthStr });
-      if (res.success && res.records) {
-        setPnlChartRecords(res.records.map((r) => ({
-          dateKey: r.dateKey,
-          isCompleted: r.isCompleted,
-          barChartProfit: r.barChartProfit,
-        })));
-      }
+      applyPnlChart(await api.getDailyPnl({ month: monthStr }));
     } catch (err) {
       console.error('Failed to load P&L chart data:', err);
     }
-  }, []);
+  }, [applyPnlChart]);
 
   const loadMonthlyOrderCounts = useCallback(async () => {
     try {
-      const res = await api.getMonthlyOrderCounts();
-      if (res.success) {
-        setMonthlyOrderCounts(res.months);
-        setOrderPace({ average: res.paceAverage, day: res.paceDay });
-      }
+      applyMonthlyOrderCounts(await api.getMonthlyOrderCounts());
     } catch (err) {
       console.error('Failed to load monthly order counts:', err);
     }
-  }, []);
+  }, [applyMonthlyOrderCounts]);
 
   const loadMonthlyRevenue = useCallback(async () => {
     try {
-      const res = await api.getMonthlyRevenue();
-      if (res.success) {
-        setMonthlyRevenue(res.months);
-        setRevenuePace({ average: res.paceAverage, day: res.paceDay });
-      }
+      applyMonthlyRevenue(await api.getMonthlyRevenue());
     } catch (err) {
       console.error('Failed to load monthly revenue:', err);
     }
-  }, []);
+  }, [applyMonthlyRevenue]);
 
   const loadHeatmap = useCallback(async (year: number) => {
     try {
-      const res = await api.getDailyPnl({ year: String(year) });
-      if (res.success && res.records) {
-        const map: Record<string, number> = {};
-        res.records.forEach((r) => { map[r.dateKey] = r.heatmapProfit; });
-        setHeatmapByDate(map);
-        setYearlyPnlRecords(res.records.map((r) => ({
-          dateKey: r.dateKey,
-          isCompleted: r.isCompleted,
-          barChartProfit: r.barChartProfit,
-        })));
-      }
+      applyHeatmap(await api.getDailyPnl({ year: String(year) }));
     } catch (err) {
       console.error('Failed to load heatmap data:', err);
     }
+  }, [applyHeatmap]);
+
+  // Everything the Dashboard shows on open comes in one request, sent alongside getMe (the
+  // route checks the token itself). If it fails, each widget loads on its own once the user
+  // is known.
+  const [summaryFailed, setSummaryFailed] = useState(false);
+  const loadSummary = useCallback(async () => {
+    setRoasLoading(true);
+    try {
+      const roas = roasRange(roasDays, roasStartDate, roasEndDate);
+      const stats = orderStatsRange();
+      const res = await api.getDashboardSummary({
+        month: `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}`,
+        year: String(selectedYear),
+        roasStart: roas.start,
+        roasEnd: roas.end,
+        statsStart: stats.start,
+        statsEnd: stats.end,
+      });
+      if (!res.success) throw new Error(res.error || 'Dashboard summary failed');
+      applyBreakevenMetrics(res.breakeven);
+      applyRoas(res.roas);
+      applyShipping(res.shipping);
+      applyOrderStats(res.orderStats);
+      applyPnlChart(res.pnlMonth);
+      applyHeatmap(res.pnlYear);
+      applyMonthlyOrderCounts(res.monthlyOrderCounts);
+      applyMonthlyRevenue(res.monthlyRevenue);
+    } catch (err) {
+      console.error('Failed to load the dashboard summary; loading widgets one by one:', err);
+      setSummaryFailed(true);
+    } finally {
+      setRoasLoading(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reads the initial filters once, on mount
   }, []);
 
   useEffect(() => {
-    if (user) {
+    if (user && summaryFailed) {
       loadBreakevenMetrics();
       loadROAS(roasDays, roasStartDate, roasEndDate);
       loadShipping();
@@ -285,8 +350,8 @@ export function DashboardPage() {
       loadPnlChart(selectedYear, selectedMonth);
       loadHeatmap(selectedYear);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount
-  }, [user, loadBreakevenMetrics, loadROAS, loadShipping, loadOrderStats, loadMonthlyOrderCounts, loadMonthlyRevenue, loadPnlChart, loadHeatmap]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, after a failed summary
+  }, [user, summaryFailed]);
 
   // Re-fetch bar chart when selected month/year changes
   useEffect(() => {

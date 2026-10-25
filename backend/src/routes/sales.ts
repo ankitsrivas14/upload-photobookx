@@ -1220,6 +1220,181 @@ router.post('/ads-performance', requireAdmin, async (req: AuthenticatedRequest, 
     }
   });
 
+// ─── Dashboard payloads ──────────────────────────────────────────────────────
+// Built from the pre-computed daily docs. Shared by the per-widget routes below and by
+// /dashboard-summary, which serves everything the Dashboard shows on open in one request.
+
+// The monthly charts start after the partial January.
+const MONTHLY_FROM = '2026-02-01';
+
+const roasRecordsOf = (records: any[]) =>
+  records.map((r) => ({
+    dateKey: r.dateKey,
+    revenue: r.revenue,
+    adSpend: r.adSpend,
+    roas: r.roas,
+    updatedAt: r.updatedAt,
+  }));
+
+const shippingRecordsOf = (records: any[]) =>
+  records.map((r) => ({
+    dateKey: r.dateKey,
+    avgShipping: r.avgShipping,
+    avgShippingSmall: r.avgShippingSmall,
+    avgShippingLarge: r.avgShippingLarge,
+    orderCount: r.orderCount,
+    smallCount: r.smallCount,
+    largeCount: r.largeCount,
+    updatedAt: r.updatedAt,
+  }));
+
+const pnlRecordsOf = (records: any[]) =>
+  records.map((r) => ({
+    dateKey: r.dateKey,
+    isCompleted: r.isCompleted,
+    barChartProfit: r.barChartProfit,
+    heatmapProfit: r.heatmapProfit,
+    orderCount: r.orderCount,
+    adSpend: r.adSpend,
+  }));
+
+/** Order-distribution totals across the given days, plus the days already complete. */
+function orderStatsTotals(records: any[]) {
+  const agg = {
+    prepaidCount: 0,
+    codCount: 0,
+    deliveredCount: 0,
+    failedCount: 0,
+    inTransitCount: 0,
+    outForDeliveryCount: 0,
+    attemptedDeliveryCount: 0,
+    confirmedCount: 0,
+    codDeliveredCount: 0,
+    codFailedCount: 0,
+  };
+  for (const r of records) {
+    agg.prepaidCount += r.prepaidCount ?? 0;
+    agg.codCount += r.codCount ?? 0;
+    agg.deliveredCount += r.deliveredCount ?? 0;
+    agg.failedCount += r.failedCount ?? 0;
+    agg.inTransitCount += r.inTransitCount ?? 0;
+    agg.outForDeliveryCount += r.outForDeliveryCount ?? 0;
+    agg.attemptedDeliveryCount += r.attemptedDeliveryCount ?? 0;
+    agg.confirmedCount += r.confirmedCount ?? 0;
+    agg.codDeliveredCount += r.codDeliveredCount ?? 0;
+    agg.codFailedCount += r.codFailedCount ?? 0;
+  }
+  const completedDates = records.filter((r) => r.isCompleted).map((r) => r.dateKey as string);
+  return { stats: agg, completedDates };
+}
+
+/**
+ * Per-month totals of `valueOf` (oldest first), plus a "pace" benchmark: the average
+ * accumulated by today's day-of-month across past complete months (excludes the current
+ * month and the partial Jan).
+ */
+function monthlyTotals(stats: any[], valueOf: (s: any) => number) {
+  const byMonth = new Map<string, number>();
+  for (const s of stats) {
+    const month = String(s.dateKey).substring(0, 7);
+    byMonth.set(month, (byMonth.get(month) || 0) + valueOf(s));
+  }
+  const todayIST = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+  const currentMonth = todayIST.substring(0, 7);
+  const dayOfMonth = todayIST.substring(8, 10); // zero-padded 'DD'
+  const paceByMonth = new Map<string, number>();
+  for (const s of stats) {
+    if (String(s.dateKey).substring(8, 10) > dayOfMonth) continue;
+    const month = String(s.dateKey).substring(0, 7);
+    if (month >= currentMonth) continue;
+    paceByMonth.set(month, (paceByMonth.get(month) || 0) + valueOf(s));
+  }
+  const paceVals = [...paceByMonth.values()];
+  const paceAverage = paceVals.length ? Math.round(paceVals.reduce((a, b) => a + b, 0) / paceVals.length) : 0;
+  const entries = [...byMonth.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  return { entries, paceAverage, paceDay: Number(dayOfMonth) };
+}
+
+function monthlyOrderCountsOf(stats: any[]) {
+  const t = monthlyTotals(stats, (s) => (s.prepaidCount || 0) + (s.codCount || 0));
+  return { months: t.entries.map(([month, orders]) => ({ month, orders })), paceAverage: t.paceAverage, paceDay: t.paceDay };
+}
+
+function monthlyRevenueOf(stats: any[]) {
+  const t = monthlyTotals(stats, (s) => s.grossRevenue || 0);
+  return {
+    months: t.entries.map(([month, revenue]) => ({ month, revenue: Math.round(revenue) })),
+    paceAverage: t.paceAverage,
+    paceDay: t.paceDay,
+  };
+}
+
+/**
+ * The breakeven snapshot the scheduled job keeps fresh. On a cold snapshot, seed it in the
+ * background (the compute scans every order and is slow) and return zeros now, so the
+ * request stays fast. The next load is real.
+ */
+async function breakevenMetrics(): Promise<Record<string, any>> {
+  const snap = await breakevenStore.get('latest');
+  if (snap && (snap as any).metrics) return (snap as any).metrics;
+  refreshBreakevenSnapshot().catch((e) => console.error('breakeven snapshot seed:', e));
+  return {
+    aov: 0, avgCOGS: 0, avgShipping: 0, avgTotalCost: 0,
+    contributionMargin: 0, breakevenROAS: 0, deliveredCount: 0, failedCount: 0,
+    totalOrders: 0, completedDaysCount: 0, computing: true,
+  };
+}
+
+/**
+ * GET /api/admin/sales/dashboard-summary?month=YYYY-MM&year=YYYY&roasStart=&roasEnd=&statsStart=&statsEnd=
+ * Everything the Dashboard shows on open, in one request: breakeven, ROAS, shipping, order
+ * distribution, P&L (month and year) and monthly orders/revenue, each shaped like its own
+ * route's response. Reads each daily collection once (the per-widget routes re-read the same
+ * docs) and skips the Shopify sessions call, which the Dashboard doesn't use.
+ */
+router.get('/dashboard-summary', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const q = req.query as Record<string, string | undefined>;
+    const day = (v?: string) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : undefined);
+    const todayIST = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+    const month = q.month && /^\d{4}-\d{2}$/.test(q.month) ? q.month : todayIST.substring(0, 7);
+    const year = q.year && /^\d{4}$/.test(q.year) ? q.year : todayIST.substring(0, 4);
+    const statsStart = day(q.statsStart);
+    const statsEnd = day(q.statsEnd);
+    const statsFrom = statsStart && statsStart < MONTHLY_FROM ? statsStart : MONTHLY_FROM;
+
+    const [statsDocs, pnlYearDocs, pnlMonthDocs, shippingDocs, roasDocs, breakeven] = await Promise.all([
+      readDailyRange(dailyOrderStatsStore, statsFrom),
+      readDailyRange(dailyPnlStore, `${year}-01-01`, `${year}-12-31`),
+      // The month is normally inside the year; read it separately only when it isn't.
+      month.startsWith(year) ? Promise.resolve(null) : readDailyRange(dailyPnlStore, `${month}-01`, `${month}-31`),
+      readDailyRange(dailyShippingStore),
+      readDailyRange(dailyRoasStore, day(q.roasStart), day(q.roasEnd)),
+      breakevenMetrics(),
+    ]);
+    const statsInRange = statsDocs.filter(
+      (r: any) => (!statsStart || r.dateKey >= statsStart) && (!statsEnd || r.dateKey <= statsEnd)
+    );
+    const monthlyStats = statsDocs.filter((r: any) => r.dateKey >= MONTHLY_FROM);
+    const pnlMonth = pnlMonthDocs ?? pnlYearDocs.filter((r: any) => String(r.dateKey).startsWith(month));
+
+    res.json({
+      success: true,
+      breakeven: { success: true, ...breakeven },
+      roas: { success: true, records: roasRecordsOf(roasDocs) },
+      shipping: { success: true, records: shippingRecordsOf(shippingDocs) },
+      orderStats: { success: true, ...orderStatsTotals(statsInRange) },
+      pnlMonth: { success: true, records: pnlRecordsOf(pnlMonth) },
+      pnlYear: { success: true, records: pnlRecordsOf(pnlYearDocs) },
+      monthlyOrderCounts: { success: true, ...monthlyOrderCountsOf(monthlyStats) },
+      monthlyRevenue: { success: true, ...monthlyRevenueOf(monthlyStats) },
+    });
+  } catch (error) {
+    console.error('Error building dashboard summary:', error);
+    res.status(500).json({ success: false, error: 'Failed to build dashboard summary' });
+  }
+});
+
 /**
  * GET /api/admin/sales/daily-roas
  * Fetch stored daily ROAS records. Optional query params: startDate, endDate (YYYY-MM-DD).
@@ -1235,16 +1410,7 @@ router.get('/daily-roas', requireAdmin, async (req: AuthenticatedRequest, res: R
     // recomputing here on every FE load was pure wasted work.
     const records = await readDailyRange(dailyRoasStore, startDate, endDate);
 
-    res.json({
-      success: true,
-      records: records.map((r: any) => ({
-        dateKey: r.dateKey,
-        revenue: r.revenue,
-        adSpend: r.adSpend,
-        roas: r.roas,
-        updatedAt: r.updatedAt,
-      })),
-    });
+    res.json({ success: true, records: roasRecordsOf(records) });
   } catch (error) {
     console.error('Error fetching daily ROAS:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch daily ROAS' });
@@ -1274,19 +1440,7 @@ router.get('/daily-shipping', requireAdmin, async (req: AuthenticatedRequest, re
     const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
     const records = await readDailyRange(dailyShippingStore, startDate, endDate);
 
-    res.json({
-      success: true,
-      records: records.map((r: any) => ({
-        dateKey: r.dateKey,
-        avgShipping: r.avgShipping,
-        avgShippingSmall: r.avgShippingSmall,
-        avgShippingLarge: r.avgShippingLarge,
-        orderCount: r.orderCount,
-        smallCount: r.smallCount,
-        largeCount: r.largeCount,
-        updatedAt: r.updatedAt,
-      })),
-    });
+    res.json({ success: true, records: shippingRecordsOf(records) });
   } catch (error) {
     console.error('Error fetching daily shipping:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch daily shipping stats' });
@@ -1317,31 +1471,7 @@ router.get('/daily-order-stats', requireAdmin, async (req: AuthenticatedRequest,
     const records = await readDailyRange(dailyOrderStatsStore, startDate, endDate);
 
     // Aggregate across all returned dates
-    const agg = {
-      prepaidCount: 0,
-      codCount: 0,
-      deliveredCount: 0,
-      failedCount: 0,
-      inTransitCount: 0,
-      outForDeliveryCount: 0,
-      attemptedDeliveryCount: 0,
-      confirmedCount: 0,
-      codDeliveredCount: 0,
-      codFailedCount: 0,
-    };
-
-    for (const r of records as any[]) {
-      agg.prepaidCount += r.prepaidCount ?? 0;
-      agg.codCount += r.codCount ?? 0;
-      agg.deliveredCount += r.deliveredCount ?? 0;
-      agg.failedCount += r.failedCount ?? 0;
-      agg.inTransitCount += r.inTransitCount ?? 0;
-      agg.outForDeliveryCount += r.outForDeliveryCount ?? 0;
-      agg.attemptedDeliveryCount += r.attemptedDeliveryCount ?? 0;
-      agg.confirmedCount += r.confirmedCount ?? 0;
-      agg.codDeliveredCount += r.codDeliveredCount ?? 0;
-      agg.codFailedCount += r.codFailedCount ?? 0;
-    }
+    const { stats: agg, completedDates } = orderStatsTotals(records as any[]);
 
     let finalStartDate = startDate;
     let finalEndDate = endDate;
@@ -1355,8 +1485,6 @@ router.get('/daily-order-stats', requireAdmin, async (req: AuthenticatedRequest,
     if (finalStartDate && finalEndDate) {
       sessionsMap = await shopifyService.getDailySessions(finalStartDate, finalEndDate);
     }
-
-    const completedDates = (records as any[]).filter((r) => r.isCompleted).map((r) => r.dateKey as string);
 
     res.json({
       success: true,
@@ -1543,38 +1671,10 @@ router.post('/firestore-sync-orders', requireAdmin, async (req: AuthenticatedReq
  */
 router.get('/monthly-order-counts', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
   try {
-    // Read the daily docs from 'YYYY-MM' >= Feb 2026 and group by month in JS
+    // Read the daily docs from Feb 2026 and group by month in JS
     // (Firestore has no aggregation pipeline; the collection is tiny).
-    const stats = await dailyOrderStatsStore.rangeByField('dateKey', '2026-02-01');
-    const byMonth = new Map<string, number>();
-    for (const s of stats) {
-      const month = String(s.dateKey).substring(0, 7);
-      byMonth.set(month, (byMonth.get(month) || 0) + (s.prepaidCount || 0) + (s.codCount || 0));
-    }
-    const months = [...byMonth.entries()].sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([month, orders]) => ({ month, orders }));
-
-    // "Pace" benchmark: average orders accumulated by today's day-of-month across
-    // past complete months (excludes the current month and the partial Jan).
-    const todayIST = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
-    const currentMonth = todayIST.substring(0, 7);
-    const dayOfMonth = todayIST.substring(8, 10); // zero-padded 'DD'
-    const paceByMonth = new Map<string, number>();
-    for (const s of stats) {
-      if (String(s.dateKey).substring(8, 10) > dayOfMonth) continue;
-      const month = String(s.dateKey).substring(0, 7);
-      if (month >= currentMonth) continue;
-      paceByMonth.set(month, (paceByMonth.get(month) || 0) + (s.prepaidCount || 0) + (s.codCount || 0));
-    }
-    const paceVals = [...paceByMonth.values()];
-    const paceAverage = paceVals.length ? Math.round(paceVals.reduce((a, b) => a + b, 0) / paceVals.length) : 0;
-
-    res.json({
-      success: true,
-      months,
-      paceAverage,
-      paceDay: Number(dayOfMonth),
-    });
+    const stats = await dailyOrderStatsStore.rangeByField('dateKey', MONTHLY_FROM);
+    res.json({ success: true, ...monthlyOrderCountsOf(stats) });
   } catch (error) {
     console.error('Error fetching monthly order counts:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch monthly order counts' });
@@ -1590,36 +1690,8 @@ router.get('/monthly-order-counts', requireAdmin, async (_req: AuthenticatedRequ
 router.get('/monthly-revenue', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
   try {
     // Grouped from the pre-computed DailyOrderStats.grossRevenue in JS (tiny collection).
-    const stats = await dailyOrderStatsStore.rangeByField('dateKey', '2026-02-01');
-    const byMonth = new Map<string, number>();
-    for (const s of stats) {
-      const month = String(s.dateKey).substring(0, 7);
-      byMonth.set(month, (byMonth.get(month) || 0) + (s.grossRevenue || 0));
-    }
-    const months = [...byMonth.entries()].sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([month, revenue]) => ({ month, revenue: Math.round(revenue) }));
-
-    // "Pace" benchmark: avg revenue accumulated by today's day-of-month across past
-    // complete months (excludes the current month and the partial Jan).
-    const todayIST = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
-    const currentMonth = todayIST.substring(0, 7);
-    const dayOfMonth = todayIST.substring(8, 10); // zero-padded 'DD'
-    const paceByMonth = new Map<string, number>();
-    for (const s of stats) {
-      if (String(s.dateKey).substring(8, 10) > dayOfMonth) continue;
-      const month = String(s.dateKey).substring(0, 7);
-      if (month >= currentMonth) continue;
-      paceByMonth.set(month, (paceByMonth.get(month) || 0) + (s.grossRevenue || 0));
-    }
-    const paceVals = [...paceByMonth.values()];
-    const paceAverage = paceVals.length ? Math.round(paceVals.reduce((a, b) => a + b, 0) / paceVals.length) : 0;
-
-    res.json({
-      success: true,
-      months,
-      paceAverage,
-      paceDay: Number(dayOfMonth),
-    });
+    const stats = await dailyOrderStatsStore.rangeByField('dateKey', MONTHLY_FROM);
+    res.json({ success: true, ...monthlyRevenueOf(stats) });
   } catch (error) {
     console.error('Error fetching monthly revenue:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch monthly revenue' });
@@ -1708,17 +1780,7 @@ router.get('/daily-pnl', requireAdmin, async (req: AuthenticatedRequest, res: Re
 
     const records = await readDailyRange(dailyPnlStore, start, end);
 
-    res.json({
-      success: true,
-      records: (records as any[]).map((r) => ({
-        dateKey: r.dateKey,
-        isCompleted: r.isCompleted,
-        barChartProfit: r.barChartProfit,
-        heatmapProfit: r.heatmapProfit,
-        orderCount: r.orderCount,
-        adSpend: r.adSpend,
-      })),
-    });
+    res.json({ success: true, records: pnlRecordsOf(records) });
   } catch (error) {
     console.error('Error fetching daily P&L:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch daily P&L' });
@@ -1747,18 +1809,7 @@ router.get('/breakeven-metrics', requireAdmin, async (_req: AuthenticatedRequest
   try {
     // Read the pre-computed snapshot (refreshed by the scheduled job) — no order-cache
     // scan on the request path. Compute once on a cold snapshot to seed it.
-    const snap = await breakevenStore.get('latest');
-    if (snap && (snap as any).metrics) {
-      return res.json({ success: true, ...(snap as any).metrics });
-    }
-    // Cold snapshot: seed it in the background (the compute scans the order cache and
-    // is slow) and return zeros now, so this request stays fast. The next load is real.
-    refreshBreakevenSnapshot().catch((e) => console.error('breakeven snapshot seed:', e));
-    res.json({
-      success: true, aov: 0, avgCOGS: 0, avgShipping: 0, avgTotalCost: 0,
-      contributionMargin: 0, breakevenROAS: 0, deliveredCount: 0, failedCount: 0,
-      totalOrders: 0, completedDaysCount: 0, computing: true,
-    });
+    res.json({ success: true, ...(await breakevenMetrics()) });
   } catch (error) {
     console.error('Error computing breakeven metrics:', error);
     res.status(500).json({ success: false, error: 'Failed to compute breakeven metrics' });
