@@ -22,7 +22,7 @@ import {
   Toast,
 } from '../components/ui/pbx';
 import { cx, formatINR } from '../components/ui/format';
-import { OrdersTableBody } from './SalesPage/OrdersTableBody';
+import { OrdersByDay } from './SalesPage/OrdersByDay';
 
 import { type ShopifyOrder } from '../services/api';
 
@@ -551,6 +551,14 @@ export function SalesPage({ initialFilter, embedded = false }: SalesPageProps = 
     }
     setSelectedOrders(newSelected);
     setSelectAll(newSelected.size === filteredOrders.length);
+  };
+
+  // Selects or clears every order of one day (the checkbox in that day's table header).
+  const handleSelectDay = (orderIds: number[], select: boolean) => {
+    const newSelected = new Set(selectedOrders);
+    orderIds.forEach((id) => (select ? newSelected.add(id) : newSelected.delete(id)));
+    setSelectedOrders(newSelected);
+    setSelectAll(filteredOrders.length > 0 && newSelected.size === filteredOrders.length);
   };
 
   // Get available months from orders (store timezone)
@@ -1986,86 +1994,68 @@ export function SalesPage({ initialFilter, embedded = false }: SalesPageProps = 
           {anyFilter && <Button size="sm" variant="ghost" icon="x" onClick={clearFilters}>Clear filters</Button>}
           <span className={styles.toolbarEnd}>
             <span className={styles.count}>{`${filteredOrders.length.toLocaleString('en-IN')} ${filteredOrders.length === 1 ? 'order' : 'orders'}`}</span>
+            <Checkbox
+              label="Select all"
+              checked={selectAll}
+              indeterminate={selectedOrders.size > 0 && !selectAll}
+              onChange={handleSelectAll}
+              disabled={filteredOrders.length === 0}
+            />
             <Switch label="AWB column" checked={showAWBColumn} onChange={(e) => setShowAWBColumn(e.target.checked)} />
           </span>
         </div>
 
-        <div className={cx('pbx-table', styles.table)}>
-          {selectedOrders.size > 0 && (
-            <div className="pbx-table__bulk" role="region" aria-label="Selection">
-              <span><strong>{selectedOrders.size.toLocaleString('en-IN')}</strong> selected</span>
-              <div className="pbx-table__bulk-actions">
-                <Button size="sm" variant="secondary" icon="bookmark" onClick={handleBulkAcknowledge} disabled={isProcessing}>Acknowledge</Button>
-                <Button size="sm" variant="secondary" icon="truck" onClick={handleMarkAsRTO} disabled={isProcessing}>Mark RTO</Button>
-                <Menu
-                  label="More bulk actions"
-                  trigger={<Button size="sm" variant="secondary" iconRight="chevron-down" loading={isProcessing}>More</Button>}
-                  items={[
-                    { label: 'Unmark RTO', icon: 'x', onSelect: handleUnmarkRTO },
-                    { label: 'Tag customers no-COD', icon: 'tag', onSelect: handleBulkAddNoCOD },
-                    { divider: true },
-                    {
-                      label: 'Discard orders',
-                      icon: 'trash-2',
-                      tone: 'negative',
-                      onSelect: () => setConfirmAction({
-                        title: `Discard ${selectedOrders.size} ${selectedOrders.size === 1 ? 'order' : 'orders'}?`,
-                        description: 'They leave the orders list and every figure on this page.',
-                        confirmLabel: 'Discard',
-                        danger: true,
-                        run: handleDiscardOrders,
-                      }),
-                    },
-                  ]}
-                />
-              </div>
-              <Button variant="ghost" size="sm" onClick={() => { setSelectedOrders(new Set()); setSelectAll(false); }}>Clear</Button>
-            </div>
-          )}
-          <div className={styles.tableScroll}>
-            <table>
-              <thead>
-                <tr>
-                  <th className="pbx-table__check">
-                    <Checkbox
-                      aria-label="Select all orders"
-                      checked={selectAll}
-                      indeterminate={selectedOrders.size > 0 && !selectAll}
-                      onChange={handleSelectAll}
-                    />
-                  </th>
-                  <th scope="col">Order</th>
-                  <th scope="col">Items</th>
-                  {showAWBColumn && <th scope="col">AWB</th>}
-                  <th scope="col">Status</th>
-                  <th scope="col" style={{ textAlign: 'right' }}>P/L</th>
-                  <th scope="col">Placed</th>
-                  <th scope="col"><span className="pbx-sr">Actions</span></th>
-                </tr>
-              </thead>
-              <OrdersTableBody
-                hasStatusFilter={hasStatusFilter}
-                filteredOrders={filteredOrders}
-                ordersGroupedByDate={ordersGroupedByDate}
-                selectedOrders={selectedOrders}
-                onSelectOrder={handleSelectOrder}
-                orderProfitLoss={orderProfitLoss}
-                rtoOrderIds={rtoOrderIds}
-                getDelayDays={getDelayDays}
-                handleOpenCogsModal={handleOpenCogsModal}
-                avgPnlPerFinalOrder={avgPnlPerFinalOrder}
-                globalNdrRate={globalNdrRate}
-                onUpdateDeliveryStatus={handleUpdateDeliveryStatus}
-                onAddCustomerTag={handleAddCustomerTag}
-                onAcknowledgeOrder={handleAcknowledgeOrder}
-                acknowledgedOrderIds={acknowledgedOrderIds}
-                onMarkTicketRaised={handleMarkTicketRaised}
-                ticketRaisedOrderIds={ticketRaisedOrderIds}
-                showAWBColumn={showAWBColumn}
+        {selectedOrders.size > 0 && (
+          <div className={cx('pbx-table__bulk', styles.bulk)} role="region" aria-label="Selection">
+            <span><strong>{selectedOrders.size.toLocaleString('en-IN')}</strong> selected</span>
+            <div className="pbx-table__bulk-actions">
+              <Button size="sm" variant="secondary" icon="bookmark" onClick={handleBulkAcknowledge} disabled={isProcessing}>Acknowledge</Button>
+              <Button size="sm" variant="secondary" icon="truck" onClick={handleMarkAsRTO} disabled={isProcessing}>Mark RTO</Button>
+              <Menu
+                label="More bulk actions"
+                trigger={<Button size="sm" variant="secondary" iconRight="chevron-down" loading={isProcessing}>More</Button>}
+                items={[
+                  { label: 'Unmark RTO', icon: 'x', onSelect: handleUnmarkRTO },
+                  { label: 'Tag customers no-COD', icon: 'tag', onSelect: handleBulkAddNoCOD },
+                  { divider: true },
+                  {
+                    label: 'Discard orders',
+                    icon: 'trash-2',
+                    tone: 'negative',
+                    onSelect: () => setConfirmAction({
+                      title: `Discard ${selectedOrders.size} ${selectedOrders.size === 1 ? 'order' : 'orders'}?`,
+                      description: 'They leave the orders list and every figure on this page.',
+                      confirmLabel: 'Discard',
+                      danger: true,
+                      run: handleDiscardOrders,
+                    }),
+                  },
+                ]}
               />
-            </table>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => { setSelectedOrders(new Set()); setSelectAll(false); }}>Clear</Button>
           </div>
-        </div>
+        )}
+        <OrdersByDay
+          days={ordersGroupedByDate}
+          hasStatusFilter={hasStatusFilter}
+          selectedOrders={selectedOrders}
+          onSelectOrder={handleSelectOrder}
+          onSelectDay={handleSelectDay}
+          orderProfitLoss={orderProfitLoss}
+          rtoOrderIds={rtoOrderIds}
+          getDelayDays={getDelayDays}
+          handleOpenCogsModal={handleOpenCogsModal}
+          avgPnlPerFinalOrder={avgPnlPerFinalOrder}
+          globalNdrRate={globalNdrRate}
+          onUpdateDeliveryStatus={handleUpdateDeliveryStatus}
+          onAddCustomerTag={handleAddCustomerTag}
+          onAcknowledgeOrder={handleAcknowledgeOrder}
+          acknowledgedOrderIds={acknowledgedOrderIds}
+          onMarkTicketRaised={handleMarkTicketRaised}
+          ticketRaisedOrderIds={ticketRaisedOrderIds}
+          showAWBColumn={showAWBColumn}
+        />
       </section>
 
       <Drawer

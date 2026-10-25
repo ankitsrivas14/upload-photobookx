@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
 
 /** Lists up to this long render every row, exactly as before. */
-const VIRTUALIZE_AFTER = 150;
+export const VIRTUALIZE_AFTER = 150;
 
 /**
  * Window-scrolled virtualisation for long lists (the admin pages scroll the window, not a
@@ -17,11 +17,13 @@ const VIRTUALIZE_AFTER = 150;
 export function useVirtualRows<T extends HTMLElement>(
   count: number,
   estimateSize: (index: number) => number,
-  getItemKey?: (index: number) => string | number
+  getItemKey?: (index: number) => string | number,
+  /** Overrides the length rule, e.g. when each item is a block of many rows. */
+  options?: { enabled?: boolean }
 ) {
   const listRef = useRef<T>(null);
   const [scrollMargin, setScrollMargin] = useState(0);
-  const enabled = count > VIRTUALIZE_AFTER;
+  const enabled = options?.enabled ?? count > VIRTUALIZE_AFTER;
 
   // Where the list starts on the page; content above it (filters, banners) can move it,
   // so re-check after every render. Updating only on a real change stops the loop.

@@ -24,9 +24,6 @@ interface OrderRowProps {
   onMarkTicketRaised?: (orderId: number, orderName: string) => void;
   ticketRaisedOrderIds: Set<number>;
   showAWBColumn?: boolean;
-  /** Set when the table is virtualised, so the row's real height can be measured. */
-  rowRef?: React.Ref<HTMLTableRowElement>;
-  index?: number;
 }
 
 export const OrderRow: React.FC<OrderRowProps> = ({
@@ -44,8 +41,6 @@ export const OrderRow: React.FC<OrderRowProps> = ({
   onMarkTicketRaised,
   ticketRaisedOrderIds,
   showAWBColumn = false,
-  rowRef,
-  index,
 }) => {
   const navigate = useNavigate();
   const handleMarkDeliveryStatus = () => {
@@ -89,13 +84,10 @@ export const OrderRow: React.FC<OrderRowProps> = ({
     deliveryStatus.includes('failed') ||
     deliveryStatus.includes('rto');
 
-  const placedAt = new Date(order.createdAt).toLocaleString('en-IN', {
-    day: 'numeric',
-    month: 'short',
-    hour: 'numeric',
-    minute: '2-digit',
-    timeZone: STORE_TIMEZONE,
-  });
+  // The day's card carries the date, so the row shows the time; the full date is on hover.
+  const placed = new Date(order.createdAt);
+  const placedTime = placed.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', timeZone: STORE_TIMEZONE });
+  const placedFull = placed.toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: STORE_TIMEZONE });
 
   const menuItems: MenuItem[] = [
     { label: 'Mark delivery status', icon: 'circle-check', onSelect: handleMarkDeliveryStatus },
@@ -105,15 +97,13 @@ export const OrderRow: React.FC<OrderRowProps> = ({
   if (!isAcknowledged) menuItems.push({ label: 'Acknowledge', icon: 'bookmark', onSelect: handleAcknowledge });
 
   return (
-    <tr ref={rowRef} data-index={index} className={isSelected ? 'is-selected' : undefined}>
+    <tr className={isSelected ? 'is-selected' : undefined}>
       <td className="pbx-table__check">
         <Checkbox aria-label={`Select ${order.name}`} checked={isSelected} onChange={() => onSelectOrder(order.id)} />
       </td>
+      <td className={styles.orderName}>{order.name}</td>
       <td>
-        <div className={styles.orderCell}>
-          <span className={styles.orderName}>{order.name}</span>
-          <Badge size="sm" dot={false} tone={isPrepaid ? 'info' : 'neutral'}>{isPrepaid ? 'Prepaid' : 'COD'}</Badge>
-        </div>
+        <Badge size="sm" dot={false} tone={isPrepaid ? 'info' : 'neutral'}>{isPrepaid ? 'Prepaid' : 'COD'}</Badge>
       </td>
       <td className={styles.items}>
         {order.lineItems && order.lineItems.length > 0
@@ -146,10 +136,12 @@ export const OrderRow: React.FC<OrderRowProps> = ({
           {isAcknowledged && <Badge size="sm" dot={false} icon="check">Acknowledged</Badge>}
         </div>
       </td>
-      <td className="pbx-num" style={{ textAlign: 'right' }}>
+      <td className={`pbx-num ${styles.num}`}>
         {isFinal || isPrepaid ? <Amount value={orderProfitLoss.get(order.id) || 0} signed pill /> : <span className="pbx-amount--none">—</span>}
       </td>
-      <td className={styles.date}>{placedAt}</td>
+      <td className={styles.time}>
+        <time dateTime={order.createdAt} title={placedFull}>{placedTime}</time>
+      </td>
       <td>
         <div className={styles.rowActions}>
           {order.trackingUrl ? (

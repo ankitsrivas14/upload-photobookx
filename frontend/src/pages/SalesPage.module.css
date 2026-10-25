@@ -219,62 +219,126 @@
   color: var(--ink-muted);
 }
 
-/* Orders table: pbx-table styling with day rows; the header sticks under the topbar */
-.tableScroll {
-  position: relative; /* keeps the buttons' screen-reader labels inside the horizontal scroll */
+/* Orders: one ruled card per day with its figures and its own table. */
+.days {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
 }
 
-.table th {
-  top: var(--topbar);
+/* Spacing lives inside each day (not as a gap) so the virtualiser measures it. */
+.day {
+  padding-bottom: var(--space-6);
 }
 
-.embedded .table th {
+/* A day's heading line: date, weekday and count, then its figures, without a box of its own. */
+.dayHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-3);
+  padding-bottom: var(--space-2);
+}
+
+.dayTitle {
+  margin: 0;
+  font: 600 14px/20px var(--font-sans);
+  color: var(--ink);
+}
+
+.dayMeta {
+  font: 400 12px/16px var(--font-sans);
+  color: var(--ink-muted);
+}
+
+.dayFigures {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-5);
+  margin: 0 0 0 auto;
+}
+
+.dayFigures div {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.dayFigures dt {
+  font: 400 11px/16px var(--font-sans);
+  color: var(--ink-muted);
+}
+
+.dayFigures dd {
+  margin: 0;
+  font: 500 13px/18px var(--font-mono);
+  color: var(--ink);
+}
+
+@media (max-width: 720px) {
+  .dayFigures {
+    width: 100%;
+    margin-left: 0;
+  }
+}
+
+.noOrders {
+  margin: 0;
+  padding: var(--space-3) 0;
+  font: 400 12px/16px var(--font-sans);
+  color: var(--ink-muted);
+}
+
+/* The selection's bulk actions stay in view while you work down the days. */
+.bulk {
+  position: sticky;
+  top: var(--topbar);
+  z-index: var(--z-sticky);
+  margin-bottom: var(--space-3);
+  background: var(--paper);
+}
+
+.embedded .bulk {
   top: 0;
 }
 
-@media (max-width: 1023px) {
-  .tableScroll {
-    overflow-x: auto;
-  }
-
-  .table table {
-    min-width: 760px;
-  }
-
-  .table th {
-    top: 0;
-  }
+/* Each day's table scrolls sideways inside its card when the screen is narrower than the table. */
+.tableScroll {
+  position: relative; /* keeps the buttons' screen-reader labels inside the horizontal scroll */
+  min-width: 0;
+  overflow-x: auto;
 }
 
-.orderCell {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.table table {
+  min-width: 760px;
+}
+
+.table td {
+  padding-top: var(--space-2);
+  padding-bottom: var(--space-2);
+}
+
+.table td.orderName {
+  font: 500 12px/16px var(--font-mono);
   white-space: nowrap;
 }
 
-.orderName {
-  font: 500 12px/16px var(--font-mono);
-}
-
 .table td.items {
-  padding-top: 6px;
-  padding-bottom: 6px;
+  min-width: 220px;
   font-size: 12px;
-  line-height: 16px;
+  line-height: 18px;
 }
 
 .variant {
   color: var(--ink-muted);
 }
 
+/* Delivery status first, then any flags (delay, RTO, ticket…), one per line. */
 .badges {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-start;
   gap: 4px;
-  padding: 4px 0;
 }
 
 .badgeLink {
@@ -285,8 +349,12 @@
   cursor: pointer;
 }
 
-.date {
-  font: 400 11px/16px var(--font-mono);
+.num {
+  text-align: right;
+}
+
+.time {
+  font: 400 12px/16px var(--font-mono);
   color: var(--ink-muted);
   white-space: nowrap;
 }
@@ -301,40 +369,6 @@
 .actionGap {
   flex: none;
   width: var(--control-sm);
-}
-
-.table .dayRow td {
-  height: 28px;
-  background: var(--table-header-bg);
-  border-bottom: 1px solid var(--line);
-}
-
-.table .dayRow:hover td {
-  background: var(--table-header-bg);
-}
-
-.dayInner {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 2px var(--space-5);
-  font: 400 11px/16px var(--font-sans);
-  color: var(--ink-muted);
-}
-
-.dayInner b,
-.dayInner :global(.pbx-amount) {
-  font: 500 11px/16px var(--font-mono);
-}
-
-.dayInner b {
-  color: var(--ink);
-}
-
-.dayDate {
-  min-width: 120px;
-  font: 600 12px/16px var(--font-sans);
-  color: var(--ink);
 }
 
 /* Pending products drawer */
