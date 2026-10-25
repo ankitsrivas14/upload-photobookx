@@ -218,8 +218,8 @@ export function GSTMonthlyReports() {
   return (
     <div className={styles.report}>
       <div className={styles.toolbar}>
-        <Select label="Month" inlineLabel size="sm" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} options={MONTHS} />
-        <Select label="Year" inlineLabel size="sm" value={selectedYear} onChange={(e) => setSelectedYear(e.target.value)} options={YEARS} />
+        <Select label="Month" inlineLabel size="sm" value={selectedMonth} onChange={setSelectedMonth} options={MONTHS} />
+        <Select label="Year" inlineLabel size="sm" value={selectedYear} onChange={setSelectedYear} options={YEARS} />
         <div className={styles.toolbarEnd}>
           <Button size="sm" icon="upload" loading={isUploading} onClick={() => fileInput.current?.click()}>
             {isUploading ? 'Uploading…' : 'Upload delivery dates'}

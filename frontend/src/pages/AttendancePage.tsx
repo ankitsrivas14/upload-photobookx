@@ -9,6 +9,7 @@ import {
   Card,
   Checkbox,
   DataList,
+  DateField,
   Dialog,
   Drawer,
   EmptyState,
@@ -19,6 +20,7 @@ import {
   StatCard,
   StatStrip,
   TextField,
+  Tooltip,
 } from '../components/ui/pbx';
 import { cx, formatINR } from '../components/ui/format';
 import { findSection } from '../layouts/adminNav';
@@ -373,14 +375,7 @@ export function AttendancePage() {
       <PageHeader
         eyebrow="Staff attendance"
         title={page?.label ?? 'Staff attendance'}
-        actions={
-          <label className={styles.monthField}>
-            <span>Month</span>
-            <span className="pbx-input pbx-input--sm">
-              <input type="month" value={monthStr} onChange={(e) => e.target.value && setMonthStr(e.target.value)} />
-            </span>
-          </label>
-        }
+        actions={<DateField mode="month" label="Month" inlineLabel size="sm" clearable={false} value={monthStr} onChange={setMonthStr} />}
       />
 
       <StatStrip>
@@ -449,19 +444,24 @@ export function AttendancePage() {
                           return (
                             <td key={dateStr} className={cx(styles.cell, isSunday && styles.sunday)}>
                               {dateStr > todayStr ? null : isBeforeJoining ? (
-                                <span className={styles.na} title="Before joining">–</span>
+                                <Tooltip content="Before joining">
+                                  <span className={styles.na}>–</span>
+                                </Tooltip>
                               ) : isAfterTermination ? (
-                                <span className={styles.terminated} title="Terminated">T</span>
+                                <Tooltip content="Terminated">
+                                  <span className={styles.terminated}>T</span>
+                                </Tooltip>
                               ) : (
-                                <button
-                                  type="button"
-                                  className={cx(styles.mark, cell.className)}
-                                  title={`${dayLabel}: ${cell.label}`}
-                                  aria-label={`${emp.name}, ${dayLabel}: ${cell.label}. Change`}
-                                  onClick={() => markMonthlyAttendance(emp._id, dateStr, status)}
-                                >
-                                  {cell.letter}
-                                </button>
+                                <Tooltip content={`${dayLabel}: ${cell.label}`} repeatsLabel>
+                                  <button
+                                    type="button"
+                                    className={cx(styles.mark, cell.className)}
+                                    aria-label={`${emp.name}, ${dayLabel}: ${cell.label}. Change`}
+                                    onClick={() => markMonthlyAttendance(emp._id, dateStr, status)}
+                                  >
+                                    {cell.letter}
+                                  </button>
+                                </Tooltip>
                               )}
                             </td>
                           );
@@ -546,19 +546,16 @@ export function AttendancePage() {
                   label="Employee"
                   required
                   value={logForm.employeeId}
-                  onChange={(e) => setLogForm((f) => ({ ...f, employeeId: e.target.value }))}
-                  options={[
-                    { value: '', label: 'Select employee…' },
-                    ...hourlyEmployees.map((emp) => ({ value: emp._id, label: `${emp.name} · ₹${emp.hourlyRate}/hr` })),
-                  ]}
+                  onChange={(v) => setLogForm((f) => ({ ...f, employeeId: v }))}
+                  placeholder="Select employee…"
+                  options={hourlyEmployees.map((emp) => ({ value: emp._id, label: `${emp.name} · ₹${emp.hourlyRate}/hr` }))}
                 />
-                <TextField
+                <DateField
                   label="Date"
-                  type="date"
                   required
                   max={todayStr}
                   value={logForm.dateStr}
-                  onChange={(e) => setLogForm((f) => ({ ...f, dateStr: e.target.value }))}
+                  onChange={(v) => setLogForm((f) => ({ ...f, dateStr: v }))}
                 />
                 <TextField
                   label="Hours"
@@ -635,7 +632,7 @@ export function AttendancePage() {
                                     <td className={styles.muted}>{log.notes || '—'}</td>
                                     <td>
                                       <div className={styles.actions}>
-                                        <Button size="sm" variant="ghost" iconOnly icon="trash-2" title="Delete entry" onClick={() => confirmDeleteLog(emp._id, log.dateStr)}>
+                                        <Button size="sm" variant="ghost" iconOnly icon="trash-2" tooltip="Delete entry" onClick={() => confirmDeleteLog(emp._id, log.dateStr)}>
                                           {`Delete the entry for ${log.dateStr}`}
                                         </Button>
                                       </div>
@@ -808,7 +805,7 @@ export function AttendancePage() {
           ) : (
             <TextField label="Hourly rate" type="number" min="0" step="0.5" required prefix="₹" suffix="/hr" value={empForm.hourlyRate} onChange={(e) => setEmpForm({ ...empForm, hourlyRate: e.target.value })} />
           )}
-          <TextField label="Joining date" type="date" required value={empForm.joiningDate} onChange={(e) => setEmpForm({ ...empForm, joiningDate: e.target.value })} />
+          <DateField label="Joining date" required value={empForm.joiningDate} onChange={(v) => setEmpForm({ ...empForm, joiningDate: v })} />
         </form>
       </Dialog>
 
@@ -854,7 +851,7 @@ export function AttendancePage() {
           </div>
           {!statusForm.isActive && (
             <>
-              <TextField label="Termination date" type="date" required value={statusForm.terminationDate} onChange={(e) => setStatusForm({ ...statusForm, terminationDate: e.target.value })} />
+              <DateField label="Termination date" required value={statusForm.terminationDate} onChange={(v) => setStatusForm({ ...statusForm, terminationDate: v })} />
               <Checkbox label="Full and final settled" checked={statusForm.isFnfMarked} onChange={(e) => setStatusForm({ ...statusForm, isFnfMarked: e.target.checked })} />
               {statusForm.isFnfMarked && (
                 <TextField label="FNF amount" type="number" required prefix="₹" value={statusForm.fnfAmount} onChange={(e) => setStatusForm({ ...statusForm, fnfAmount: e.target.value })} />

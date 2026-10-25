@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { api } from '../../services/api';
 import { toast } from 'react-hot-toast';
-import { Button, Card, Checkbox, Dialog, EmptyState, Icon, Skeleton } from '../../components/ui/pbx';
+import { Button, Card, Checkbox, DateField, Dialog, EmptyState, Icon, Skeleton, TextField } from '../../components/ui/pbx';
 import styles from '../AnalysisPage.module.css';
 
 interface Strategy {
@@ -156,29 +156,22 @@ export function Reels() {
       <div className={styles.row}>
         <Card className={styles.wide} title="Add reel">
           <div className={styles.reelForm}>
-            <span className="pbx-input pbx-input--sm">
-              <input aria-label="Reel name" placeholder="Name" value={reelName} onChange={(e) => setReelName(e.target.value)} />
-            </span>
-            <span className="pbx-input pbx-input--sm">
-              <input aria-label="Reel URL" placeholder="Reel URL" value={reelUrl} onChange={(e) => setReelUrl(e.target.value)} />
-            </span>
-            <span className="pbx-input pbx-input--sm">
-              <input aria-label="Reel date" type="date" value={reelDate} onChange={(e) => setReelDate(e.target.value)} />
-            </span>
+            <TextField size="sm" aria-label="Reel name" placeholder="Name" value={reelName} onChange={(e) => setReelName(e.target.value)} />
+            <TextField size="sm" aria-label="Reel URL" placeholder="Reel URL" value={reelUrl} onChange={(e) => setReelUrl(e.target.value)} />
+            <DateField size="sm" aria-label="Reel date" value={reelDate} onChange={setReelDate} />
             <Button size="sm" variant="primary" icon="plus" loading={savingReel} onClick={handleAddReel}>Add</Button>
           </div>
         </Card>
         <Card title="Add strategy">
           <div className={styles.strategyForm}>
-            <span className="pbx-input pbx-input--sm">
-              <input
-                aria-label="Strategy name"
-                placeholder="Strategy name"
-                value={strategyName}
-                onChange={(e) => setStrategyName(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') handleAddStrategy(); }}
-              />
-            </span>
+            <TextField
+              size="sm"
+              aria-label="Strategy name"
+              placeholder="Strategy name"
+              value={strategyName}
+              onChange={(e) => setStrategyName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleAddStrategy(); }}
+            />
             <Button size="sm" icon="plus" loading={savingStrategy} onClick={handleAddStrategy}>Add</Button>
           </div>
         </Card>
@@ -203,7 +196,7 @@ export function Reels() {
                             variant="ghost"
                             iconOnly
                             icon="trash-2"
-                            title="Delete strategy"
+                            tooltip="Delete strategy"
                             onClick={() => setConfirmDelete({ title: `Delete the "${s.name}" strategy?`, description: 'Its column and every tick in it go.', run: () => handleDeleteStrategy(s._id) })}
                           >
                             {`Delete ${s.name}`}
@@ -226,7 +219,7 @@ export function Reels() {
                               variant="ghost"
                               iconOnly
                               icon="trash-2"
-                              title="Delete reel"
+                              tooltip="Delete reel"
                               onClick={() => setConfirmDelete({ title: `Delete "${reel.name}"?`, description: 'The reel and its ticks go.', run: () => handleDeleteReel(reel._id) })}
                             >
                               {`Delete ${reel.name}`}

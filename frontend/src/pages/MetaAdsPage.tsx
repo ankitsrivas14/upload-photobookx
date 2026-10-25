@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
-import { Button, Card, Dialog, EmptyState, Skeleton, TextField } from '../components/ui/pbx';
+import { Button, Card, DateField, Dialog, EmptyState, Skeleton, TextField } from '../components/ui/pbx';
 import { cx, formatINR } from '../components/ui/format';
 import styles from './MetaAdsPage.module.css';
 
@@ -103,7 +103,7 @@ export function MetaAdsPage() {
     <>
       <Card title="Add daily spend" eyebrow="actual daily spend from the Meta Ads dashboard">
         <form onSubmit={handleSubmitAdSpend} className={styles.form}>
-          <TextField label="Date" type="date" required value={adSpendDate} onChange={(e) => setAdSpendDate(e.target.value)} />
+          <DateField label="Date" required value={adSpendDate} onChange={setAdSpendDate} />
           <TextField
             label="Amount spent"
             type="number"
@@ -173,7 +173,7 @@ export function MetaAdsPage() {
                         </td>
                         <td>
                           <div className={styles.actions}>
-                            <Button size="sm" variant="ghost" iconOnly icon="trash-2" title="Delete entry" onClick={() => setDeleteId(entry.id)}>
+                            <Button size="sm" variant="ghost" iconOnly icon="trash-2" tooltip="Delete entry" onClick={() => setDeleteId(entry.id)}>
                               {`Delete the entry for ${dateLabel(entry.date)}`}
                             </Button>
                           </div>

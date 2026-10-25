@@ -19,6 +19,7 @@ import {
   StatStrip,
   Switch,
   Toast,
+  Tooltip,
 } from '../components/ui/pbx';
 import { cx, formatINR } from '../components/ui/format';
 import { OrdersByDay } from './SalesPage/OrdersByDay';
@@ -1689,8 +1690,8 @@ export function SalesPage({ initialFilter, embedded = false }: SalesPageProps = 
         inlineLabel
         size="sm"
         value={selectedMonthFilter}
-        onChange={(e) => {
-          setSelectedMonthFilter(e.target.value);
+        onChange={(v) => {
+          setSelectedMonthFilter(v);
           setSelectedOrders(new Set());
           setSelectAll(false);
         }}
@@ -1835,9 +1836,11 @@ export function SalesPage({ initialFilter, embedded = false }: SalesPageProps = 
               : `${expectedProfit.pendingOrdersCount.toLocaleString('en-IN')} pending orders`}
           >
             {/* "Now" is the Total P/L beside it, so the note keeps to the two parts still to come */}
-            <span className={styles.statNote} title={`Now ${formatINR(expectedProfit.currentPL, { signed: true })} · average per delivered order ${formatINR(expectedProfit.avgPLPerDeliveredOrder)}`}>
-              {`pending ${formatINR(expectedProfit.expectedPendingPL, { signed: true, compact: true })} · rest ${formatINR(expectedProfit.expectedFuturePL, { signed: true, compact: true })}`}
-            </span>
+            <Tooltip content={`Now ${formatINR(expectedProfit.currentPL, { signed: true })} · average per delivered order ${formatINR(expectedProfit.avgPLPerDeliveredOrder)}`}>
+              <span className={styles.statNote}>
+                {`pending ${formatINR(expectedProfit.expectedPendingPL, { signed: true, compact: true })} · rest ${formatINR(expectedProfit.expectedFuturePL, { signed: true, compact: true })}`}
+              </span>
+            </Tooltip>
           </StatCard>
         )}
       </StatStrip>

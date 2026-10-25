@@ -344,9 +344,7 @@ export function CreateTicketForm() {
                             onChange={(e) => setAiMessage(e.target.value)}
                         />
                         <div className={styles.waRow}>
-                            <span className="pbx-input pbx-input--sm">
-                                <input type="text" readOnly aria-label="WhatsApp link" value={getWaLink()} />
-                            </span>
+                            <TextField size="sm" readOnly aria-label="WhatsApp link" value={getWaLink()} />
                             <Button size="sm" icon="copy" onClick={() => handleCopyLink(getWaLink())}>Copy link</Button>
                             <Button
                                 size="sm"

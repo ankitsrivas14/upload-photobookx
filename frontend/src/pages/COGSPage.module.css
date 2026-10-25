@@ -96,7 +96,7 @@
 }
 
 /* A total typed over the computed sum: dashed until a cell above is edited */
-.overridden {
+.overridden :global(.pbx-input) {
   border-style: dashed;
   border-color: var(--caution);
 }

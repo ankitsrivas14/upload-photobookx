@@ -64,10 +64,6 @@
   color: var(--ink-subtle);
 }
 
-.controls input[type='date'] {
-  width: 112px;
-}
-
 /* Order distribution: one stacked share bar per breakdown */
 .dist {
   display: flex;

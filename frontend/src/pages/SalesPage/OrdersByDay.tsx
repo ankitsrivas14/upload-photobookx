@@ -2,7 +2,7 @@ import React from 'react';
 import { OrderRow } from './OrderRow';
 import styles from '../SalesPage.module.css';
 import { useVirtualRows, VIRTUALIZE_AFTER } from '../../lib/useVirtualRows';
-import { Amount, Card, Checkbox, EmptyState } from '../../components/ui/pbx';
+import { Amount, Card, Checkbox, EmptyState, Tooltip } from '../../components/ui/pbx';
 
 import { type ShopifyOrder } from '../../services/api';
 
@@ -116,10 +116,12 @@ export const OrdersByDay: React.FC<OrdersByDayProps> = (props) => {
               <dt>P/L so far</dt>
               <dd>{hasOrders || group.adSpend > 0 ? <Amount value={f.pnl} signed /> : '—'}</dd>
             </div>
-            <div title={f.pendingCount > 0 ? `${plural(f.pendingCount, 'order')} still pending, counted at the average P/L` : undefined}>
-              <dt>Est. P/L</dt>
-              <dd>{hasOrders ? <Amount value={f.estimatedPnl} signed /> : '—'}</dd>
-            </div>
+            <Tooltip content={f.pendingCount > 0 ? `${plural(f.pendingCount, 'order')} still pending, counted at the average P/L` : undefined}>
+              <div>
+                <dt>Est. P/L</dt>
+                <dd>{hasOrders ? <Amount value={f.estimatedPnl} signed /> : '—'}</dd>
+              </div>
+            </Tooltip>
             <div>
               <dt>Expected NDR</dt>
               <dd>{hasOrders ? f.expectedNdr.toLocaleString('en-IN') : '—'}</dd>

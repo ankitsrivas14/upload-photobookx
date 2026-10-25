@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import type { ShopifyOrder } from '../../services/api';
-import { Alert, Badge, Button, Card, DataList, Dialog, Drawer, EmptyState, Icon, Skeleton, StatCard, StatStrip } from '../../components/ui/pbx';
+import { Alert, Badge, Button, Card, DataList, Dialog, Drawer, EmptyState, Icon, Skeleton, StatCard, StatStrip, Tooltip } from '../../components/ui/pbx';
 import { cx } from '../../components/ui/format';
 import styles from '../AnalysisPage.module.css';
 
@@ -465,16 +465,17 @@ export function StuckOrdersAnalysis() {
                                         <div className={styles.actions}>
                                             <Button size="sm" onClick={() => setSelectedOrder(order)}>Activities</Button>
                                             {order.trackingUrl && (
-                                                <a
-                                                    href={order.trackingUrl}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="pbx-btn pbx-btn--ghost pbx-btn--sm pbx-btn--icon"
-                                                    title="Track shipment"
-                                                    aria-label={`Track ${order.name}`}
-                                                >
-                                                    <Icon name="external-link" size={14} />
-                                                </a>
+                                                <Tooltip content="Track shipment" repeatsLabel>
+                                                    <a
+                                                        href={order.trackingUrl}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="pbx-btn pbx-btn--ghost pbx-btn--sm pbx-btn--icon"
+                                                        aria-label={`Track ${order.name}`}
+                                                    >
+                                                        <Icon name="external-link" size={14} />
+                                                    </a>
+                                                </Tooltip>
                                             )}
                                         </div>
                                     </td>

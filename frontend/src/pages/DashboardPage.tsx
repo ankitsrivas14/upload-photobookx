@@ -8,7 +8,7 @@ import {
   Cell,
   XAxis,
   YAxis,
-  Tooltip,
+  Tooltip as ChartTooltip,
   ResponsiveContainer,
   CartesianGrid,
   ReferenceLine,
@@ -22,6 +22,7 @@ import {
   Button,
   Card,
   DataList,
+  DateField,
   DeliveryBadge,
   Dialog,
   Drawer,
@@ -33,6 +34,8 @@ import {
   Skeleton,
   StatCard,
   StatStrip,
+  TextField,
+  Tooltip,
 } from '../components/ui/pbx';
 import { formatINR } from '../components/ui/format';
 import type { HeatmapDay } from '../components/ui/pbx';
@@ -91,10 +94,10 @@ export function DashboardPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
-  // ROAS filter — uncontrolled refs for inputs (no re-render on typing)
+  // ROAS filter — the days field stays uncontrolled (no re-render on typing); From and To are picks waiting for Apply
   const roasDaysRef = useRef<HTMLInputElement>(null);
-  const roasStartRef = useRef<HTMLInputElement>(null);
-  const roasEndRef = useRef<HTMLInputElement>(null);
+  const [roasFrom, setRoasFrom] = useState('');
+  const [roasTo, setRoasTo] = useState('');
   // ROAS filter — applied state (what the chart uses, updated on Go)
   const [roasDays, setRoasDays] = useState(30);
   const [roasStartDate, setRoasStartDate] = useState('');
@@ -698,7 +701,7 @@ export function DashboardPage() {
             inlineLabel
             size="sm"
             value={String(selectedYear)}
-            onChange={(e) => setSelectedYear(Number(e.target.value))}
+            onChange={(v) => setSelectedYear(Number(v))}
             options={[0, 1, 2].map((back) => {
               const y = new Date().getFullYear() - back;
               return { value: String(y), label: String(y) };
@@ -763,43 +766,38 @@ export function DashboardPage() {
           }
           actions={
             <div className={styles.controls}>
-              <label className={styles.ctl}>
+              <div className={styles.ctl}>
                 <span>Last</span>
-                <span className="pbx-input pbx-input--sm">
-                  <input
-                    ref={roasDaysRef}
-                    type="number"
-                    min={1}
-                    max={365}
-                    defaultValue={30}
-                    aria-label="Last N days"
-                    style={{ width: 44 }}
-                    onKeyDown={(e) => {
-                      if (e.key !== 'Enter') return;
-                      const days = Math.max(1, Number(roasDaysRef.current?.value) || 30);
-                      setRoasDays(days);
-                      setRoasStartDate('');
-                      setRoasEndDate('');
-                      if (roasStartRef.current) roasStartRef.current.value = '';
-                      if (roasEndRef.current) roasEndRef.current.value = '';
-                      loadROAS(days, '', '');
-                    }}
-                  />
-                </span>
+                <TextField
+                  ref={roasDaysRef}
+                  size="sm"
+                  type="number"
+                  min={1}
+                  max={365}
+                  defaultValue={30}
+                  aria-label="Last N days"
+                  style={{ width: 44 }}
+                  onKeyDown={(e) => {
+                    if (e.key !== 'Enter') return;
+                    const days = Math.max(1, Number(roasDaysRef.current?.value) || 30);
+                    setRoasDays(days);
+                    setRoasStartDate('');
+                    setRoasEndDate('');
+                    setRoasFrom('');
+                    setRoasTo('');
+                    loadROAS(days, '', '');
+                  }}
+                />
                 <span>days</span>
-              </label>
+              </div>
               <span className={styles.or}>or</span>
-              <span className="pbx-input pbx-input--sm">
-                <input ref={roasStartRef} type="date" aria-label="From" defaultValue="" />
-              </span>
-              <span className="pbx-input pbx-input--sm">
-                <input ref={roasEndRef} type="date" aria-label="To" defaultValue="" />
-              </span>
+              <DateField size="sm" aria-label="From" placeholder="From" max={roasTo || undefined} value={roasFrom} onChange={setRoasFrom} />
+              <DateField size="sm" aria-label="To" placeholder="To" min={roasFrom || undefined} value={roasTo} onChange={setRoasTo} />
               <Button
                 size="sm"
                 onClick={() => {
-                  const start = roasStartRef.current?.value || '';
-                  const end = roasEndRef.current?.value || '';
+                  const start = roasFrom;
+                  const end = roasTo;
                   const days = Math.max(1, Number(roasDaysRef.current?.value) || 30);
                   if (start && end) {
                     setRoasStartDate(start);
@@ -822,8 +820,8 @@ export function DashboardPage() {
                   onClick={() => {
                     setRoasStartDate('');
                     setRoasEndDate('');
-                    if (roasStartRef.current) roasStartRef.current.value = '';
-                    if (roasEndRef.current) roasEndRef.current.value = '';
+                    setRoasFrom('');
+                    setRoasTo('');
                     loadROAS(roasDays, '', '');
                   }}
                 >
@@ -841,7 +839,7 @@ export function DashboardPage() {
                 <CartesianGrid vertical={false} stroke="var(--chart-grid)" />
                 <XAxis dataKey="date" tick={AXIS_TICK} tickLine={false} axisLine={{ stroke: 'var(--rule)' }} minTickGap={24} />
                 <YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} tickFormatter={(v: number) => `${v}×`} width={40} />
-                <Tooltip contentStyle={TOOLTIP_STYLE} labelStyle={TOOLTIP_LABEL} itemStyle={TOOLTIP_ITEM} formatter={(v) => [`${Number(v).toFixed(2)}×`, 'ROAS']} />
+                <ChartTooltip contentStyle={TOOLTIP_STYLE} labelStyle={TOOLTIP_LABEL} itemStyle={TOOLTIP_ITEM} formatter={(v) => [`${Number(v).toFixed(2)}×`, 'ROAS']} />
                 {breakevenMetrics.breakevenROAS > 0 && (
                   <ReferenceLine
                     y={breakevenMetrics.breakevenROAS}
@@ -891,7 +889,7 @@ export function DashboardPage() {
               <CartesianGrid vertical={false} stroke="var(--chart-grid)" />
               <XAxis dataKey="label" tick={AXIS_TICK} tickLine={false} axisLine={{ stroke: 'var(--rule)' }} />
               <YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} width={40} />
-              <Tooltip cursor={CURSOR_FILL} contentStyle={TOOLTIP_STYLE} labelStyle={TOOLTIP_LABEL} itemStyle={TOOLTIP_ITEM} formatter={(v) => [Number(v).toLocaleString('en-IN'), 'Orders']} />
+              <ChartTooltip cursor={CURSOR_FILL} contentStyle={TOOLTIP_STYLE} labelStyle={TOOLTIP_LABEL} itemStyle={TOOLTIP_ITEM} formatter={(v) => [Number(v).toLocaleString('en-IN'), 'Orders']} />
               {avgMonthlyOrders > 0 && (
                 <ReferenceLine
                   y={avgMonthlyOrders}
@@ -932,7 +930,7 @@ export function DashboardPage() {
               <CartesianGrid vertical={false} stroke="var(--chart-grid)" />
               <XAxis dataKey="label" tick={AXIS_TICK} tickLine={false} axisLine={{ stroke: 'var(--rule)' }} />
               <YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} width={48} tickFormatter={(v: number) => formatINR(v, { compact: true })} />
-              <Tooltip cursor={CURSOR_FILL} contentStyle={TOOLTIP_STYLE} labelStyle={TOOLTIP_LABEL} itemStyle={TOOLTIP_ITEM} formatter={(v) => [formatINR(Number(v)), 'Revenue']} />
+              <ChartTooltip cursor={CURSOR_FILL} contentStyle={TOOLTIP_STYLE} labelStyle={TOOLTIP_LABEL} itemStyle={TOOLTIP_ITEM} formatter={(v) => [formatINR(Number(v)), 'Revenue']} />
               {avgMonthlyRevenue > 0 && (
                 <ReferenceLine
                   y={avgMonthlyRevenue}
@@ -974,7 +972,7 @@ export function DashboardPage() {
               <CartesianGrid vertical={false} stroke="var(--chart-grid)" />
               <XAxis dataKey="month" tick={AXIS_TICK} tickLine={false} axisLine={false} />
               <YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} width={48} tickFormatter={(v: number) => formatINR(v, { compact: true })} />
-              <Tooltip cursor={CURSOR_FILL} contentStyle={TOOLTIP_STYLE} labelStyle={TOOLTIP_LABEL} itemStyle={TOOLTIP_ITEM} formatter={(v) => [formatINR(Number(v), { signed: true }), 'Profit']} />
+              <ChartTooltip cursor={CURSOR_FILL} contentStyle={TOOLTIP_STYLE} labelStyle={TOOLTIP_LABEL} itemStyle={TOOLTIP_ITEM} formatter={(v) => [formatINR(Number(v), { signed: true }), 'Profit']} />
               <ReferenceLine y={0} stroke="var(--rule)" />
               <Bar dataKey="profit" isAnimationActive={false}>
                 {monthlyProfitData.map((d) => (
@@ -1003,7 +1001,7 @@ export function DashboardPage() {
               inlineLabel
               size="sm"
               value={String(selectedMonth)}
-              onChange={(e) => setSelectedMonth(Number(e.target.value))}
+              onChange={(v) => setSelectedMonth(Number(v))}
               options={monthNames.map((name, i) => ({ value: String(i), label: name }))}
             />
           }
@@ -1013,7 +1011,7 @@ export function DashboardPage() {
               <CartesianGrid vertical={false} stroke="var(--chart-grid)" />
               <XAxis dataKey="date" tick={AXIS_TICK} tickLine={false} axisLine={false} minTickGap={16} />
               <YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} width={48} tickFormatter={(v: number) => formatINR(v, { compact: true })} />
-              <Tooltip
+              <ChartTooltip
                 cursor={CURSOR_FILL}
                 contentStyle={TOOLTIP_STYLE}
                 labelStyle={TOOLTIP_LABEL}
@@ -1046,7 +1044,9 @@ export function DashboardPage() {
                   </div>
                   <div className={styles.stack}>
                     {row.segs.map((x) => (
-                      <span key={x.name} title={`${x.name}: ${x.value}`} style={{ width: total ? `${(x.value / total) * 100}%` : 0, background: x.color }} />
+                      <Tooltip content={`${x.name}: ${x.value}`} key={x.name}>
+                        <span style={{ width: total ? `${(x.value / total) * 100}%` : 0, background: x.color }} />
+                      </Tooltip>
                     ))}
                   </div>
                   <div className={styles.legend}>

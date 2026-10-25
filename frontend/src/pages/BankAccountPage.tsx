@@ -557,7 +557,9 @@ export function BankAccountPage() {
                 <span className={styles.nickname} tabIndex={0}>{styled}</span>
             </Tooltip>
         ) : (
-            <span className={styles.narration} title={original}>{styled}</span>
+            <Tooltip content={original}>
+                <span className={styles.narration}>{styled}</span>
+            </Tooltip>
         );
     };
 
@@ -576,7 +578,7 @@ export function BankAccountPage() {
                     inlineLabel
                     size="sm"
                     value={monthFilter}
-                    onChange={(e) => setMonthFilter(e.target.value)}
+                    onChange={setMonthFilter}
                     options={availableMonths.map(m => ({ value: m, label: m }))}
                 />
                 <span className={styles.period}>{period ? `Statement ${period}` : 'Upload an HDFC statement to add transactions'}</span>
@@ -613,18 +615,17 @@ export function BankAccountPage() {
                                     <div className={styles.catHead}>
                                         {editingCategory === cat.name ? (
                                             <span className={styles.inline}>
-                                                <span className="pbx-input pbx-input--sm">
-                                                    <input
-                                                        aria-label="Category name"
-                                                        value={editCategoryName}
-                                                        onChange={(e) => setEditCategoryName(e.target.value)}
-                                                        onKeyDown={(e) => {
-                                                            if (e.key === 'Enter') handleUpdateCategory(cat.name);
-                                                            if (e.key === 'Escape') setEditingCategory(null);
-                                                        }}
-                                                        autoFocus
-                                                    />
-                                                </span>
+                                                <TextField
+                                                    size="sm"
+                                                    aria-label="Category name"
+                                                    value={editCategoryName}
+                                                    onChange={(e) => setEditCategoryName(e.target.value)}
+                                                    onKeyDown={(e) => {
+                                                        if (e.key === 'Enter') handleUpdateCategory(cat.name);
+                                                        if (e.key === 'Escape') setEditingCategory(null);
+                                                    }}
+                                                    autoFocus
+                                                />
                                                 <Button size="sm" variant="primary" onClick={() => handleUpdateCategory(cat.name)}>Save</Button>
                                                 <Button size="sm" variant="ghost" onClick={() => setEditingCategory(null)}>Cancel</Button>
                                             </span>
@@ -640,7 +641,7 @@ export function BankAccountPage() {
                                                 </button>
                                                 <span className={styles.catCount}>{`${cat.count} txs`}</span>
                                                 <Button size="sm" variant="ghost" onClick={() => { setEditingCategory(cat.name); setEditCategoryName(cat.name); }}>Rename</Button>
-                                                <Button size="sm" variant="ghost" iconOnly icon="trash-2" title="Delete category" onClick={() => setConfirmDeleteCategory(cat.name)}>
+                                                <Button size="sm" variant="ghost" iconOnly icon="trash-2" tooltip="Delete category" onClick={() => setConfirmDeleteCategory(cat.name)}>
                                                     {`Delete ${cat.name}`}
                                                 </Button>
                                             </span>
@@ -657,19 +658,18 @@ export function BankAccountPage() {
                                         {cat.tags?.map(tag => <Badge key={tag} size="sm" dot={false}>{tag}</Badge>)}
                                         {isAddingTag === cat.name ? (
                                             <span className={styles.inline}>
-                                                <span className="pbx-input pbx-input--sm">
-                                                    <input
-                                                        aria-label={`New tag for ${cat.name}`}
-                                                        placeholder="Tag name…"
-                                                        value={newTagName}
-                                                        onChange={e => setNewTagName(e.target.value)}
-                                                        onKeyDown={e => {
-                                                            if (e.key === 'Enter') addCategoryTag(cat);
-                                                            if (e.key === 'Escape') setIsAddingTag(null);
-                                                        }}
-                                                        autoFocus
-                                                    />
-                                                </span>
+                                                <TextField
+                                                    size="sm"
+                                                    aria-label={`New tag for ${cat.name}`}
+                                                    placeholder="Tag name…"
+                                                    value={newTagName}
+                                                    onChange={e => setNewTagName(e.target.value)}
+                                                    onKeyDown={e => {
+                                                        if (e.key === 'Enter') addCategoryTag(cat);
+                                                        if (e.key === 'Escape') setIsAddingTag(null);
+                                                    }}
+                                                    autoFocus
+                                                />
                                                 <Button size="sm" onClick={() => addCategoryTag(cat)}>Add</Button>
                                             </span>
                                         ) : (
@@ -691,9 +691,9 @@ export function BankAccountPage() {
                     actions={
                         <>
                             {ignoredCount > 0 && (
-                                <span title="These transactions are already categorised">
+                                <Tooltip content="These transactions are already categorised">
                                     <Badge size="sm">{`${ignoredCount} duplicates hidden`}</Badge>
-                                </span>
+                                </Tooltip>
                             )}
                             <Button size="sm" variant="primary" icon="tag" disabled={selectedCount === 0} onClick={() => setShowCategoryMenu(true)}>
                                 Categorise selection
@@ -802,7 +802,7 @@ export function BankAccountPage() {
                                                     <div className={styles.actions}>
                                                         <Menu
                                                             label={`Move ${tx.narration}`}
-                                                            trigger={<Button size="sm" variant="ghost" iconOnly icon="layers" title="Move to another category">Move to another category</Button>}
+                                                            trigger={<Button size="sm" variant="ghost" iconOnly icon="layers" tooltip="Move to another category">Move to another category</Button>}
                                                             items={categories.map((cat) => ({
                                                                 label: cat.name,
                                                                 icon: tx.category === cat.name ? ('check' as const) : undefined,
@@ -810,7 +810,7 @@ export function BankAccountPage() {
                                                                 onSelect: () => handleMoveTransaction(tx.id, cat.name),
                                                             }))}
                                                         />
-                                                        <Button size="sm" variant="ghost" iconOnly icon="x" title="Remove from categorised" onClick={() => removeCategorized(tx.id)}>
+                                                        <Button size="sm" variant="ghost" iconOnly icon="x" tooltip="Remove from categorised" onClick={() => removeCategorized(tx.id)}>
                                                             Remove from categorised
                                                         </Button>
                                                     </div>
@@ -835,7 +835,7 @@ export function BankAccountPage() {
                     {categories.map((cat) => (
                         <span key={cat.name} className={styles.pick}>
                             <Button size="sm" onClick={() => handleCategorize(cat.name)}>{cat.name}</Button>
-                            <Button size="sm" variant="ghost" iconOnly icon="trash-2" title="Delete category" onClick={() => setConfirmDeleteCategory(cat.name)}>
+                            <Button size="sm" variant="ghost" iconOnly icon="trash-2" tooltip="Delete category" onClick={() => setConfirmDeleteCategory(cat.name)}>
                                 {`Delete ${cat.name}`}
                             </Button>
                         </span>
@@ -908,7 +908,7 @@ export function BankAccountPage() {
                                             <td className={styles.strong}>{rule.nickname}</td>
                                             <td>
                                                 <div className={styles.actions}>
-                                                    <Button size="sm" variant="ghost" iconOnly icon="trash-2" title="Delete rule" onClick={() => handleDeleteRule(rule.id)}>
+                                                    <Button size="sm" variant="ghost" iconOnly icon="trash-2" tooltip="Delete rule" onClick={() => handleDeleteRule(rule.id)}>
                                                         {`Delete the rule for ${rule.keyword}`}
                                                     </Button>
                                                 </div>

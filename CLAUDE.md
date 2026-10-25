@@ -16,6 +16,9 @@ Every UI change in `frontend/` uses Ledger. No exceptions for "quick" screens, d
   values.
 - If Ledger lacks a component, add it to `pbx.tsx`/`pbx.css` (tokens only, light and dark), not
   inside a page.
+- Nothing the browser draws itself: `Select`, not `<select>`; `DateField`, not a date or month
+  input; `TextField`, not a raw `<input>`; `Tooltip` or a Button's `tooltip`, not a `title`
+  attribute. Fields show their own validation messages and toasts render as our `Toast`.
 - Screens work in light and dark, at phone width, and by keyboard. Confirm with `Dialog`, never
   `window.confirm` or `alert`.
 - `npm run build` in `frontend/` runs `lint:design` first, so a violation fails the build and the

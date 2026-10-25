@@ -213,10 +213,10 @@ export default function AbandonedCheckoutsPage() {
                                   <Icon name="message-circle" size={14} />
                                   Send on WhatsApp
                                 </a>
-                                <Button size="sm" variant="ghost" iconOnly icon="check" title="Mark as messaged" onClick={() => handleUpdateStatus(checkout._id, 'message_sent')}>
+                                <Button size="sm" variant="ghost" iconOnly icon="check" tooltip="Mark as messaged" onClick={() => handleUpdateStatus(checkout._id, 'message_sent')}>
                                   {`Mark ${checkout.name} as messaged`}
                                 </Button>
-                                <Button size="sm" variant="ghost" iconOnly icon="x" title="Mark as not needed" onClick={() => handleUpdateStatus(checkout._id, 'not_required')}>
+                                <Button size="sm" variant="ghost" iconOnly icon="x" tooltip="Mark as not needed" onClick={() => handleUpdateStatus(checkout._id, 'not_required')}>
                                   {`Mark ${checkout.name} as not needed`}
                                 </Button>
                               </div>

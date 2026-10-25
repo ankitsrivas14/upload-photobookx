@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { api } from '../../services/api';
-import { Alert, Button, Card, Dialog, EmptyState, Skeleton, StatCard, StatStrip, TextField } from '../../components/ui/pbx';
+import { Alert, Button, Card, Dialog, EmptyState, Skeleton, StatCard, StatStrip, TextField, Tooltip } from '../../components/ui/pbx';
 import { cx } from '../../components/ui/format';
 import styles from '../AnalysisPage.module.css';
 
@@ -256,15 +256,15 @@ export function PinCodesAnalysis() {
                         {pinCodeDataList.map((row) => {
                             const isRTO = blockedPinCodes.some(p => p.pinCode === row.pin);
                             return (
-                                <button
-                                    key={row.pin}
-                                    type="button"
-                                    className={cx(styles.pin, isRTO && styles.pinRisk)}
-                                    onClick={() => handleCopy(row.pin, row.orders)}
-                                    title={isRTO ? 'RTO pin code' : `Failed ${row.failed} of ${row.total} (${row.failRate}%) · click to copy the orders`}
-                                >
-                                    {copiedPin === row.pin ? 'Copied' : row.pin}
-                                </button>
+                                <Tooltip content={isRTO ? 'RTO pin code' : `Failed ${row.failed} of ${row.total} (${row.failRate}%) · click to copy the orders`} key={row.pin}>
+                                    <button
+                                        type="button"
+                                        className={cx(styles.pin, isRTO && styles.pinRisk)}
+                                        onClick={() => handleCopy(row.pin, row.orders)}
+                                    >
+                                        {copiedPin === row.pin ? 'Copied' : row.pin}
+                                    </button>
+                                </Tooltip>
                             );
                         })}
                     </div>
@@ -286,9 +286,11 @@ export function PinCodesAnalysis() {
                 ) : (
                     <div className={styles.pins}>
                         {blockedPinCodes.map((p) => (
-                            <span key={p.pinCode} className={cx(styles.pin, styles.pinRisk, styles.pinStatic)} title={p.notes ? `Notes: ${p.notes}` : 'RTO pin code'}>
-                                {p.pinCode}
-                            </span>
+                            <Tooltip content={p.notes ? `Notes: ${p.notes}` : 'RTO pin code'} key={p.pinCode}>
+                                <span className={cx(styles.pin, styles.pinRisk, styles.pinStatic)}>
+                                    {p.pinCode}
+                                </span>
+                            </Tooltip>
                         ))}
                     </div>
                 )}
@@ -306,15 +308,15 @@ export function PinCodesAnalysis() {
                         ) : (
                             <div className={styles.pins}>
                                 {codDeliveredRTOPinCodes.map((row) => (
-                                    <button
-                                        key={row.pin}
-                                        type="button"
-                                        className={cx(styles.pin, styles.pinGood)}
-                                        onClick={() => handleCopy(row.pin + '-cod', row.orders)}
-                                        title={`Delivered COD orders: ${row.delivered} · failed: ${row.failed} · click to copy the orders`}
-                                    >
-                                        {copiedPin === row.pin + '-cod' ? 'Copied' : row.pin}
-                                    </button>
+                                    <Tooltip content={`Delivered COD orders: ${row.delivered} · failed: ${row.failed} · click to copy the orders`} key={row.pin}>
+                                        <button
+                                            type="button"
+                                            className={cx(styles.pin, styles.pinGood)}
+                                            onClick={() => handleCopy(row.pin + '-cod', row.orders)}
+                                        >
+                                            {copiedPin === row.pin + '-cod' ? 'Copied' : row.pin}
+                                        </button>
+                                    </Tooltip>
                                 ))}
                             </div>
                         )}
@@ -329,15 +331,15 @@ export function PinCodesAnalysis() {
                         ) : (
                             <div className={styles.pins}>
                                 {paidDeliveredRTOPinCodes.map((row) => (
-                                    <button
-                                        key={row.pin}
-                                        type="button"
-                                        className={cx(styles.pin, styles.pinGood)}
-                                        onClick={() => handleCopy(row.pin + '-paid', row.orders)}
-                                        title={`Delivered prepaid orders: ${row.delivered} · click to copy the orders`}
-                                    >
-                                        {copiedPin === row.pin + '-paid' ? 'Copied' : row.pin}
-                                    </button>
+                                    <Tooltip content={`Delivered prepaid orders: ${row.delivered} · click to copy the orders`} key={row.pin}>
+                                        <button
+                                            type="button"
+                                            className={cx(styles.pin, styles.pinGood)}
+                                            onClick={() => handleCopy(row.pin + '-paid', row.orders)}
+                                        >
+                                            {copiedPin === row.pin + '-paid' ? 'Copied' : row.pin}
+                                        </button>
+                                    </Tooltip>
                                 ))}
                             </div>
                         )}
@@ -379,7 +381,7 @@ export function PinCodesAnalysis() {
                                             <td className={styles.muted}>{p.notes || '—'}</td>
                                             <td>
                                                 <div className={styles.actions}>
-                                                    <Button size="sm" variant="ghost" iconOnly icon="trash-2" title="Remove" onClick={() => handleDeletePinCode(p.pinCode)}>
+                                                    <Button size="sm" variant="ghost" iconOnly icon="trash-2" tooltip="Remove" onClick={() => handleDeletePinCode(p.pinCode)}>
                                                         {`Remove ${p.pinCode}`}
                                                     </Button>
                                                 </div>

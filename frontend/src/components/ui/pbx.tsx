@@ -1,4 +1,6 @@
 import * as React from 'react';
+import { createPortal } from 'react-dom';
+import { Toaster as HotToaster, resolveValue, toast as hotToast } from 'react-hot-toast';
 import { ICONS, type IconName } from './icons';
 import { cx, formatINR } from './format';
 
@@ -46,22 +48,24 @@ export function Icon(props: IconProps) {
 
 /* ---------------------------------------------------------------- Button */
 
-export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+export interface ButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'title'> {
   variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
   size?: 'sm' | 'md' | 'lg';
   icon?: IconName;
   iconRight?: IconName;
-  /** Square button showing only the icon; children become its screen-reader label. */
+  /** Square button showing only the icon; children become its screen-reader label and, without `tooltip`, its tooltip. */
   iconOnly?: boolean;
   loading?: boolean;
   fullWidth?: boolean;
+  /** Shown on hover and keyboard focus. Buttons take no `title`: the browser's tooltip is not ours. */
+  tooltip?: React.ReactNode;
 }
 
 /** The one button. Primary (green) once per view, for the thing the screen is for. */
 export function Button(props: ButtonProps) {
-  const { variant = 'secondary', size = 'md', icon, iconRight, iconOnly, loading, fullWidth, disabled, className, children, type = 'button', ...rest } = props;
+  const { variant = 'secondary', size = 'md', icon, iconRight, iconOnly, loading, fullWidth, tooltip, disabled, className, children, type = 'button', ...rest } = props;
   const iconSize = size === 'lg' ? 18 : 16;
-  return (
+  const button = (
     <button
       type={type}
       className={cx('pbx-btn', 'pbx-btn--' + variant, 'pbx-btn--' + size, iconOnly && 'pbx-btn--icon', fullWidth && 'pbx-btn--full', loading && 'is-loading', className)}
@@ -73,6 +77,106 @@ export function Button(props: ButtonProps) {
       {iconOnly ? <span className="pbx-sr">{children}</span> : children}
       {iconRight && !iconOnly ? <Icon name={iconRight} size={iconSize} /> : null}
     </button>
+  );
+  // An icon-only button shows its label (or a shorter `tooltip`) as a tooltip; its screen-reader
+  // label already says the same, so the tooltip is not read out as well.
+  const tip = tooltip ?? (iconOnly ? children : null);
+  return tip ? <Tooltip content={tip} repeatsLabel={iconOnly}>{button}</Tooltip> : button;
+}
+
+/* -------------------------------------------------------------- Floating */
+
+const FLOAT_GAP = 4;
+const FLOAT_EDGE = 8;
+
+interface FloatingProps extends React.HTMLAttributes<HTMLDivElement> {
+  /** The element the panel opens from. */
+  anchor: React.RefObject<HTMLElement | null>;
+  panel: React.RefObject<HTMLDivElement | null>;
+  side?: 'top' | 'bottom' | 'left' | 'right';
+  align?: 'start' | 'center' | 'end';
+  /** At least as wide as the anchor (a list under its field). */
+  matchWidth?: boolean;
+  /** Taller content scrolls inside the panel. */
+  maxHeight?: number;
+  /** Called on a press outside the anchor and the panel. */
+  onDismiss?: () => void;
+}
+
+/**
+ * A menu, list, calendar or tooltip in a portal on <body>, fixed next to the element it opens
+ * from, so no table or scrolling card clips it and it shows above dialogs. It opens on the side
+ * asked for, or the opposite one when that has more room, keeps inside the window and follows
+ * its anchor while the page scrolls.
+ */
+function Floating(props: FloatingProps) {
+  const { anchor, panel, side = 'bottom', align = 'start', matchWidth, maxHeight, onDismiss, className, children, ...rest } = props;
+  const dismiss = React.useRef(onDismiss);
+  React.useEffect(() => { dismiss.current = onDismiss; }, [onDismiss]);
+
+  React.useLayoutEffect(() => {
+    const place = () => {
+      const a = anchor.current;
+      const p = panel.current;
+      if (!a || !p) return;
+      p.style.visibility = a.isConnected ? '' : 'hidden';
+      const r = a.getBoundingClientRect();
+      const vw = document.documentElement.clientWidth;
+      const vh = window.innerHeight;
+      if (matchWidth) p.style.minWidth = r.width + 'px';
+      const w = p.offsetWidth;
+      // The full height, also while a scrolling panel is capped below it.
+      const natural = p.scrollHeight + p.offsetHeight - p.clientHeight;
+      let h = maxHeight ? Math.min(natural, maxHeight) : natural;
+      let top: number;
+      let left: number;
+      if (side === 'left' || side === 'right') {
+        const after = r.right + FLOAT_GAP;
+        const before = r.left - FLOAT_GAP - w;
+        left = side === 'right' ? (after + w <= vw - FLOAT_EDGE ? after : before) : before >= FLOAT_EDGE ? before : after;
+        top = r.top + (r.height - h) / 2;
+      } else {
+        const below = vh - r.bottom - FLOAT_GAP - FLOAT_EDGE;
+        const above = r.top - FLOAT_GAP - FLOAT_EDGE;
+        const down = side === 'bottom' ? h <= below || below >= above : h > above && below > above;
+        if (maxHeight) {
+          h = Math.min(h, Math.max(down ? below : above, 96));
+          p.style.maxHeight = h + 'px';
+        }
+        top = down ? r.bottom + FLOAT_GAP : r.top - FLOAT_GAP - h;
+        left = align === 'start' ? r.left : align === 'end' ? r.right - w : r.left + (r.width - w) / 2;
+      }
+      p.style.left = Math.round(Math.max(FLOAT_EDGE, Math.min(left, vw - FLOAT_EDGE - w))) + 'px';
+      p.style.top = Math.round(Math.max(FLOAT_EDGE, Math.min(top, vh - FLOAT_EDGE - h))) + 'px';
+    };
+    // Scrolling inside the panel moves nothing; scrolling the page or a card moves the anchor.
+    const onScroll = (e: Event) => { if (!panel.current?.contains(e.target as Node)) place(); };
+    place();
+    const resize = new ResizeObserver(place);
+    if (panel.current) resize.observe(panel.current);
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', place);
+    return () => {
+      resize.disconnect();
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', place);
+    };
+  }, [anchor, panel, side, align, matchWidth, maxHeight]);
+
+  React.useEffect(() => {
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (!anchor.current?.contains(t) && !panel.current?.contains(t)) dismiss.current?.();
+    };
+    document.addEventListener('pointerdown', onDown, true);
+    return () => document.removeEventListener('pointerdown', onDown, true);
+  }, [anchor, panel]);
+
+  return createPortal(
+    <div ref={panel} className={cx('pbx-float', className)} {...rest}>
+      {children}
+    </div>,
+    document.body,
   );
 }
 
@@ -105,17 +209,32 @@ export function Menu(props: MenuProps) {
   const [open, setOpen] = React.useState(defaultOpen);
   const root = React.useRef<HTMLDivElement>(null);
   const list = React.useRef<HTMLDivElement>(null);
+  // Set when the keyboard opens the menu, so its first item takes focus once it renders.
+  const focusFirst = React.useRef(false);
 
   React.useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => { if (root.current && !root.current.contains(e.target as Node)) setOpen(false); };
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
-    document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKey);
-    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
+    if (open && focusFirst.current) list.current?.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')?.focus({ preventScroll: true });
+    focusFirst.current = false;
   }, [open]);
 
-  const move = (e: React.KeyboardEvent) => {
+  const close = (refocus: boolean) => {
+    setOpen(false);
+    if (refocus) (root.current?.firstElementChild as HTMLElement | null)?.focus();
+  };
+
+  const onListKey = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      // Only the menu closes, not a dialog it sits in.
+      e.preventDefault();
+      e.stopPropagation();
+      close(true);
+      return;
+    }
+    if (e.key === 'Tab') {
+      // Tab leaves from the menu's button, so focus moves on to whatever follows it.
+      close(true);
+      return;
+    }
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Home' && e.key !== 'End') return;
     e.preventDefault();
     const els = Array.from(list.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') || []);
@@ -131,12 +250,18 @@ export function Menu(props: MenuProps) {
     onClick: (e: React.MouseEvent<HTMLElement>) => { trigger.props.onClick?.(e); setOpen((o) => !o); },
     onKeyDown: (e: React.KeyboardEvent<HTMLElement>) => {
       trigger.props.onKeyDown?.(e);
-      if (e.key !== 'ArrowDown') return;
-      e.preventDefault();
-      setOpen(true);
-      // Find the list through the DOM: the menu renders it on the next frame.
-      const menu = e.currentTarget.closest('.pbx-menu');
-      requestAnimationFrame(() => menu?.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')?.focus());
+      if (e.key === 'Escape' && open) {
+        e.preventDefault();
+        e.stopPropagation();
+        setOpen(false);
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (open) list.current?.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')?.focus();
+        else {
+          focusFirst.current = true;
+          setOpen(true);
+        }
+      }
     },
   });
 
@@ -144,7 +269,17 @@ export function Menu(props: MenuProps) {
     <div ref={root} className={cx('pbx-menu', className)}>
       {opener}
       {open ? (
-        <div ref={list} role="menu" aria-label={label} className={cx('pbx-menu__list', 'pbx-menu__list--' + align)} style={minWidth ? { minWidth } : undefined} onKeyDown={move}>
+        <Floating
+          anchor={root}
+          panel={list}
+          align={align}
+          onDismiss={() => setOpen(false)}
+          role="menu"
+          aria-label={label}
+          className="pbx-menu__list"
+          style={minWidth ? { minWidth } : undefined}
+          onKeyDown={onListKey}
+        >
           {items.map((it, i) =>
             it.divider ? (
               <div key={i} role="separator" className="pbx-menu__sep" />
@@ -155,7 +290,7 @@ export function Menu(props: MenuProps) {
                 role="menuitem"
                 disabled={it.disabled}
                 className={cx('pbx-menu__item', it.tone && it.tone !== 'neutral' && 'pbx-menu__item--' + it.tone)}
-                onClick={() => { setOpen(false); it.onSelect?.(); }}
+                onClick={() => { close(!!list.current?.contains(document.activeElement)); it.onSelect?.(); }}
               >
                 {it.icon ? <Icon name={it.icon} size={16} /> : null}
                 <span className="pbx-menu__label">{it.label}</span>
@@ -163,7 +298,7 @@ export function Menu(props: MenuProps) {
               </button>
             ),
           )}
-        </div>
+        </Floating>
       ) : null}
     </div>
   );
@@ -187,7 +322,7 @@ function FieldShell(props: FieldShellProps) {
   return (
     <div className={cx('pbx-field', inline && 'pbx-field--inline', error ? 'has-error' : false, className)}>
       {label ? (
-        <label htmlFor={id} className="pbx-field__label">
+        <label id={id + '-label'} htmlFor={id} className="pbx-field__label">
           {label}
           {required ? <span className="pbx-field__req" aria-hidden="true"> *</span> : null}
         </label>
@@ -202,9 +337,44 @@ function FieldShell(props: FieldShellProps) {
   );
 }
 
+/** What is wrong with a field, in our words rather than the browser's. */
+function validityMessage(el: HTMLInputElement | HTMLTextAreaElement) {
+  const v = el.validity;
+  const { min, max, step, type } = el as HTMLInputElement;
+  if (v.valueMissing) return 'Fill this in.';
+  if (v.badInput) return type === 'number' ? 'Enter a number.' : 'Check this value.';
+  if (v.typeMismatch) return type === 'email' ? 'Enter an email address.' : type === 'url' ? 'Enter a web address, starting https://' : 'Check this value.';
+  if (v.rangeUnderflow) return `Enter ${min} or more.`;
+  if (v.rangeOverflow) return `Enter ${max} or less.`;
+  if (v.stepMismatch) return step === '1' ? 'Enter a whole number.' : `Use steps of ${step}.`;
+  if (v.tooShort) return `Use at least ${el.minLength} characters.`;
+  if (v.tooLong) return `Use at most ${el.maxLength} characters.`;
+  if (v.patternMismatch) return 'Check the format.';
+  return el.validationMessage;
+}
+
+/**
+ * Our fields show their own validation messages. Each cancels its `invalid` event, which keeps the
+ * browser's bubble away while `required`, `min` and the rest still stop the form from submitting,
+ * shows the message under itself, and the form's first invalid field takes focus.
+ */
+function useValidity(focus?: () => void) {
+  const [message, setMessage] = React.useState('');
+  const onInvalid = (e: React.FormEvent<HTMLInputElement | HTMLTextAreaElement>, text?: string) => {
+    e.preventDefault();
+    const el = e.currentTarget;
+    setMessage(text || validityMessage(el));
+    if (el.form?.querySelector('input:invalid, textarea:invalid') === el) {
+      if (focus) focus();
+      else el.focus();
+    }
+  };
+  return { message, onInvalid, clear: () => setMessage('') };
+}
+
 /* ------------------------------------------------------------- TextField */
 
-export interface TextFieldProps extends Omit<React.InputHTMLAttributes<HTMLInputElement & HTMLTextAreaElement>, 'size' | 'prefix'> {
+export interface TextFieldProps extends Omit<React.InputHTMLAttributes<HTMLInputElement & HTMLTextAreaElement>, 'size' | 'prefix' | 'title'> {
   label?: React.ReactNode;
   hint?: React.ReactNode;
   error?: React.ReactNode;
@@ -216,23 +386,52 @@ export interface TextFieldProps extends Omit<React.InputHTMLAttributes<HTMLInput
   size?: 'sm' | 'md' | 'lg';
   multiline?: boolean;
   rows?: number;
+  /** The input element (not a multiline field's textarea). */
+  ref?: React.Ref<HTMLInputElement>;
 }
 
-/** A labelled text, number, date or search input — or a textarea. */
+/**
+ * A labelled text, number or search input, or a textarea; dates and months use DateField. The
+ * browser's own suggestions stay off unless `autoComplete` asks for them (the sign-in form does).
+ */
 export function TextField(props: TextFieldProps) {
-  const { label, hint, error, icon, prefix, suffix, size = 'md', multiline, rows = 4, id, className, required, ...rest } = props;
+  const { label, hint, error, icon, prefix, suffix, size = 'md', multiline, rows = 4, id, className, required, autoComplete = 'off', onChange, onInvalid, ref, ...rest } = props;
   const auto = React.useId();
   const fid = id || auto;
-  const described = hint || error ? fid + '-msg' : undefined;
+  const validity = useValidity();
+  const shown = error || validity.message || undefined;
+  const field = {
+    id: fid,
+    required,
+    autoComplete,
+    'aria-invalid': shown ? true : undefined,
+    'aria-describedby': hint || shown ? fid + '-msg' : undefined,
+    ...rest,
+    onChange: (e: React.ChangeEvent<HTMLInputElement & HTMLTextAreaElement>) => { validity.clear(); onChange?.(e); },
+    onInvalid: (e: React.FormEvent<HTMLInputElement & HTMLTextAreaElement>) => { validity.onInvalid(e); onInvalid?.(e); },
+  };
+  // Our clear button in place of the browser's: it sets the value the way typing does, so onChange runs.
+  const clearSearch = (e: React.MouseEvent<HTMLButtonElement>) => {
+    const input = e.currentTarget.parentElement?.querySelector('input');
+    if (!input) return;
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, '');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.focus();
+  };
   return (
-    <FieldShell id={fid} label={label} hint={hint} error={error} required={required} className={className}>
+    <FieldShell id={fid} label={label} hint={hint} error={shown} required={required} className={className}>
       {multiline ? (
-        <textarea id={fid} rows={rows} required={required} aria-invalid={error ? true : undefined} aria-describedby={described} className="pbx-input pbx-input--multiline" {...rest} />
+        <textarea rows={rows} className="pbx-input pbx-input--multiline" {...field} />
       ) : (
         <div className={cx('pbx-input', 'pbx-input--' + size)}>
           {icon ? <Icon name={icon} size={16} className="pbx-input__icon" /> : null}
           {prefix ? <span className="pbx-input__affix">{prefix}</span> : null}
-          <input id={fid} required={required} aria-invalid={error ? true : undefined} aria-describedby={described} {...rest} />
+          <input ref={ref} {...field} />
+          {rest.type === 'search' && rest.value && !rest.disabled && !rest.readOnly ? (
+            <button type="button" className="pbx-input__clear" aria-label="Clear" onClick={clearSearch}>
+              <Icon name="x" size={14} />
+            </button>
+          ) : null}
           {suffix ? <span className="pbx-input__affix">{suffix}</span> : null}
         </div>
       )}
@@ -244,32 +443,509 @@ export function TextField(props: TextFieldProps) {
 
 export interface SelectOption { value: string; label: string; disabled?: boolean }
 
-export interface SelectProps extends Omit<React.SelectHTMLAttributes<HTMLSelectElement>, 'size'> {
+export interface SelectProps {
+  value: string;
+  onChange?: (value: string) => void;
+  /** Options in order; `{ divider: true }` draws a rule between groups. */
+  options: Array<SelectOption | { divider: true }>;
   label?: React.ReactNode;
   hint?: React.ReactNode;
   error?: React.ReactNode;
-  /** Options in order; `{ divider: true }` draws a disabled rule between groups. */
-  options: Array<SelectOption | { divider: true }>;
   size?: 'sm' | 'md' | 'lg';
   /** Label sits to the left ("Period  [This month]") for toolbar filters. */
   inlineLabel?: boolean;
+  /** Shown while the value matches no option. */
+  placeholder?: string;
+  required?: boolean;
+  disabled?: boolean;
+  /** Submits the value with a form. */
+  name?: string;
+  id?: string;
+  className?: string;
+  'aria-label'?: string;
 }
 
-/** A native select, styled; for periods, years, employees and other short lists. */
+const isOption = (o: SelectOption | { divider: true } | undefined): o is SelectOption => !!o && !('divider' in o);
+
+/**
+ * Our select, for periods, years, employees and other short lists: a field that opens its options
+ * in a list under it. Arrows, Home and End move, typing jumps to an option, Enter or Space picks
+ * and Escape closes; focus stays on the field throughout. It is as wide as its longest option.
+ */
 export function Select(props: SelectProps) {
-  const { label, hint, error, options, size = 'md', inlineLabel, id, className, required, ...rest } = props;
+  const { value, onChange, options, label, hint, error, size = 'md', inlineLabel, placeholder = 'Select…', required, disabled, name, id, className } = props;
   const auto = React.useId();
   const fid = id || auto;
+  const [open, setOpen] = React.useState(false);
+  const [active, setActive] = React.useState(-1);
+  const box = React.useRef<HTMLDivElement>(null);
+  const list = React.useRef<HTMLDivElement>(null);
+  const button = React.useRef<HTMLButtonElement>(null);
+  const typed = React.useRef({ text: '', at: 0 });
+  const validity = useValidity(() => button.current?.focus());
+  const shown = error || validity.message || undefined;
+
+  const selected = options.findIndex((o) => isOption(o) && o.value === value);
+  const current = selected >= 0 ? (options[selected] as SelectOption) : null;
+  const usable = (i: number) => { const o = options[i]; return isOption(o) && !o.disabled; };
+  // The option `times` usable steps from `from`, or the last one found on the way.
+  const step = (from: number, dir: 1 | -1, times = 1) => {
+    let at = from;
+    for (let i = from + dir, left = times; left > 0 && i >= 0 && i < options.length; i += dir) {
+      if (usable(i)) { at = i; left--; }
+    }
+    return at;
+  };
+  const show = (at = usable(selected) ? selected : step(-1, 1)) => { setActive(at); setOpen(true); };
+  const choose = (i: number) => {
+    if (!usable(i)) return;
+    setOpen(false);
+    const next = (options[i] as SelectOption).value;
+    if (next === value) return;
+    validity.clear();
+    onChange?.(next);
+  };
+
+  // Typing jumps to the next option that starts with the typed text; one letter again and again
+  // cycles through the options starting with it, as in a native select.
+  const find = (key: string) => {
+    const t = typed.current;
+    const now = Date.now();
+    t.text = now - t.at > 700 ? key : t.text + key;
+    t.at = now;
+    const text = t.text.toLowerCase();
+    const query = text.split('').every((c) => c === text[0]) ? text[0] : text;
+    const from = open ? active : selected;
+    const start = query.length === 1 ? from + 1 : Math.max(from, 0);
+    for (let n = 0; n < options.length; n++) {
+      const i = (start + n) % options.length;
+      if (usable(i) && (options[i] as SelectOption).label.toLowerCase().startsWith(query)) return i;
+    }
+    return -1;
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    const k = e.key;
+    const char = k.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey;
+    if (!open) {
+      // Enter opens through the button's click.
+      if (k === 'ArrowDown' || k === 'ArrowUp' || k === ' ') {
+        e.preventDefault();
+        show();
+      } else if (char) {
+        const i = find(k);
+        if (i >= 0) show(i);
+      }
+      return;
+    }
+    if (k === 'Escape') {
+      // Only the list closes, not a dialog the field sits in.
+      e.preventDefault();
+      e.stopPropagation();
+      setOpen(false);
+    } else if (k === 'Tab') {
+      setOpen(false);
+    } else if (k === 'Enter' || (k === ' ' && Date.now() - typed.current.at > 700)) {
+      // A space right after typing continues the name ("New D…") instead.
+      e.preventDefault();
+      choose(active);
+    } else {
+      const next =
+        k === 'ArrowDown' ? step(active, 1) : k === 'ArrowUp' ? step(active, -1)
+        : k === 'Home' ? step(-1, 1) : k === 'End' ? step(options.length, -1)
+        : k === 'PageDown' ? step(active, 1, 8) : k === 'PageUp' ? step(active, -1, 8)
+        : char ? find(k) : -2;
+      if (next === -2) return;
+      e.preventDefault();
+      if (next >= 0) setActive(next);
+    }
+  };
+
+  // Keep the active option in view as the keys move through a long list.
+  React.useLayoutEffect(() => {
+    const l = list.current;
+    const el = open ? l?.querySelector<HTMLElement>(`[data-index="${active}"]`) : null;
+    if (!l || !el) return;
+    if (el.offsetTop < l.scrollTop) l.scrollTop = el.offsetTop;
+    else if (el.offsetTop + el.offsetHeight > l.scrollTop + l.clientHeight) l.scrollTop = el.offsetTop + el.offsetHeight - l.clientHeight;
+  }, [open, active]);
+
   return (
-    <FieldShell id={fid} label={label} hint={hint} error={error} required={required} inline={inlineLabel} className={className}>
-      <div className={cx('pbx-select', 'pbx-select--' + size)}>
-        <select id={fid} required={required} aria-invalid={error ? true : undefined} aria-describedby={hint || error ? fid + '-msg' : undefined} {...rest}>
-          {options.map((o, i) =>
-            'divider' in o ? <option key={'d' + i} disabled>{'─'.repeat(12)}</option> : <option key={o.value} value={o.value} disabled={o.disabled}>{o.label}</option>,
-          )}
-        </select>
-        <Icon name="chevron-down" size={16} className="pbx-select__chev" />
+    <FieldShell id={fid} label={label} hint={hint} error={shown} required={required} inline={inlineLabel} className={className}>
+      <div ref={box} className={cx('pbx-select', 'pbx-select--' + size, open && 'is-open')}>
+        <button
+          ref={button}
+          id={fid}
+          type="button"
+          role="combobox"
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          aria-controls={open ? fid + '-list' : undefined}
+          aria-activedescendant={open && usable(active) ? fid + '-' + active : undefined}
+          aria-label={props['aria-label']}
+          aria-required={required || undefined}
+          aria-invalid={shown ? true : undefined}
+          aria-describedby={hint || shown ? fid + '-msg' : undefined}
+          disabled={disabled}
+          className="pbx-select__trigger"
+          onClick={() => (open ? setOpen(false) : show())}
+          onKeyDown={onKeyDown}
+          // Space picks on keydown; its keyup would click the button open again.
+          onKeyUp={(e) => { if (e.key === ' ') e.preventDefault(); }}
+          onBlur={() => setOpen(false)}
+        >
+          <span className="pbx-select__value">
+            <span className={current ? undefined : 'is-placeholder'}>{current ? current.label : placeholder}</span>
+            {options.map((o, i) => (isOption(o) ? <span key={i} className="pbx-select__sizer" aria-hidden="true">{o.label}</span> : null))}
+          </span>
+          <Icon name="chevron-down" size={16} className="pbx-select__chev pbx-select__chev--turn" />
+        </button>
+        {name ? <input type="hidden" name={name} value={value} /> : null}
+        {/* Keeps `required` in the form's validation; the field shows the message. */}
+        {required ? (
+          <input className="pbx-sr" tabIndex={-1} aria-hidden="true" required value={current ? value : ''} onChange={() => {}} onInvalid={(e) => validity.onInvalid(e, 'Choose one.')} />
+        ) : null}
       </div>
+      {open ? (
+        <Floating
+          anchor={box}
+          panel={list}
+          matchWidth
+          maxHeight={320}
+          onDismiss={() => setOpen(false)}
+          id={fid + '-list'}
+          role="listbox"
+          aria-labelledby={label ? fid + '-label' : undefined}
+          aria-label={label ? undefined : props['aria-label']}
+          className="pbx-select__list"
+          // Focus stays on the field while the pointer picks.
+          onMouseDown={(e) => e.preventDefault()}
+        >
+          {options.map((o, i) =>
+            isOption(o) ? (
+              <div
+                key={i}
+                id={fid + '-' + i}
+                data-index={i}
+                role="option"
+                aria-selected={i === selected}
+                aria-disabled={o.disabled || undefined}
+                className={cx('pbx-select__opt', i === active && 'is-active')}
+                onMouseMove={() => { if (i !== active && usable(i)) setActive(i); }}
+                onClick={() => choose(i)}
+              >
+                <span className="pbx-select__label">{o.label}</span>
+                {i === selected ? <Icon name="check" size={14} /> : null}
+              </div>
+            ) : (
+              <div key={i} role="separator" className="pbx-menu__sep" />
+            ),
+          )}
+        </Floating>
+      ) : null}
+    </FieldShell>
+  );
+}
+
+/* ------------------------------------------------------------- DateField */
+
+const pad2 = (n: number) => String(n).padStart(2, '0');
+const dateKey = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const monthKey = (d: Date) => dateKey(d).slice(0, 7);
+/** `YYYY-MM-DD`, or `YYYY-MM` (the 1st), as a local date. */
+function parseDateKey(s: string | undefined): Date | null {
+  const m = /^(\d{4})-(\d{2})(?:-(\d{2}))?$/.exec(s || '');
+  return m ? new Date(+m[1], +m[2] - 1, m[3] ? +m[3] : 1) : null;
+}
+const shiftDays = (d: Date, n: number) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+/** The same day n months away, or that month's last day when it is shorter. */
+function shiftMonths(d: Date, n: number) {
+  const last = new Date(d.getFullYear(), d.getMonth() + n + 1, 0).getDate();
+  return new Date(d.getFullYear(), d.getMonth() + n, Math.min(d.getDate(), last));
+}
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+interface CalendarProps {
+  mode: 'day' | 'month';
+  value: string;
+  min?: string;
+  max?: string;
+  clearable: boolean;
+  onPick: (value: string) => void;
+}
+
+/** DateField's popup: a month of days (or a year of months) with keyboard movement. */
+function Calendar(props: CalendarProps) {
+  const { mode, value, min, max, clearable, onPick } = props;
+  const today = new Date();
+  // Outside [min, max]: compares keys cut to `len` characters (10 for days, 7 for months).
+  const out = (key: string, len: number) => (!!min && key < min.slice(0, len)) || (!!max && key > max.slice(0, len));
+  const [view, setView] = React.useState<'days' | 'months'>(mode === 'month' ? 'months' : 'days');
+  // The day (or month) that holds focus in the grid.
+  const [cursor, setCursor] = React.useState(() => {
+    const start = parseDateKey(value) ?? today;
+    const key = dateKey(start);
+    if (max && key > max) return parseDateKey(max) ?? start;
+    if (min && key < min) return parseDateKey(min) ?? start;
+    return start;
+  });
+  const grid = React.useRef<HTMLDivElement>(null);
+  // Focus follows the cursor when the calendar opens and after a key moves it, not after the arrows are clicked.
+  const follow = React.useRef(true);
+  React.useEffect(() => {
+    if (!follow.current) return;
+    follow.current = false;
+    grid.current?.querySelector<HTMLElement>('[tabindex="0"]')?.focus({ preventScroll: true });
+  }, [cursor, view]);
+  const move = (next: Date) => { follow.current = true; setCursor(next); };
+
+  const y = cursor.getFullYear();
+  const m = cursor.getMonth();
+  const todayKey = dateKey(today);
+
+  if (view === 'days') {
+    const first = new Date(y, m, 1 - new Date(y, m, 1).getDay());
+    const days = Array.from({ length: 42 }, (_, i) => shiftDays(first, i));
+    const cursorKey = dateKey(cursor);
+    const title = cursor.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+    const onKey = (e: React.KeyboardEvent) => {
+      const c = cursor;
+      const k = e.key;
+      const next =
+        k === 'ArrowLeft' ? shiftDays(c, -1) : k === 'ArrowRight' ? shiftDays(c, 1)
+        : k === 'ArrowUp' ? shiftDays(c, -7) : k === 'ArrowDown' ? shiftDays(c, 7)
+        : k === 'Home' ? shiftDays(c, -c.getDay()) : k === 'End' ? shiftDays(c, 6 - c.getDay())
+        : k === 'PageUp' ? shiftMonths(c, e.shiftKey ? -12 : -1) : k === 'PageDown' ? shiftMonths(c, e.shiftKey ? 12 : 1)
+        : null;
+      if (!next) return;
+      e.preventDefault();
+      move(next);
+    };
+    return (
+      <>
+        <div className="pbx-cal__head">
+          <Button variant="ghost" size="sm" iconOnly icon="chevron-left" onClick={() => setCursor(shiftMonths(cursor, -1))}>Previous month</Button>
+          <button type="button" className="pbx-cal__title" aria-live="polite" onClick={() => { follow.current = true; setView('months'); }}>
+            {title}
+            <Icon name="chevron-down" size={14} />
+          </button>
+          <Button variant="ghost" size="sm" iconOnly icon="chevron-right" onClick={() => setCursor(shiftMonths(cursor, 1))}>Next month</Button>
+        </div>
+        <div ref={grid}>
+          <table role="grid" aria-label={title} className="pbx-cal__grid" onKeyDown={onKey}>
+            <thead>
+              <tr>
+                {WEEKDAYS.map((w) => <th key={w} scope="col" abbr={w}>{w.slice(0, 2)}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {[0, 1, 2, 3, 4, 5].map((row) => (
+                <tr key={row}>
+                  {days.slice(row * 7, row * 7 + 7).map((d) => {
+                    const key = dateKey(d);
+                    const off = out(key, 10);
+                    return (
+                      <td key={key} aria-selected={key === value}>
+                        <button
+                          type="button"
+                          tabIndex={key === cursorKey ? 0 : -1}
+                          aria-label={d.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                          aria-current={key === todayKey ? 'date' : undefined}
+                          aria-disabled={off || undefined}
+                          className={cx('pbx-cal__day', d.getMonth() !== m && 'is-outside', key === value && 'is-selected')}
+                          onClick={() => { if (!off) onPick(key); }}
+                        >
+                          {d.getDate()}
+                        </button>
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="pbx-cal__foot">
+          <Button variant="ghost" size="sm" disabled={out(todayKey, 10)} onClick={() => onPick(todayKey)}>Today</Button>
+          {clearable ? <Button variant="ghost" size="sm" onClick={() => onPick('')}>Clear</Button> : null}
+        </div>
+      </>
+    );
+  }
+
+  const chosen = value.slice(0, 7);
+  const thisMonth = monthKey(today);
+  const onKey = (e: React.KeyboardEvent) => {
+    const c = cursor;
+    const k = e.key;
+    const by =
+      k === 'ArrowLeft' ? -1 : k === 'ArrowRight' ? 1 : k === 'ArrowUp' ? -3 : k === 'ArrowDown' ? 3
+      : k === 'Home' ? -c.getMonth() : k === 'End' ? 11 - c.getMonth()
+      : k === 'PageUp' ? -12 : k === 'PageDown' ? 12 : 0;
+    if (!by) return;
+    e.preventDefault();
+    move(shiftMonths(c, by));
+  };
+  const pickMonth = (d: Date) => {
+    if (mode === 'month') return onPick(monthKey(d));
+    // Picking the month for a date: back to that month's days.
+    follow.current = true;
+    setCursor(shiftMonths(cursor, (d.getFullYear() - y) * 12 + d.getMonth() - m));
+    setView('days');
+  };
+  return (
+    <>
+      <div className="pbx-cal__head">
+        <Button variant="ghost" size="sm" iconOnly icon="chevron-left" onClick={() => setCursor(shiftMonths(cursor, -12))}>Previous year</Button>
+        {mode === 'day' ? (
+          <button type="button" className="pbx-cal__title" aria-live="polite" onClick={() => { follow.current = true; setView('days'); }}>{y}</button>
+        ) : (
+          <span className="pbx-cal__title" aria-live="polite">{y}</span>
+        )}
+        <Button variant="ghost" size="sm" iconOnly icon="chevron-right" onClick={() => setCursor(shiftMonths(cursor, 12))}>Next year</Button>
+      </div>
+      <div ref={grid} role="group" aria-label={String(y)} className="pbx-cal__months" onKeyDown={onKey}>
+        {MONTHS.map((short, i) => {
+          const d = new Date(y, i, 1);
+          const key = monthKey(d);
+          const off = out(key, 7);
+          return (
+            <button
+              key={key}
+              type="button"
+              tabIndex={i === m ? 0 : -1}
+              aria-label={d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}
+              aria-pressed={key === chosen}
+              aria-current={key === thisMonth ? 'date' : undefined}
+              aria-disabled={off || undefined}
+              className={cx('pbx-cal__month', key === chosen && 'is-selected')}
+              onClick={() => { if (!off) pickMonth(d); }}
+            >
+              {short}
+            </button>
+          );
+        })}
+      </div>
+      {mode === 'month' ? (
+        <div className="pbx-cal__foot">
+          <Button variant="ghost" size="sm" disabled={out(thisMonth, 7)} onClick={() => onPick(thisMonth)}>This month</Button>
+          {clearable ? <Button variant="ghost" size="sm" onClick={() => onPick('')}>Clear</Button> : null}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+export interface DateFieldProps {
+  /** `YYYY-MM-DD`, or `YYYY-MM` in month mode; '' while empty. */
+  value: string;
+  onChange?: (value: string) => void;
+  /** `day` picks a date, `month` a month. */
+  mode?: 'day' | 'month';
+  /** Earliest and latest choices, in the value's format. */
+  min?: string;
+  max?: string;
+  label?: React.ReactNode;
+  hint?: React.ReactNode;
+  error?: React.ReactNode;
+  size?: 'sm' | 'md' | 'lg';
+  /** Label sits to the left, for toolbar filters. */
+  inlineLabel?: boolean;
+  placeholder?: string;
+  required?: boolean;
+  /** Offers Clear in the calendar; by default when the field is not required. */
+  clearable?: boolean;
+  disabled?: boolean;
+  /** Submits the value with a form. */
+  name?: string;
+  id?: string;
+  className?: string;
+  'aria-label'?: string;
+}
+
+/**
+ * Our date and month picker: a field that opens a calendar under it. Arrows move by day (or
+ * month), Page Up and Page Down by month (or year), Enter picks and Escape closes.
+ */
+export function DateField(props: DateFieldProps) {
+  const { value, onChange, mode = 'day', min, max, label, hint, error, size = 'md', inlineLabel, placeholder, required, clearable = !required, disabled, name, id, className } = props;
+  const auto = React.useId();
+  const fid = id || auto;
+  const [open, setOpen] = React.useState(false);
+  const box = React.useRef<HTMLDivElement>(null);
+  const pop = React.useRef<HTMLDivElement>(null);
+  const button = React.useRef<HTMLButtonElement>(null);
+  const validity = useValidity(() => button.current?.focus());
+  const shown = error || validity.message || undefined;
+  const date = parseDateKey(value);
+  const text = date ? date.toLocaleDateString('en-IN', mode === 'month' ? { month: 'long', year: 'numeric' } : { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+  const what = mode === 'month' ? 'month' : 'date';
+
+  const close = () => {
+    setOpen(false);
+    button.current?.focus();
+  };
+  const pick = (next: string) => {
+    close();
+    if (next === value) return;
+    validity.clear();
+    onChange?.(next);
+  };
+  const onPopKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Escape') {
+      // Only the calendar closes, not a dialog the field sits in.
+      e.preventDefault();
+      e.stopPropagation();
+      close();
+    } else if (e.key === 'Tab') {
+      // Tab cycles inside the calendar until it closes, as in a dialog.
+      const els = Array.from(pop.current?.querySelectorAll<HTMLElement>('button:not(:disabled):not([tabindex="-1"])') || []);
+      if (!els.length) return;
+      const at = els.indexOf(document.activeElement as HTMLElement);
+      e.preventDefault();
+      e.stopPropagation();
+      els[e.shiftKey ? (at <= 0 ? els.length - 1 : at - 1) : (at + 1) % els.length].focus();
+    }
+  };
+
+  return (
+    <FieldShell id={fid} label={label} hint={hint} error={shown} required={required} inline={inlineLabel} className={className}>
+      <div ref={box} className={cx('pbx-select', 'pbx-select--' + size, open && 'is-open')}>
+        <button
+          ref={button}
+          id={fid}
+          type="button"
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          aria-controls={open ? fid + '-cal' : undefined}
+          // Named by the label and the date it holds: "Joining date 25 Oct 2026".
+          aria-labelledby={label ? `${fid}-label ${fid}-value` : undefined}
+          aria-label={label ? undefined : [props['aria-label'], text].filter(Boolean).join(', ') || undefined}
+          aria-required={required || undefined}
+          aria-invalid={shown ? true : undefined}
+          aria-describedby={hint || shown ? fid + '-msg' : undefined}
+          disabled={disabled}
+          className="pbx-select__trigger"
+          onClick={() => setOpen((o) => !o)}
+          onKeyDown={(e) => { if (e.key === 'ArrowDown' && !open) { e.preventDefault(); setOpen(true); } }}
+        >
+          <span id={fid + '-value'} className="pbx-select__value">
+            <span className={text ? undefined : 'is-placeholder'}>{text || placeholder || 'Choose a ' + what}</span>
+            <span className="pbx-select__sizer" aria-hidden="true">{mode === 'month' ? 'September 2026' : '28 Sept 2026'}</span>
+          </span>
+          <Icon name="calendar" size={15} className="pbx-select__chev" />
+        </button>
+        {name ? <input type="hidden" name={name} value={value} /> : null}
+        {/* Keeps `required` in the form's validation; the field shows the message. */}
+        {required ? (
+          <input className="pbx-sr" tabIndex={-1} aria-hidden="true" required value={value} onChange={() => {}} onInvalid={(e) => validity.onInvalid(e, `Choose a ${what}.`)} />
+        ) : null}
+      </div>
+      {open ? (
+        <Floating anchor={box} panel={pop} onDismiss={() => setOpen(false)} id={fid + '-cal'} role="dialog" aria-label={'Choose a ' + what} className="pbx-cal" onKeyDown={onPopKey}>
+          <Calendar mode={mode} value={value} min={min} max={max} clearable={clearable && !!value} onPick={pick} />
+        </Floating>
+      ) : null}
     </FieldShell>
   );
 }
@@ -493,19 +1169,23 @@ export function Sidebar(props: SidebarProps) {
                 const on = it.id === activeId;
                 // A section is open while it or one of its sub-pages is current; the marker sits on the page itself.
                 const childOn = !!it.children?.some((c) => c.id === activeId);
-                const link = (item: NavItem, current: boolean, extra?: string) => (
-                  <a
-                    href={item.href || '#'}
-                    className={cx('pbx-nav', current && 'is-active', extra)}
-                    aria-current={current ? 'page' : undefined}
-                    title={collapsed ? item.label : undefined}
-                    onClick={onNavigate ? (e) => { e.preventDefault(); onNavigate(item.id); } : undefined}
-                  >
-                    {item.icon ? <Icon name={item.icon} size={18} /> : null}
-                    <span className="pbx-nav__label">{item.label}</span>
-                    {item.badge != null ? <span className="pbx-nav__badge">{item.badge}</span> : null}
-                  </a>
-                );
+                const link = (item: NavItem, current: boolean, extra?: string) => {
+                  const a = (
+                    <a
+                      href={item.href || '#'}
+                      className={cx('pbx-nav', current && 'is-active', extra)}
+                      aria-current={current ? 'page' : undefined}
+                      aria-label={collapsed ? item.label : undefined}
+                      onClick={onNavigate ? (e) => { e.preventDefault(); onNavigate(item.id); } : undefined}
+                    >
+                      {item.icon ? <Icon name={item.icon} size={18} /> : null}
+                      <span className="pbx-nav__label">{item.label}</span>
+                      {item.badge != null ? <span className="pbx-nav__badge">{item.badge}</span> : null}
+                    </a>
+                  );
+                  // Collapsed to icons, each destination names itself in a tooltip.
+                  return collapsed ? <Tooltip content={item.label} side="right" repeatsLabel>{a}</Tooltip> : a;
+                };
                 return (
                   <li key={it.id}>
                     {link(it, on, childOn ? 'is-open' : undefined)}
@@ -1202,16 +1882,18 @@ export interface ToastProps {
   title: React.ReactNode;
   description?: React.ReactNode;
   action?: React.ReactNode;
+  /** Work still running: a spinner in place of the icon. */
+  busy?: boolean;
   onClose?: () => void;
   className?: string;
 }
 
 /** A transient confirmation or error after an action, bottom-right. */
 export function Toast(props: ToastProps) {
-  const { tone = 'neutral', title, description, action, onClose, className } = props;
+  const { tone = 'neutral', title, description, action, busy, onClose, className } = props;
   return (
     <div className={cx('pbx-toast', 'pbx-toast--' + tone, className)} role={tone === 'negative' ? 'alert' : 'status'}>
-      <Icon name={TONE_ICON[tone]} size={18} className="pbx-toast__icon" />
+      {busy ? <span className="pbx-spinner pbx-toast__icon" aria-hidden="true" /> : <Icon name={TONE_ICON[tone]} size={18} className="pbx-toast__icon" />}
       <div className="pbx-toast__text">
         <div className="pbx-toast__title">{title}</div>
         {description ? <div className="pbx-toast__desc">{description}</div> : null}
@@ -1219,6 +1901,26 @@ export function Toast(props: ToastProps) {
       {action}
       {onClose ? <button type="button" className="pbx-toast__close" aria-label="Dismiss" onClick={onClose}><Icon name="x" size={14} /></button> : null}
     </div>
+  );
+}
+
+/**
+ * Where the app's toasts appear: `toast.success()`, `toast.error()` and `toast.loading()` from
+ * react-hot-toast, drawn as our Toast at the bottom right. App renders it once.
+ */
+export function Toaster() {
+  return (
+    <HotToaster position="bottom-right" containerStyle={{ zIndex: 'var(--z-toast)' }}>
+      {(t) => (
+        <Toast
+          tone={t.type === 'success' ? 'positive' : t.type === 'error' ? 'negative' : 'neutral'}
+          busy={t.type === 'loading'}
+          title={resolveValue(t.message, t)}
+          onClose={t.type === 'loading' ? undefined : () => hotToast.dismiss(t.id)}
+          className={t.visible ? 'pbx-toast--in' : 'pbx-toast--out'}
+        />
+      )}
+    </HotToaster>
   );
 }
 
@@ -1265,17 +1967,63 @@ export function Skeleton(props: SkeletonProps) {
 
 /* --------------------------------------------------------------- Tooltip */
 
-export interface TooltipProps { content: React.ReactNode; children: React.ReactElement<React.HTMLAttributes<HTMLElement>>; side?: 'top' | 'bottom' }
+export interface TooltipProps {
+  content: React.ReactNode;
+  children: React.ReactElement<React.HTMLAttributes<HTMLElement>>;
+  side?: 'top' | 'bottom' | 'left' | 'right';
+  /** The content repeats the element's own name (an icon button's label), so it is not read twice. */
+  repeatsLabel?: boolean;
+}
 
-/** A short label on hover and focus, for icon buttons and truncated values. */
+/**
+ * Our tooltip, in place of the browser's `title`: a short note on hover (after a moment) and on
+ * keyboard focus, for icon buttons, truncated values and figures that need a word of explanation.
+ * It wraps one element without adding a box around it, and reads its text out as a description.
+ */
 export function Tooltip(props: TooltipProps) {
-  const { content, children, side = 'top' } = props;
+  const { content, children, side = 'top', repeatsLabel } = props;
   const id = React.useId();
+  const [open, setOpen] = React.useState(false);
+  const anchor = React.useRef<HTMLElement | null>(null);
+  const panel = React.useRef<HTMLDivElement>(null);
+  const timer = React.useRef(0);
+  React.useEffect(() => () => window.clearTimeout(timer.current), []);
+  React.useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open]);
+  if (content == null || content === false || content === '') return children;
+
+  const show = (el: HTMLElement, delay: number) => {
+    anchor.current = el;
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => setOpen(true), delay);
+  };
+  const hide = () => {
+    window.clearTimeout(timer.current);
+    setOpen(false);
+  };
+  const own = children.props;
+  const described = repeatsLabel ? {} : typeof content === 'string' ? { 'aria-description': content } : { 'aria-describedby': open ? id : undefined };
+  const trigger = React.cloneElement(children, {
+    ...described,
+    onPointerEnter: (e: React.PointerEvent<HTMLElement>) => { own.onPointerEnter?.(e); if (e.pointerType !== 'touch') show(e.currentTarget, 400); },
+    onPointerLeave: (e: React.PointerEvent<HTMLElement>) => { own.onPointerLeave?.(e); hide(); },
+    onPointerDown: (e: React.PointerEvent<HTMLElement>) => { own.onPointerDown?.(e); hide(); },
+    onFocus: (e: React.FocusEvent<HTMLElement>) => { own.onFocus?.(e); if (e.currentTarget.matches(':focus-visible')) show(e.currentTarget, 0); },
+    onBlur: (e: React.FocusEvent<HTMLElement>) => { own.onBlur?.(e); hide(); },
+  } as React.HTMLAttributes<HTMLElement>);
   return (
-    <span className={cx('pbx-tip', 'pbx-tip--' + side)}>
-      {React.cloneElement(children, { 'aria-describedby': id })}
-      <span role="tooltip" id={id} className="pbx-tip__bubble">{content}</span>
-    </span>
+    <>
+      {trigger}
+      {open ? (
+        <Floating anchor={anchor} panel={panel} side={side} align="center" id={id} role="tooltip" className="pbx-tip">
+          {content}
+        </Floating>
+      ) : null}
+    </>
   );
 }
 

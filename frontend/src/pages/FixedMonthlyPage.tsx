@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { api } from '../services/api';
 import toast from 'react-hot-toast';
-import { Button, Card, EmptyState, Skeleton } from '../components/ui/pbx';
+import { Button, Card, DateField, EmptyState, Skeleton, TextField } from '../components/ui/pbx';
 import { cx, formatINR } from '../components/ui/format';
 import styles from './FixedMonthlyPage.module.css';
 
@@ -109,40 +109,30 @@ export function FixedMonthlyPage() {
       title={`Fixed monthly costs · ${monthLabel}`}
       eyebrow="deducted from that month's profit on the Sales page"
       padding="sm"
-      actions={
-        <label className={styles.monthField}>
-          <span>Month</span>
-          <span className="pbx-input pbx-input--sm">
-            <input type="month" value={selectedMonth} onChange={e => e.target.value && setSelectedMonth(e.target.value)} />
-          </span>
-        </label>
-      }
+      actions={<DateField mode="month" label="Month" inlineLabel size="sm" clearable={false} value={selectedMonth} onChange={setSelectedMonth} />}
     >
       {/* Add a cost: Enter in either field adds it */}
       <div className={styles.addRow}>
-        <span className="pbx-input pbx-input--sm">
-          <input
-            type="text"
-            placeholder="Label, e.g. Office rent"
-            aria-label="New cost label"
-            value={newLabel}
-            onChange={e => setNewLabel(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleAdd()}
-          />
-        </span>
-        <span className="pbx-input pbx-input--sm">
-          <span className="pbx-input__affix">₹</span>
-          <input
-            type="number"
-            placeholder="Amount"
-            aria-label="New cost amount"
-            value={newAmount}
-            onChange={e => setNewAmount(e.target.value)}
-            min="0"
-            step="0.01"
-            onKeyDown={e => e.key === 'Enter' && handleAdd()}
-          />
-        </span>
+        <TextField
+          size="sm"
+          placeholder="Label, e.g. Office rent"
+          aria-label="New cost label"
+          value={newLabel}
+          onChange={e => setNewLabel(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && handleAdd()}
+        />
+        <TextField
+          size="sm"
+          type="number"
+          prefix="₹"
+          placeholder="Amount"
+          aria-label="New cost amount"
+          value={newAmount}
+          onChange={e => setNewAmount(e.target.value)}
+          min="0"
+          step="0.01"
+          onKeyDown={e => e.key === 'Enter' && handleAdd()}
+        />
         <Button size="sm" variant="primary" icon="plus" onClick={handleAdd} loading={isAdding} disabled={!newLabel.trim() || !newAmount}>
           Add
         </Button>
@@ -168,26 +158,24 @@ export function FixedMonthlyPage() {
                   <tr key={e._id}>
                     <td>
                       {editingId === e._id ? (
-                        <span className="pbx-input pbx-input--sm">
-                          <input aria-label="Cost label" value={editLabel} onChange={ev => setEditLabel(ev.target.value)} autoFocus />
-                        </span>
+                        <TextField size="sm" aria-label="Cost label" value={editLabel} onChange={ev => setEditLabel(ev.target.value)} autoFocus />
                       ) : (
                         e.label
                       )}
                     </td>
                     <td className={cx('pbx-num', styles.right)}>
                       {editingId === e._id ? (
-                        <span className={cx('pbx-input pbx-input--sm', styles.amountInput)}>
-                          <span className="pbx-input__affix">₹</span>
-                          <input
-                            type="number"
-                            aria-label="Cost amount"
-                            value={editAmount}
-                            onChange={ev => setEditAmount(ev.target.value)}
-                            min="0"
-                            step="0.01"
-                          />
-                        </span>
+                        <TextField
+                          size="sm"
+                          type="number"
+                          prefix="₹"
+                          className={styles.amountInput}
+                          aria-label="Cost amount"
+                          value={editAmount}
+                          onChange={ev => setEditAmount(ev.target.value)}
+                          min="0"
+                          step="0.01"
+                        />
                       ) : (
                         money(e.amount)
                       )}
@@ -202,7 +190,7 @@ export function FixedMonthlyPage() {
                         ) : (
                           <>
                             <Button size="sm" variant="ghost" onClick={() => startEdit(e)}>Edit</Button>
-                            <Button size="sm" variant="ghost" iconOnly icon="trash-2" title="Delete" onClick={() => handleDelete(e._id)}>
+                            <Button size="sm" variant="ghost" iconOnly icon="trash-2" tooltip="Delete" onClick={() => handleDelete(e._id)}>
                               {`Delete ${e.label}`}
                             </Button>
                           </>

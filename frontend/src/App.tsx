@@ -1,9 +1,9 @@
 import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { Toaster } from 'react-hot-toast';
 import { AdminLogin } from './pages/AdminLogin';
 import { AdminLayout } from './layouts/AdminLayout';
 import { api } from './services/api';
+import { Toaster } from './components/ui/pbx';
 
 // Every page is its own chunk, downloaded the first time it is opened, so no page (least of all
 // the public upload page) pays for the code and libraries of all the others.
@@ -49,7 +49,7 @@ function ExternalRedirect() {
 function App() {
   return (
     <BrowserRouter>
-      <Toaster position="bottom-right" reverseOrder={false} />
+      <Toaster />
       <Routes>
         {/* Root redirects to photobookx.com */}
         <Route path="/" element={<ExternalRedirect />} />

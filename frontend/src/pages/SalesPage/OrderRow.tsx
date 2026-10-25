@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { Amount, Badge, Button, Checkbox, DeliveryBadge, Icon, Menu } from '../../components/ui/pbx';
+import { Amount, Badge, Button, Checkbox, DeliveryBadge, Icon, Menu, Tooltip } from '../../components/ui/pbx';
 import type { MenuItem } from '../../components/ui/pbx';
 import styles from '../SalesPage.module.css';
 
@@ -129,9 +129,11 @@ export const OrderRow: React.FC<OrderRowProps> = ({
           {isMissingData && <Badge size="sm" tone="caution" dot={false} icon="triangle-alert">No tracking data</Badge>}
           {isRTO && <Badge size="sm" tone="negative" dot={false}>RTO</Badge>}
           {hasTicket && (
-            <button type="button" className={styles.badgeLink} onClick={() => navigate('/admin/analysis/tickets')} title="Open tickets">
-              <Badge size="sm" tone="info" dot={false} icon="life-buoy">Ticket</Badge>
-            </button>
+            <Tooltip content="Open tickets">
+              <button type="button" className={styles.badgeLink} onClick={() => navigate('/admin/analysis/tickets')}>
+                <Badge size="sm" tone="info" dot={false} icon="life-buoy">Ticket</Badge>
+              </button>
+            </Tooltip>
           )}
           {isAcknowledged && <Badge size="sm" dot={false} icon="check">Acknowledged</Badge>}
         </div>
@@ -140,30 +142,33 @@ export const OrderRow: React.FC<OrderRowProps> = ({
         {isFinal || isPrepaid ? <Amount value={orderProfitLoss.get(order.id) || 0} signed pill /> : <span className="pbx-amount--none">—</span>}
       </td>
       <td className={styles.time}>
-        <time dateTime={order.createdAt} title={placedFull}>{placedTime}</time>
+        <Tooltip content={placedFull}>
+          <time dateTime={order.createdAt}>{placedTime}</time>
+        </Tooltip>
       </td>
       <td>
         <div className={styles.rowActions}>
           {order.trackingUrl ? (
-            <a
-              href={order.trackingUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="pbx-btn pbx-btn--ghost pbx-btn--sm pbx-btn--icon"
-              title="Track shipment"
-              aria-label={`Track ${order.name}`}
-            >
-              <Icon name="external-link" size={14} />
-            </a>
+            <Tooltip content="Track shipment" repeatsLabel>
+              <a
+                href={order.trackingUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="pbx-btn pbx-btn--ghost pbx-btn--sm pbx-btn--icon"
+                aria-label={`Track ${order.name}`}
+              >
+                <Icon name="external-link" size={14} />
+              </a>
+            </Tooltip>
           ) : (
             <span className={styles.actionGap} aria-hidden="true" />
           )}
-          <Button size="sm" variant="ghost" iconOnly icon="file-text" title="P/L breakdown" onClick={() => handleOpenCogsModal(order)}>
+          <Button size="sm" variant="ghost" iconOnly icon="file-text" tooltip="P/L breakdown" onClick={() => handleOpenCogsModal(order)}>
             {`P/L breakdown for ${order.name}`}
           </Button>
           <Menu
             label={`Actions for ${order.name}`}
-            trigger={<Button size="sm" variant="ghost" iconOnly icon="ellipsis-vertical" title="More actions">{`More actions for ${order.name}`}</Button>}
+            trigger={<Button size="sm" variant="ghost" iconOnly icon="ellipsis-vertical" tooltip="More actions">{`More actions for ${order.name}`}</Button>}
             items={menuItems}
           />
         </div>

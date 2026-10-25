@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { api, type COGSVersion, type COGSTotalOverrides } from '../services/api';
-import { Badge, Button, Card, Dialog, EmptyState, SegmentedControl, Select, Skeleton, StatCard, StatStrip, TextField } from '../components/ui/pbx';
+import { Badge, Button, Card, DateField, Dialog, EmptyState, SegmentedControl, Select, Skeleton, StatCard, StatStrip, TextField, Tooltip } from '../components/ui/pbx';
 import { cx, formatINR } from '../components/ui/format';
 import styles from './COGSPage.module.css';
 
@@ -122,16 +122,14 @@ function CostTable({ category, fields, overrides, onChange, onOverrideChange }: 
   return (
     <Card title={title} eyebrow={subtitle} padding="sm">
       <div className={styles.addRow}>
-        <span className="pbx-input pbx-input--sm">
-          <input
-            type="text"
-            placeholder={`New ${title.toLowerCase()} component`}
-            aria-label={`New ${title.toLowerCase()} component`}
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && addField()}
-          />
-        </span>
+        <TextField
+          size="sm"
+          placeholder={`New ${title.toLowerCase()} component`}
+          aria-label={`New ${title.toLowerCase()} component`}
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && addField()}
+        />
         <Button size="sm" icon="plus" onClick={addField} disabled={!newName.trim()}>Add field</Button>
       </div>
 
@@ -157,14 +155,14 @@ function CostTable({ category, fields, overrides, onChange, onOverrideChange }: 
                         size="sm"
                         aria-label={`${field.name}: applies to`}
                         value={field.type}
-                        onChange={(e) => setField(field.id, { type: e.target.value as CostField['type'] })}
+                        onChange={(v) => setField(field.id, { type: v as CostField['type'] })}
                         options={[{ value: 'cogs', label: 'COGS' }, { value: 'ndr', label: 'NDR' }, { value: 'both', label: 'Both' }]}
                       />
                       <Select
                         size="sm"
                         aria-label={`${field.name}: calculation`}
                         value={field.calculationType}
-                        onChange={(e) => setField(field.id, { calculationType: e.target.value as CostField['calculationType'] })}
+                        onChange={(v) => setField(field.id, { calculationType: v as CostField['calculationType'] })}
                         options={[{ value: 'fixed', label: 'Fixed (₹)' }, { value: 'percentage', label: 'Percentage (%)' }]}
                       />
                       {field.calculationType === 'percentage' && (
@@ -182,25 +180,26 @@ function CostTable({ category, fields, overrides, onChange, onOverrideChange }: 
                     const isOverridden = overrides[key] !== undefined;
                     return (
                       <td key={key} className={styles.valueCell}>
-                        <span className={cx('pbx-input pbx-input--sm', styles.valueInput, isOverridden && styles.overridden)}>
-                          <input
+                        <Tooltip content={isOverridden ? 'Click to edit and clear the total override' : undefined}>
+                          <TextField
+                            size="sm"
                             type="number"
                             min="0"
                             step="0.01"
+                            className={cx(styles.valueInput, isOverridden && styles.overridden)}
                             aria-label={`${field.name}, ${VALUE_LABELS[key]}`}
                             value={isOverridden ? '' : field[key]}
                             placeholder={isOverridden ? '—' : undefined}
                             onFocus={() => { if (isOverridden) onOverrideChange(key, undefined); }}
                             onChange={(e) => updateValue(field.id, key, parseFloat(e.target.value) || 0)}
-                            title={isOverridden ? 'Click to edit and clear the total override' : undefined}
                           />
-                        </span>
+                        </Tooltip>
                       </td>
                     );
                   })}
                   <td>
                     <div className={styles.actions}>
-                      <Button size="sm" variant="ghost" iconOnly icon="trash-2" title="Delete field" onClick={() => deleteField(field.id)}>
+                      <Button size="sm" variant="ghost" iconOnly icon="trash-2" tooltip="Delete field" onClick={() => deleteField(field.id)}>
                         {`Delete ${field.name}`}
                       </Button>
                     </div>
@@ -223,11 +222,13 @@ function CostTable({ category, fields, overrides, onChange, onOverrideChange }: 
                   const displayValue = isOverridden ? overrides[key]! : computedTotal(key);
                   return (
                     <td key={key} className={styles.valueCell}>
-                      <span className={cx('pbx-input pbx-input--sm', styles.valueInput, styles.totalInput, isOverridden && styles.overridden)}>
-                        <input
+                      <Tooltip content={isOverridden ? 'Override active — edit a cell above to revert to computed total' : 'Edit to override the total for this column'}>
+                        <TextField
+                          size="sm"
                           type="number"
                           min="0"
                           step="1"
+                          className={cx(styles.valueInput, styles.totalInput, isOverridden && styles.overridden)}
                           aria-label={`${title} total, ${VALUE_LABELS[key]}`}
                           value={totalInputRefs.current[key] ?? displayValue}
                           onChange={(e) => {
@@ -244,9 +245,8 @@ function CostTable({ category, fields, overrides, onChange, onOverrideChange }: 
                             // If user cleared the field, remove override
                             if (overrides[key] === undefined) return;
                           }}
-                          title={isOverridden ? 'Override active — edit a cell above to revert to computed total' : 'Edit to override the total for this column'}
                         />
-                      </span>
+                      </Tooltip>
                     </td>
                   );
                 })}
@@ -414,11 +414,10 @@ export function COGSPage() {
       {editorOpen ? (
         <>
           <div className={styles.effective}>
-            <TextField
+            <DateField
               label="Effective from"
-              type="date"
               value={editEffectiveFrom}
-              onChange={(e) => setEditEffectiveFrom(e.target.value)}
+              onChange={setEditEffectiveFrom}
               hint="Orders placed on this date or later use these values."
             />
           </div>

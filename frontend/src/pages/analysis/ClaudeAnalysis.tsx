@@ -81,7 +81,7 @@ export function ClaudeAnalysis() {
                     inlineLabel
                     size="sm"
                     value={selectedDate}
-                    onChange={(e) => e.target.value && loadReview(e.target.value)}
+                    onChange={(v) => v && loadReview(v)}
                     disabled={dates.length === 0}
                     options={dates.length === 0 ? [{ value: '', label: 'No reviews yet' }] : dates.map((d) => ({ value: d, label: formatDate(d) }))}
                 />

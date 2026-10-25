@@ -12,7 +12,7 @@ The work lives on branch `redesign/ledger-shell` (worktree `.claude/worktrees/le
 | Piece | File |
 |---|---|
 | Tokens: colours, type, spacing, radii, shadows, z-index, light and dark | `frontend/src/styles/tokens.css` |
-| Components: `Button`, `Menu`, `TextField`, `Select`, `Checkbox`, `Switch`, `SegmentedControl`, `Dropzone`, `OptionCard`, `PageHeader`, `Tabs`, `Stepper`, `StatCard`, `StatStrip`, `Amount`, `Badge`, `DeliveryBadge`, `DataTable`, `DataList`, `Heatmap`, `Card`, `Avatar`, `Alert`, `Toast`, `EmptyState`, `Skeleton`, `Tooltip`, `Dialog`, `Drawer`, `PhotoTile` | `frontend/src/components/ui/pbx.tsx`, styled by `pbx.css` |
+| Components: `Button`, `Menu`, `TextField`, `Select`, `DateField`, `Checkbox`, `Switch`, `SegmentedControl`, `Dropzone`, `OptionCard`, `PageHeader`, `Tabs`, `Stepper`, `StatCard`, `StatStrip`, `Amount`, `Badge`, `DeliveryBadge`, `DataTable`, `DataList`, `Heatmap`, `Card`, `Avatar`, `Alert`, `Toast` (and `Toaster`), `EmptyState`, `Skeleton`, `Tooltip`, `Dialog`, `Drawer`, `PhotoTile` | `frontend/src/components/ui/pbx.tsx`, styled by `pbx.css` |
 | Icons (`<Icon name="…" />`, Lucide shapes) | `frontend/src/components/ui/icons.ts` |
 | `formatINR`, `cx` | `frontend/src/components/ui/format.ts` |
 | Chart styling for Recharts | `frontend/src/pages/dashboard/chartStyles.ts` |
@@ -22,8 +22,9 @@ Reference screens: `DashboardPage.tsx` and `SalesPage.tsx`.
 
 ## Rules for every screen
 
-1. Build from the `pbx` components. Don't hand-roll buttons, inputs, selects, tables, badges, tabs,
-   cards, dialogs, drawers, alerts, tooltips or empty states.
+1. Build from the `pbx` components. Don't hand-roll buttons, inputs, selects, date pickers, tables,
+   badges, tabs, cards, dialogs, drawers, alerts, tooltips or empty states, and don't use what the
+   browser draws itself: no `<select>`, date or month input, raw `<input>` or `title` tooltip.
 2. Take every colour, font, size, radius, shadow and z-index from the tokens (`var(--…)`). Hex,
    `rgb()` and `hsl()` values belong in `tokens.css` only.
 3. Page layout goes in the page's `.module.css`, built on tokens. Use inline `style` only for
@@ -38,7 +39,9 @@ Reference screens: `DashboardPage.tsx` and `SalesPage.tsx`.
 7. Restyle without changing behaviour: data fetching, the query cache, virtualisation and API
    calls stay as they are. If a change is needed, say so in the commit.
 8. `npm run lint:design` (in `frontend/`) passes; `npm run build` runs it first. It fails on
-   colour literals, raw font families, `confirm`/`alert` and `lucide-react` imports.
+   colour literals, raw font families, `confirm`/`alert`/`prompt`, `lucide-react` imports, and
+   browser-drawn controls: `<select>` and other native widgets, raw `<input>`s, date, colour and
+   range pickers, and `title` tooltips.
 
 ## Status
 
@@ -46,7 +49,7 @@ Reference screens: `DashboardPage.tsx` and `SalesPage.tsx`.
 |---|---|---|---|---|
 | Shell | Sidebar, topbar, theme switch | `layouts/AdminLayout` | 137 | Done |
 | System | More breathing room, sections as cards | `styles/tokens.css`, `components/ui/pbx.css`, page `.module.css` layout | — | Done |
-| System | Our own controls everywhere, no browser defaults: select, date and month picker, tooltips, menus, toasts, validation messages | `components/ui/pbx.*`, `scripts/check-design.mjs`, the screens that use them | — | In progress |
+| System | Our own controls everywhere, no browser defaults: select, date and month picker, tooltips, menus, toasts, validation messages | `components/ui/pbx.*`, `scripts/check-design.mjs`, the screens that use them | — | Done |
 | Dashboard | Dashboard | `pages/DashboardPage`, `pages/dashboard/*` | 1,348 | Done |
 | Sales | Sales management | `pages/SalesManagementPage`, `pages/SalesPage`, `pages/SalesPage/*` | 2,660 | Done (orders as one table per day) |
 | Orders | Backlog | `pages/BacklogPage` | 261 | Done |

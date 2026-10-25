@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
 import {
-  ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  ComposedChart, Bar, Line, XAxis, YAxis, Tooltip as ChartTooltip, ResponsiveContainer,
   CartesianGrid, Legend,
 } from 'recharts';
 import { api } from '../../services/api';
 import { toast } from 'react-hot-toast';
-import { Alert, Badge, Button, Card, EmptyState, Icon, Select, Skeleton, StatCard, StatStrip } from '../../components/ui/pbx';
+import { Alert, Badge, Button, Card, EmptyState, Icon, Select, Skeleton, StatCard, StatStrip, TextField, Tooltip } from '../../components/ui/pbx';
 import { cx } from '../../components/ui/format';
 import { AXIS_TICK, TOOLTIP_ITEM, TOOLTIP_LABEL, TOOLTIP_STYLE } from '../dashboard/chartStyles';
 import styles from '../AnalysisPage.module.css';
@@ -131,8 +131,12 @@ function ComparePanel({ cmp }: { cmp: Comparison }) {
       {totalSpend > 0 && (
         <div className={styles.share}>
           <div className={styles.shareBar}>
-            <span className={styles.shareAgency} style={{ width: `${share(a.spend)}%` }} title={`Agency ₹${fmt(a.spend)}`} />
-            <span className={styles.shareOther} style={{ width: `${share(n.spend)}%` }} title={`Non-agency ₹${fmt(n.spend)}`} />
+            <Tooltip content={`Agency ₹${fmt(a.spend)}`}>
+              <span className={styles.shareAgency} style={{ width: `${share(a.spend)}%` }} />
+            </Tooltip>
+            <Tooltip content={`Non-agency ₹${fmt(n.spend)}`}>
+              <span className={styles.shareOther} style={{ width: `${share(n.spend)}%` }} />
+            </Tooltip>
           </div>
           <div className={styles.shareKey}>
             <span><b className={styles.shareAgency} /> Agency</span>
@@ -188,9 +192,9 @@ function CampaignCard({ c, month }: { c: Campaign; month: string }) {
         <>
           <Badge size="sm" tone={c.isRunning ? 'positive' : 'neutral'}>{c.isRunning ? 'Running' : 'Ended'}</Badge>
           {c.grade && (
-            <span title={c.gradeReason}>
+            <Tooltip content={c.gradeReason}>
               <Badge size="sm" tone={GRADE_TONE[c.grade]} dot={false}>{c.grade}</Badge>
-            </span>
+            </Tooltip>
           )}
         </>
       }
@@ -219,7 +223,7 @@ function CampaignCard({ c, month }: { c: Campaign; month: string }) {
           <XAxis dataKey="date" tick={AXIS_TICK} tickLine={false} axisLine={{ stroke: 'var(--rule)' }} interval="preserveStartEnd" minTickGap={24} />
           <YAxis yAxisId="left" tick={AXIS_TICK} tickLine={false} axisLine={false} width={48} tickFormatter={(v: number) => `₹${v >= 1000 ? `${Math.round(v / 1000)}k` : v}`} />
           <YAxis yAxisId="right" orientation="right" tick={AXIS_TICK} tickLine={false} axisLine={false} width={32} />
-          <Tooltip
+          <ChartTooltip
             contentStyle={TOOLTIP_STYLE}
             labelStyle={TOOLTIP_LABEL}
             itemStyle={TOOLTIP_ITEM}
@@ -348,7 +352,7 @@ export function Agency() {
           inlineLabel
           size="sm"
           value={month}
-          onChange={(e) => setMonth(e.target.value)}
+          onChange={setMonth}
           disabled={isLoading}
           options={[{ value: '', label: 'All time' }, ...availableMonths.map((m) => ({ value: m, label: monthLabel(m) }))]}
         />
@@ -377,23 +381,24 @@ export function Agency() {
           {prefixes.map((p) => (
             <span key={p} className={styles.prefix}>
               <span className="pbx-mono">{p}</span>
-              <button type="button" aria-label={`Remove the prefix ${p}`} title="Remove prefix" onClick={() => savePrefixes(prefixes.filter((x) => x !== p))}>
-                <Icon name="x" size={12} />
-              </button>
+              <Tooltip content="Remove prefix" repeatsLabel>
+                <button type="button" aria-label={`Remove the prefix ${p}`} onClick={() => savePrefixes(prefixes.filter((x) => x !== p))}>
+                  <Icon name="x" size={12} />
+                </button>
+              </Tooltip>
             </span>
           ))}
           {prefixes.length === 0 && <span className={styles.muted}>No prefixes yet</span>}
         </div>
         <div className={styles.prefixForm}>
-          <span className="pbx-input pbx-input--sm">
-            <input
-              aria-label="New prefix"
-              placeholder='e.g. "S | "'
-              value={prefixInput}
-              onChange={(e) => setPrefixInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleAddPrefix(); }}
-            />
-          </span>
+          <TextField
+            size="sm"
+            aria-label="New prefix"
+            placeholder='e.g. "S | "'
+            value={prefixInput}
+            onChange={(e) => setPrefixInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleAddPrefix(); }}
+          />
           <Button size="sm" icon="plus" onClick={handleAddPrefix}>Add prefix</Button>
         </div>
       </Card>
