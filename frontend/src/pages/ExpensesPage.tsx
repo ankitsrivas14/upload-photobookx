@@ -1,12 +1,14 @@
 import { Link, useNavigate, useLocation, Routes, Route } from 'react-router-dom';
-import { useState, useEffect } from 'react';
+import { lazy, Suspense, useState, useEffect } from 'react';
 import { api } from '../services/api';
 import type { AdminUser } from '../services/api';
-import { MetaAdsPage } from './MetaAdsPage';
-import { COGSPage } from './COGSPage';
-import { FixedMonthlyPage } from './FixedMonthlyPage';
-import { BankAccountPage } from './BankAccountPage';
 import styles from './ExpensesPage.module.css';
+
+// Each section loads the first time it is opened (Bank Account alone pulls in xlsx).
+const MetaAdsPage = lazy(() => import('./MetaAdsPage').then((m) => ({ default: m.MetaAdsPage })));
+const COGSPage = lazy(() => import('./COGSPage').then((m) => ({ default: m.COGSPage })));
+const FixedMonthlyPage = lazy(() => import('./FixedMonthlyPage').then((m) => ({ default: m.FixedMonthlyPage })));
+const BankAccountPage = lazy(() => import('./BankAccountPage').then((m) => ({ default: m.BankAccountPage })));
 
 export function ExpensesPage() {
   const navigate = useNavigate();
@@ -130,14 +132,14 @@ export function ExpensesPage() {
           </Link>
         </div>
 
-        <Routes>
-
-          <Route path="meta-ads" element={<MetaAdsPage />} />
-
-          <Route path="cogs" element={<COGSPage />} />
-          <Route path="fixed-monthly" element={<FixedMonthlyPage />} />
-          <Route path="bank-account" element={<BankAccountPage />} />
-        </Routes>
+        <Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.85rem' }}>Loading...</div>}>
+          <Routes>
+            <Route path="meta-ads" element={<MetaAdsPage />} />
+            <Route path="cogs" element={<COGSPage />} />
+            <Route path="fixed-monthly" element={<FixedMonthlyPage />} />
+            <Route path="bank-account" element={<BankAccountPage />} />
+          </Routes>
+        </Suspense>
       </main>
     </div>
   );

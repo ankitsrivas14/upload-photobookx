@@ -2,7 +2,6 @@ import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { connectMongo } from './db';
 import { backfillAllDates } from './services/roasService';
 import { runScheduledRefresh } from './services/refreshService';
-import shopifyService from './services/shopifyService';
 
 /**
  * Durable ROAS recompute for the Cloud Functions runtime.
@@ -70,9 +69,10 @@ export const scheduledRefresh = onSchedule(
 );
 
 /**
- * Fast, lightweight order freshness: every 10 minutes pull recent orders straight from
- * Shopify into Firestore. No Mongo — so it never touches the slow ~15MB cache doc and
- * can't time out on it. This is what keeps the SalesPage (which reads Firestore) current.
+ * Fast, lightweight order freshness: every 10 minutes pull the orders that changed since the
+ * last run (Shopify updated_at, any age) straight into Firestore. No Mongo — so it never
+ * touches the slow ~15MB cache doc and can't time out on it. This is what keeps the
+ * SalesPage (which reads Firestore) current, including late deliveries and RTOs.
  */
 export const ordersSync = onSchedule(
   {
@@ -84,10 +84,8 @@ export const ordersSync = onSchedule(
     secrets: ['SHOPIFY_STORE_DOMAIN', 'SHOPIFY_ACCESS_TOKEN', 'PRINTED_PHOTOS_PRODUCT_ID'],
   },
   async () => {
-    const since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
-    const recent = await shopifyService.fetchRecentOrders(since);
-    const { saveAll } = await import('./db/ordersRepo');
-    const written = await saveAll(recent);
-    console.log(`ordersSync: fetched ${recent.length}, upserted ${written} recent orders to Firestore`);
+    const { syncChangedOrders } = await import('./services/orderSyncService');
+    const { fetched, written, since } = await syncChangedOrders();
+    console.log(`ordersSync: ${fetched} orders changed since ${since}, upserted ${written} to Firestore`);
   }
 );

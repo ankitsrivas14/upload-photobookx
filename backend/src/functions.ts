@@ -41,6 +41,9 @@ export const api = onRequest(
     region: 'asia-south1',
     timeoutSeconds: 540,
     memory: '1GiB',
+    // One instance stays warm so the first request after a quiet spell doesn't pay a cold start
+    // (loading the whole module graph and opening the Atlas connection).
+    minInstances: 1,
     secrets,
   },
   app

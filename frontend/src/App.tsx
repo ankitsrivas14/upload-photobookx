@@ -1,17 +1,30 @@
+import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { AdminLogin } from './pages/AdminLogin';
-import { DashboardPage } from './pages/DashboardPage';
-import { ExpensesPage } from './pages/ExpensesPage';
-import { UploadPage } from './pages/UploadPage';
-import { SalesManagementPage } from './pages/SalesManagementPage';
-import { ToolsPage } from './pages/ToolsPage';
-import { AnalysisPage } from './pages/AnalysisPage';
-import { AttendancePage } from './pages/AttendancePage';
-import BacklogPage from './pages/BacklogPage';
-import AbandonedCheckoutsPage from './pages/AbandonedCheckoutsPage';
 import { AdminLayout } from './layouts/AdminLayout';
 import { api } from './services/api';
+
+// Every page is its own chunk, downloaded the first time it is opened, so no page (least of all
+// the public upload page) pays for the code and libraries of all the others.
+const DashboardPage = lazy(() => import('./pages/DashboardPage').then((m) => ({ default: m.DashboardPage })));
+const ExpensesPage = lazy(() => import('./pages/ExpensesPage').then((m) => ({ default: m.ExpensesPage })));
+const UploadPage = lazy(() => import('./pages/UploadPage').then((m) => ({ default: m.UploadPage })));
+const SalesManagementPage = lazy(() => import('./pages/SalesManagementPage').then((m) => ({ default: m.SalesManagementPage })));
+const ToolsPage = lazy(() => import('./pages/ToolsPage').then((m) => ({ default: m.ToolsPage })));
+const AnalysisPage = lazy(() => import('./pages/AnalysisPage').then((m) => ({ default: m.AnalysisPage })));
+const AttendancePage = lazy(() => import('./pages/AttendancePage').then((m) => ({ default: m.AttendancePage })));
+const BacklogPage = lazy(() => import('./pages/BacklogPage'));
+const AbandonedCheckoutsPage = lazy(() => import('./pages/AbandonedCheckoutsPage'));
+
+// The boundary sits inside each route, so the admin sidebar stays put while a page loads.
+function Page({ children }: { children: React.ReactNode }) {
+  return (
+    <Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.85rem' }}>Loading...</div>}>
+      {children}
+    </Suspense>
+  );
+}
 
 // Protected Route component
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -46,14 +59,14 @@ function App() {
               </ProtectedRoute>
             }
           >
-            <Route path="dashboard" element={<DashboardPage />} />
-            <Route path="sales-management" element={<SalesManagementPage />} />
-            <Route path="backlog" element={<BacklogPage />} />
-            <Route path="abandoned-checkouts" element={<AbandonedCheckoutsPage />} />
-            <Route path="expenses/*" element={<ExpensesPage />} />
-            <Route path="analysis/*" element={<AnalysisPage />} />
-            <Route path="attendance/*" element={<AttendancePage />} />
-            <Route path="tools/*" element={<ToolsPage />} />
+            <Route path="dashboard" element={<Page><DashboardPage /></Page>} />
+            <Route path="sales-management" element={<Page><SalesManagementPage /></Page>} />
+            <Route path="backlog" element={<Page><BacklogPage /></Page>} />
+            <Route path="abandoned-checkouts" element={<Page><AbandonedCheckoutsPage /></Page>} />
+            <Route path="expenses/*" element={<Page><ExpensesPage /></Page>} />
+            <Route path="analysis/*" element={<Page><AnalysisPage /></Page>} />
+            <Route path="attendance/*" element={<Page><AttendancePage /></Page>} />
+            <Route path="tools/*" element={<Page><ToolsPage /></Page>} />
 
             {/* Redirects for moved pages */}
             <Route path="products" element={<Navigate to="tools/products" replace />} />
@@ -62,7 +75,7 @@ function App() {
         </Route>
 
         {/* Upload page (public with magic link) */}
-        <Route path="/upload/:token" element={<UploadPage />} />
+        <Route path="/upload/:token" element={<Page><UploadPage /></Page>} />
 
         {/* Fallback - redirect to photobookx */}
         <Route path="*" element={<ExternalRedirect />} />

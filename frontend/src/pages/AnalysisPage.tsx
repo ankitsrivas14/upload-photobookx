@@ -1,17 +1,20 @@
-import { useState, useEffect } from 'react';
+import { lazy, Suspense, useState, useEffect } from 'react';
 import { useNavigate, useLocation, Link, Routes, Route, Navigate } from 'react-router-dom';
 import { api } from '../services/api';
 import type { AdminUser } from '../services/api';
-import { FailedOrdersAnalysis } from './analysis/FailedOrdersAnalysis';
-import { PinCodesAnalysis } from './analysis/PinCodesAnalysis';
-import { StuckOrdersAnalysis } from './analysis/StuckOrdersAnalysis';
-import { TicketsAnalysis } from './analysis/TicketsAnalysis';
-import { CreateTicketForm } from './analysis/CreateTicketForm';
-import { AdsAnalysis } from './analysis/AdsAnalysis';
-import { ClaudeAnalysis } from './analysis/ClaudeAnalysis';
-import { Reels } from './analysis/Reels';
-import { Agency } from './analysis/Agency';
 import styles from './AnalysisPage.module.css';
+
+// Each tab loads the first time it is opened (Ads pulls in papaparse and react-markdown,
+// Agency pulls in recharts).
+const FailedOrdersAnalysis = lazy(() => import('./analysis/FailedOrdersAnalysis').then((m) => ({ default: m.FailedOrdersAnalysis })));
+const PinCodesAnalysis = lazy(() => import('./analysis/PinCodesAnalysis').then((m) => ({ default: m.PinCodesAnalysis })));
+const StuckOrdersAnalysis = lazy(() => import('./analysis/StuckOrdersAnalysis').then((m) => ({ default: m.StuckOrdersAnalysis })));
+const TicketsAnalysis = lazy(() => import('./analysis/TicketsAnalysis').then((m) => ({ default: m.TicketsAnalysis })));
+const CreateTicketForm = lazy(() => import('./analysis/CreateTicketForm').then((m) => ({ default: m.CreateTicketForm })));
+const AdsAnalysis = lazy(() => import('./analysis/AdsAnalysis').then((m) => ({ default: m.AdsAnalysis })));
+const ClaudeAnalysis = lazy(() => import('./analysis/ClaudeAnalysis').then((m) => ({ default: m.ClaudeAnalysis })));
+const Reels = lazy(() => import('./analysis/Reels').then((m) => ({ default: m.Reels })));
+const Agency = lazy(() => import('./analysis/Agency').then((m) => ({ default: m.Agency })));
 
 export function AnalysisPage() {
     const navigate = useNavigate();
@@ -147,6 +150,7 @@ export function AnalysisPage() {
                     </Link>
                 </div>
 
+                <Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.85rem' }}>Loading...</div>}>
                 <Routes>
                     <Route path="ads" element={<AdsAnalysis />} />
                     <Route path="claude" element={<ClaudeAnalysis />} />
@@ -159,6 +163,7 @@ export function AnalysisPage() {
                     <Route path="agency" element={<Agency />} />
                     <Route path="*" element={<Navigate to="ads" replace />} />
                 </Routes>
+                </Suspense>
             </main>
         </div>
     );

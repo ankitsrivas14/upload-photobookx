@@ -1501,11 +1501,17 @@ router.post('/firestore-backfill-shipping', requireAdmin, async (_req: Authentic
 
 /**
  * POST /api/admin/sales/firestore-sync-orders
- * Fast freshness: fetch recent orders straight from Shopify (last N days) and upsert
- * into Firestore — no 15MB Mongo round-trip. This is what keeps orders current.
+ * Fast freshness: upsert the orders that changed in Shopify since the last sync (any age,
+ * so late deliveries and RTOs land too) into Firestore — no 15MB Mongo round-trip.
+ * `?days=N` instead re-pulls every order created in the last N days (manual backfill).
  */
 router.post('/firestore-sync-orders', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    if (!req.query.days) {
+      const { syncChangedOrders } = await import('../services/orderSyncService');
+      const { fetched, written, since } = await syncChangedOrders();
+      return res.json({ success: true, fetched, written, since });
+    }
     const days = Math.max(1, Math.min(60, Number(req.query.days) || 14));
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
     const recent = await shopifyService.fetchRecentOrders(since);

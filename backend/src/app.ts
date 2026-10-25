@@ -1,8 +1,10 @@
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
+import compression from 'compression';
 import config from './config';
 import { connectMongo } from './db';
-import adminAuthRoutes from './routes/adminAuth';
+import adminAuthRoutes, { requireAdmin } from './routes/adminAuth';
+import type { AuthenticatedRequest } from './types';
 import magicLinksRoutes from './routes/magicLinks';
 import uploadRoutes from './routes/upload';
 import expensesRoutes from './routes/expenses';
@@ -48,13 +50,27 @@ app.use(cors({
   },
   credentials: true,
   exposedHeaders: ['Content-Disposition'], // Allow frontend to read Content-Disposition header
+  // Let browsers reuse a preflight for 2 hours (Chrome's cap) instead of ~5 seconds, so most
+  // API calls no longer pay an extra OPTIONS round trip.
+  maxAge: 7200,
 }));
 app.use(express.json());
+// Gzip JSON responses; large order lists shrink by roughly 85-90%.
+app.use(compression());
 
 // Liveness check — deliberately BEFORE the DB-ensure middleware so it stays a pure ping
 // even if Mongo is unreachable.
 app.get('/api/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Deny by default: every /api/admin route needs an admin token unless it is listed here, so a
+// handler that forgets `requireAdmin` is still protected. Runs before the Mongo middleware so
+// unauthenticated requests never touch the database.
+const PUBLIC_ADMIN_PATHS = new Set(['/auth/login', '/auth/register']);
+app.use('/api/admin', (req: Request, res: Response, next: NextFunction) => {
+  if (PUBLIC_ADMIN_PATHS.has(req.path)) return next();
+  requireAdmin(req as AuthenticatedRequest, res, next);
 });
 
 // Ensure Mongo is connected before any route handler runs. On Cloud Functions this connects

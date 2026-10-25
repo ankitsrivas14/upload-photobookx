@@ -385,6 +385,22 @@ router.get('/shopify/orders', requireAdmin, async (req: AuthenticatedRequest, re
       availableMonths = Array.from(availableMonthsSet).sort().reverse();
     }
 
+    // Narrow the list before the per-order lookups below, which are the slow part:
+    // `created_at_min` keeps recent orders only, and `exclude=terminal` drops finished orders
+    // (cancelled, delivered, failed, RTO) for views that only care about open shipments.
+    if (createdAtMin) {
+      const min = new Date(createdAtMin).getTime();
+      if (!Number.isNaN(min)) orders = orders.filter((o: any) => new Date(o.created_at).getTime() >= min);
+    }
+    if (req.query.exclude === 'terminal') {
+      orders = orders.filter((o: any) => {
+        if (o.cancelled_at) return false;
+        const latest = o.fulfillments?.length ? o.fulfillments[o.fulfillments.length - 1] : null;
+        const status = String(latest?.shipment_status || o.fulfillment_status || '').toLowerCase();
+        return !(status === 'delivered' || status.includes('fail') || status.includes('rto'));
+      });
+    }
+
     // Fetch delivery dates from database for all orders
     const orderNumbers = orders.map(o => o.name);
     const normalizedOrderNumbers = orderNumbers.map(n => n.startsWith('#') ? n.substring(1) : n);

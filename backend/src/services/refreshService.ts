@@ -1,4 +1,3 @@
-import shopifyService from './shopifyService';
 import shiprocketService from './shiprocketService';
 import { backfillOrderStats } from './orderStatsService';
 import { backfillDailyPnl } from './dailyPnlService';
@@ -88,11 +87,10 @@ export async function runScheduledRefresh(): Promise<{
   fetched: number;
   skipped: number;
 }> {
-  // 1. Latest orders straight into Firestore (fast; no 15MB Mongo path).
-  const since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
-  const recent = await shopifyService.fetchRecentOrders(since);
-  const { saveAll, getAll } = await import('../db/ordersRepo');
-  const synced = await saveAll(recent);
+  // 1. Orders changed since the last sync straight into Firestore (fast; no 15MB Mongo path).
+  const { syncChangedOrders } = await import('./orderSyncService');
+  const { written: synced } = await syncChangedOrders();
+  const { getAll } = await import('../db/ordersRepo');
 
   // 2. Decide which orders need a shipping sync (orders from Firestore).
   const orders = await getAll();

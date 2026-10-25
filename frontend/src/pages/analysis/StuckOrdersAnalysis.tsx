@@ -415,7 +415,8 @@ export function StuckOrdersAnalysis() {
         setError(null);
         try {
             const [ordersRes, ticketsRes] = await Promise.all([
-                api.getOrders(10000, true),
+                // Only open shipments can be stuck; the server leaves out finished orders.
+                api.getOrders(10000, true, undefined, undefined, 'terminal'),
                 api.getTickets()
             ]);
 

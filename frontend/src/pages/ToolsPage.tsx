@@ -1,14 +1,16 @@
 import { Link, useNavigate, useLocation, Routes, Route, Navigate } from 'react-router-dom';
-import { useState, useEffect } from 'react';
+import { lazy, Suspense, useState, useEffect } from 'react';
 import { api } from '../services/api';
 import type { AdminUser } from '../services/api';
-import { ProfitPredictionCalculator } from './ProfitPredictionCalculator';
-import { StockPrediction } from './StockPrediction';
-import { ProductsManager } from './tools/ProductsManager';
-import { VariantPerformance } from './tools/VariantPerformance';
-import { Labels } from './tools/Labels';
-import { GSTMonthlyReports } from './GSTMonthlyReports';
 import styles from './ToolsPage.module.css';
+
+// Each tool loads the first time it is opened (Labels alone pulls in pdf-lib and pdfjs).
+const ProfitPredictionCalculator = lazy(() => import('./ProfitPredictionCalculator').then((m) => ({ default: m.ProfitPredictionCalculator })));
+const StockPrediction = lazy(() => import('./StockPrediction').then((m) => ({ default: m.StockPrediction })));
+const ProductsManager = lazy(() => import('./tools/ProductsManager').then((m) => ({ default: m.ProductsManager })));
+const VariantPerformance = lazy(() => import('./tools/VariantPerformance').then((m) => ({ default: m.VariantPerformance })));
+const Labels = lazy(() => import('./tools/Labels').then((m) => ({ default: m.Labels })));
+const GSTMonthlyReports = lazy(() => import('./GSTMonthlyReports').then((m) => ({ default: m.GSTMonthlyReports })));
 
 export function ToolsPage() {
   const navigate = useNavigate();
@@ -130,15 +132,17 @@ export function ToolsPage() {
           </Link>
         </div>
 
-        <Routes>
-          <Route path="profit-calculator" element={<ProfitPredictionCalculator />} />
-          <Route path="stock-prediction" element={<StockPrediction />} />
-          <Route path="products" element={<ProductsManager />} />
-          <Route path="gst-reports" element={<GSTMonthlyReports />} />
-          <Route path="variant-performance" element={<VariantPerformance />} />
-          <Route path="labels" element={<Labels />} />
-          <Route path="*" element={<Navigate to="profit-calculator" replace />} />
-        </Routes>
+        <Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.85rem' }}>Loading...</div>}>
+          <Routes>
+            <Route path="profit-calculator" element={<ProfitPredictionCalculator />} />
+            <Route path="stock-prediction" element={<StockPrediction />} />
+            <Route path="products" element={<ProductsManager />} />
+            <Route path="gst-reports" element={<GSTMonthlyReports />} />
+            <Route path="variant-performance" element={<VariantPerformance />} />
+            <Route path="labels" element={<Labels />} />
+            <Route path="*" element={<Navigate to="profit-calculator" replace />} />
+          </Routes>
+        </Suspense>
       </main>
     </div>
   );

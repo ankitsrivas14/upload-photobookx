@@ -355,11 +355,14 @@ class ApiService {
   }
 
   // Shopify Orders
-  async getOrders(limit = 50, allOrders = false, createdAtMin?: string, month?: string): Promise<OrdersResponse> {
+  // `exclude: 'terminal'` asks the server to leave out finished orders (cancelled, delivered,
+  // failed, RTO), for views that only need open shipments.
+  async getOrders(limit = 50, allOrders = false, createdAtMin?: string, month?: string, exclude?: 'terminal'): Promise<OrdersResponse> {
     const allParam = allOrders ? '&all=true' : '';
     const dateParam = createdAtMin ? `&created_at_min=${encodeURIComponent(createdAtMin)}` : '';
     const monthParam = month ? `&month=${encodeURIComponent(month)}` : '';
-    return this.request<OrdersResponse>(`/api/admin/magic-links/shopify/orders?limit=${limit}${allParam}${dateParam}${monthParam}`);
+    const excludeParam = exclude ? `&exclude=${exclude}` : '';
+    return this.request<OrdersResponse>(`/api/admin/magic-links/shopify/orders?limit=${limit}${allParam}${dateParam}${monthParam}${excludeParam}`);
   }
 
   async getGSTSummary(month: string, year: string): Promise<{

@@ -548,11 +548,11 @@ class ShopifyService {
   }
 
   /**
-   * Fetch orders created on/after `createdAtMin` straight from Shopify (trimmed), WITHOUT
-   * touching the Mongo cache. Used by the lightweight Firestore sync so order freshness
-   * never depends on reading/writing the ~15MB cache doc.
+   * Fetch orders created on/after `since` (or, with `field = 'updated'`, changed on/after it)
+   * straight from Shopify (trimmed), WITHOUT touching the Mongo cache. Used by the lightweight
+   * Firestore sync so order freshness never depends on reading/writing the ~15MB cache doc.
    */
-  async fetchRecentOrders(createdAtMin: string, maxOrders: number = 2000): Promise<any[]> {
+  async fetchRecentOrders(since: string, maxOrders: number = 2000, field: 'created' | 'updated' = 'created'): Promise<any[]> {
     const perPage = 250;
     const all: any[] = [];
     let pageInfo: string | null = null;
@@ -560,7 +560,7 @@ class ShopifyService {
     while (all.length < maxOrders) {
       let url: string;
       if (first) {
-        url = `/orders.json?status=any&limit=${perPage}&created_at_min=${encodeURIComponent(createdAtMin)}`;
+        url = `/orders.json?status=any&limit=${perPage}&${field}_at_min=${encodeURIComponent(since)}`;
         first = false;
       } else if (pageInfo) {
         url = `/orders.json?page_info=${pageInfo}&limit=${perPage}`;

@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { lazy, Suspense, useState, useEffect, useCallback, useRef } from 'react';
 import {
   LineChart,
   Line,
@@ -19,8 +19,11 @@ import {
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
 import type { AdminUser } from '../services/api';
-import { SalesPage, type SalesPageProps } from './SalesPage';
+import type { SalesPageProps } from './SalesPage';
 import styles from './DashboardPage.module.css';
+
+// The orders modal is heavy (the whole Sales page); load it only when the modal first opens.
+const SalesPage = lazy(() => import('./SalesPage').then((m) => ({ default: m.SalesPage })));
 
 const STORE_TIMEZONE = 'Asia/Kolkata';
 
@@ -1792,7 +1795,9 @@ export function DashboardPage() {
               </svg>
             </button>
             <div className={styles.modalBody}>
-              <SalesPage initialFilter={salesModalFilter} />
+              <Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.85rem' }}>Loading...</div>}>
+                <SalesPage initialFilter={salesModalFilter} />
+              </Suspense>
             </div>
           </div>
         </div>
