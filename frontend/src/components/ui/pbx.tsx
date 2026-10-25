@@ -1370,8 +1370,11 @@ export interface PhotoTileProps {
   src?: string;
   alt?: string;
   status?: 'ready' | 'uploading' | 'uploaded' | 'error';
-  /** 0–100 while uploading. */
+  /** 0–100 while uploading; leave it out when the upload reports no progress and the bar runs indeterminate. */
   progress?: number;
+  /** The image's load and error events, e.g. to read its orientation or fall back when it cannot be shown. */
+  onImageLoad?: React.ReactEventHandler<HTMLImageElement>;
+  onImageError?: React.ReactEventHandler<HTMLImageElement>;
   /** Width / height of the print: "3 / 4" (small) or "2 / 3" (large). */
   ratio?: string;
   /** Shows the chosen print style: a Polaroid adds the white border. */
@@ -1383,16 +1386,24 @@ export interface PhotoTileProps {
 
 /** A customer photo as it will print, with upload progress, state and remove. */
 export function PhotoTile(props: PhotoTileProps) {
-  const { src, alt = '', status = 'ready', progress = 0, ratio = '3 / 4', printStyle = 'normal', label, onRemove, className } = props;
+  const { src, alt = '', status = 'ready', progress, ratio = '3 / 4', printStyle = 'normal', label, onRemove, onImageLoad, onImageError, className } = props;
+  const indeterminate = progress === undefined;
   return (
     <figure className={cx('pbx-photo', 'pbx-photo--' + printStyle, 'is-' + status, className)}>
       <div className="pbx-photo__frame" style={{ aspectRatio: ratio }}>
         <div className="pbx-photo__print">
-          {src ? <img src={src} alt={alt} loading="lazy" /> : <span className="pbx-photo__ph"><Icon name="image" size={20} /></span>}
+          {src ? <img src={src} alt={alt} loading="lazy" onLoad={onImageLoad} onError={onImageError} /> : <span className="pbx-photo__ph"><Icon name="image" size={20} /></span>}
         </div>
         {status === 'uploading' ? (
-          <span className="pbx-photo__progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress)} aria-label="Uploading">
-            <span style={{ width: Math.max(4, Math.min(100, progress)) + '%' }} />
+          <span
+            className={cx('pbx-photo__progress', indeterminate && 'pbx-photo__progress--indeterminate')}
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={indeterminate ? undefined : Math.round(progress)}
+            aria-label="Uploading"
+          >
+            <span style={indeterminate ? undefined : { width: Math.max(4, Math.min(100, progress)) + '%' }} />
           </span>
         ) : null}
         {status === 'uploaded' ? <Badge tone="positive" size="sm" icon="check" className="pbx-photo__state">Uploaded</Badge> : null}
