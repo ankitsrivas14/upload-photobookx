@@ -71,9 +71,10 @@ function TrendChart({ title, data, dataKey, formatValue, zeroLine }: TrendChartP
     <figure className={styles.chart}>
       <figcaption className={styles.chartTitle}>{title}</figcaption>
       <ResponsiveContainer width="100%" height={160}>
-        <LineChart data={data} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
+        <LineChart data={data} margin={{ top: 8, right: 16, left: -12, bottom: 0 }}>
           <CartesianGrid vertical={false} stroke="var(--chart-grid)" />
-          <XAxis dataKey="label" tick={AXIS_TICK} tickLine={false} axisLine={{ stroke: 'var(--rule)' }} minTickGap={24} interval="preserveStartEnd" />
+          {/* Ticks show the week's Monday; the tooltip keeps the whole week. */}
+          <XAxis dataKey="label" tick={AXIS_TICK} tickFormatter={(label: string) => label.split('–')[0]} tickLine={false} axisLine={{ stroke: 'var(--rule)' }} minTickGap={24} interval="preserveStartEnd" />
           <YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} tickFormatter={formatValue} width={56} />
           {zeroLine ? <ReferenceLine y={0} stroke="var(--line-strong)" /> : null}
           <Tooltip contentStyle={TOOLTIP_STYLE} labelStyle={TOOLTIP_LABEL} itemStyle={TOOLTIP_ITEM} formatter={(v) => [formatValue(Number(v)), title]} />
