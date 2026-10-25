@@ -20,7 +20,6 @@ const LEGACY = new Set([
   'pages/AdminLogin.tsx',
   'pages/AnalysisPage.tsx',
   'pages/AttendancePage.tsx',
-  'pages/BacklogPage.tsx',
   'pages/BankAccountPage.tsx',
   'pages/COGSPage.tsx',
   'pages/ExpensesOverview.tsx',
