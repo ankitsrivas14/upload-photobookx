@@ -49,7 +49,7 @@ Reference screens: `DashboardPage.tsx` and `SalesPage.tsx`.
 | Dashboard | Dashboard | `pages/DashboardPage`, `pages/dashboard/*` | 1,348 | Done |
 | Sales | Sales management | `pages/SalesManagementPage`, `pages/SalesPage`, `pages/SalesPage/*` | 2,660 | Done |
 | Orders | Backlog | `pages/BacklogPage` | 261 | Done |
-| Orders | Abandoned checkouts | `pages/AbandonedCheckoutsPage` | 263 | In progress |
+| Orders | Abandoned checkouts | `pages/AbandonedCheckoutsPage` | 263 | Done |
 | Analysis | Section tabs | `pages/AnalysisPage` | 163 | To do |
 | Analysis | Claude Analysis | `pages/analysis/ClaudeAnalysis` | 247 | To do |
 | Analysis | Agency | `pages/analysis/Agency` | 540 | To do |

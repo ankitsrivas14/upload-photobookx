@@ -15,7 +15,6 @@ const TOKENS = 'styles/tokens.css';
 
 const LEGACY = new Set([
   'index.css',
-  'pages/AbandonedCheckoutsPage.tsx',
   'pages/AdminDashboard.tsx',
   'pages/AdminLogin.tsx',
   'pages/AnalysisPage.tsx',
