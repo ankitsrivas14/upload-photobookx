@@ -65,7 +65,7 @@ Reference screens: `DashboardPage.tsx` and `SalesPage.tsx`.
 | Expenses | COGS | `pages/COGSPage` | 489 | To do |
 | Expenses | Bank account | `pages/BankAccountPage` | 1,211 | To do |
 | Tools | Section tabs | `pages/ToolsPage` | 149 | Done |
-| Tools | GST reports | `pages/GSTReportsPage`, `pages/GSTMonthlyReports` | 527 | In progress |
+| Tools | GST reports | `pages/GSTMonthlyReports` (unrouted `GSTReportsPage` deleted) | 427 | Done |
 | Tools | Products | `pages/tools/ProductsManager` | 480 | In progress |
 | Tools | Labels | `pages/tools/Labels` | 270 | In progress |
 | Tools | Variant performance | `pages/tools/VariantPerformance` | 232 | In progress |
