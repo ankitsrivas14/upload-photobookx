@@ -11,8 +11,8 @@ import { markDatesDirty } from '../db/aggregatesDirty';
  * read-only (ads_read) system-user token.
  */
 
-const GRAPH = 'https://graph.facebook.com/v23.0';
-const AD_ACCOUNT_ID = process.env.META_ADS_ACCOUNT_ID || 'act_1300540326624566';
+export const GRAPH = 'https://graph.facebook.com/v23.0';
+export const AD_ACCOUNT_ID = process.env.META_ADS_ACCOUNT_ID || 'act_1300540326624566';
 const SOURCE = 'meta-api';
 const STORE_TZ = 'Asia/Kolkata';
 
@@ -37,7 +37,7 @@ function daysBetween(since: string, until: string): string[] {
   return out;
 }
 
-async function getWithRetry(url: string, attempts = 3): Promise<any> {
+export async function getWithRetry(url: string, attempts = 3): Promise<any> {
   for (let i = 1; ; i++) {
     const res = await fetch(url);
     const body: any = await res.json().catch(() => ({}));

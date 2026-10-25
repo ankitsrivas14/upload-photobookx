@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import { requireAdmin } from './adminAuth';
 import { agencySettingsStore } from '../db/featureStores';
-import { MetaAdPerformance } from '../models/MetaAdPerformance';
+import { campaignDays } from '../services/metaInsightsService';
 import { computeBreakevenMetrics } from '../services/breakevenService';
 import type { AuthenticatedRequest } from '../types';
 
@@ -51,6 +51,29 @@ export function gradeCampaign(
 
 /** Tolerant name key so names group despite case/spacing drift. */
 const norm = (n: any) => (typeof n === 'string' ? n.trim().toLowerCase().replace(/\s+/g, ' ') : '');
+
+/**
+ * One row per (campaign name, day) from Meta's daily campaign insights. Campaigns that share
+ * a name are summed, since the page groups campaigns by name.
+ */
+async function campaignRows(): Promise<Array<{ name: string; date: string; spend: number; roas: number; purchases: number }>> {
+  const byKey = new Map<string, { name: string; date: string; spend: number; value: number; purchases: number }>();
+  for (const r of await campaignDays()) {
+    const key = `${norm(r.name)}|${r.date}`;
+    const cur = byKey.get(key) ?? { name: r.name, date: r.date, spend: 0, value: 0, purchases: 0 };
+    cur.spend += r.spend;
+    cur.value += r.purchaseValue;
+    cur.purchases += r.purchases;
+    byKey.set(key, cur);
+  }
+  return [...byKey.values()].map((r) => ({
+    name: r.name,
+    date: r.date,
+    spend: r.spend,
+    roas: r.spend > 0 ? r.value / r.spend : 0,
+    purchases: r.purchases,
+  }));
+}
 
 /** The configured agency name prefixes ([] when unset = no filtering). */
 async function getNamePrefixes(): Promise<string[]> {
@@ -113,8 +136,8 @@ function eachDay(start: string, end: string): string[] {
 
 /**
  * GET /api/admin/agency
- * Campaign-by-campaign breakdown of the agency's campaigns, derived from the campaign
- * data uploaded on the Ads Analysis page. Each campaign carries a daily series running
+ * Campaign-by-campaign breakdown of the agency's campaigns, from Meta's daily campaign
+ * insights (metaInsightsDaily, synced hourly). Each campaign carries a daily series running
  * from its first day to its last (or to the latest data we have, if it's still running).
  */
 router.get('/', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
@@ -124,9 +147,7 @@ router.get('/', requireAdmin, async (req: AuthenticatedRequest, res: Response) =
     const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(monthParam) ? monthParam : '';
 
     const [allRows, namePrefixes] = await Promise.all([
-      MetaAdPerformance.find({ level: 'campaign' }, {
-        name: 1, date: 1, spend: 1, roas: 1, purchases: 1,
-      }).lean(),
+      campaignRows(),
       getNamePrefixes(),
     ]);
 
@@ -142,8 +163,7 @@ router.get('/', requireAdmin, async (req: AuthenticatedRequest, res: Response) =
       console.error('agency: breakeven metrics unavailable, campaigns will be ungraded', err);
     }
 
-    // One row per (campaign, day) — the Ads Analysis upload inserts rather than
-    // upserts, so the same day can appear more than once.
+    // Rows are already one per (campaign, day); this stays as a cheap guard against duplicates.
     const deduped = Array.from(
       new Map(
         (allRows as any[])

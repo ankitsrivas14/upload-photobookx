@@ -11,7 +11,6 @@ const PinCodesAnalysis = lazy(() => import('./analysis/PinCodesAnalysis').then((
 const StuckOrdersAnalysis = lazy(() => import('./analysis/StuckOrdersAnalysis').then((m) => ({ default: m.StuckOrdersAnalysis })));
 const TicketsAnalysis = lazy(() => import('./analysis/TicketsAnalysis').then((m) => ({ default: m.TicketsAnalysis })));
 const CreateTicketForm = lazy(() => import('./analysis/CreateTicketForm').then((m) => ({ default: m.CreateTicketForm })));
-const AdsAnalysis = lazy(() => import('./analysis/AdsAnalysis').then((m) => ({ default: m.AdsAnalysis })));
 const ClaudeAnalysis = lazy(() => import('./analysis/ClaudeAnalysis').then((m) => ({ default: m.ClaudeAnalysis })));
 const Reels = lazy(() => import('./analysis/Reels').then((m) => ({ default: m.Reels })));
 const Agency = lazy(() => import('./analysis/Agency').then((m) => ({ default: m.Agency })));
@@ -27,7 +26,6 @@ export function AnalysisPage() {
     const isPinCodes = currentPath.includes('/admin/analysis/pin-codes');
     const isStuckOrders = currentPath.includes('/admin/analysis/stuck-orders');
     const isTickets = currentPath.includes('/admin/analysis/tickets');
-    const isAds = currentPath.includes('/admin/analysis/ads');
     const isClaude = currentPath.includes('/admin/analysis/claude');
     const isReels = currentPath.includes('/admin/analysis/reels');
     const isAgency = currentPath.includes('/admin/analysis/agency');
@@ -107,12 +105,6 @@ export function AnalysisPage() {
                         Claude Analysis
                     </Link>
                     <Link
-                        to="/admin/analysis/ads"
-                        className={`${styles['analysis-nav-item']} ${isAds ? styles.active : ''}`}
-                    >
-                        Ads Analysis
-                    </Link>
-                    <Link
                         to="/admin/analysis/failed-orders"
                         className={`${styles['analysis-nav-item']} ${isFailedOrders ? styles.active : ''}`}
                     >
@@ -152,7 +144,8 @@ export function AnalysisPage() {
 
                 <Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.85rem' }}>Loading...</div>}>
                 <Routes>
-                    <Route path="ads" element={<AdsAnalysis />} />
+                    {/* The CSV-based Ads Analysis was retired; Claude Analysis replaced it. */}
+                    <Route path="ads" element={<Navigate to="/admin/analysis/claude" replace />} />
                     <Route path="claude" element={<ClaudeAnalysis />} />
                     <Route path="failed-orders" element={<FailedOrdersAnalysis />} />
                     <Route path="pin-codes" element={<PinCodesAnalysis />} />
@@ -161,7 +154,7 @@ export function AnalysisPage() {
                     <Route path="tickets/new" element={<CreateTicketForm />} />
                     <Route path="reels" element={<Reels />} />
                     <Route path="agency" element={<Agency />} />
-                    <Route path="*" element={<Navigate to="ads" replace />} />
+                    <Route path="*" element={<Navigate to="claude" replace />} />
                 </Routes>
                 </Suspense>
             </main>

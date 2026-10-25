@@ -70,8 +70,9 @@ export const ordersSync = onSchedule(
 
 /**
  * Hourly at :15 IST: Meta ad spend for the last 7 days (today included) into dailyAdSpend,
- * so ROAS and P&L carry ad cost without anyone typing it in. Re-pulling a week picks up
- * Meta's late spend corrections. Changed days are recomputed right away (or by the next
+ * so ROAS and P&L carry ad cost without anyone typing it in, and the same days' campaign
+ * insights into metaInsightsDaily for the Agency and Expenses pages. Re-pulling a week picks
+ * up Meta's late corrections. Changed days are recomputed right away (or by the next
  * ordersSync if a recompute is already running). Needs only the read-only Meta token.
  */
 export const adSpendSync = onSchedule(
@@ -86,14 +87,18 @@ export const adSpendSync = onSchedule(
   },
   async () => {
     const { syncAdSpend, istToday } = await import('./services/metaAdSpendService');
+    const { syncCampaignInsights } = await import('./services/metaInsightsService');
     const { shiftDateKey, processDirtyDates } = await import('./services/aggregatesService');
     const today = istToday();
-    const { daysWithSpend, changes } = await syncAdSpend(shiftDateKey(today, -6), today);
+    const since = shiftDateKey(today, -6);
+    const { daysWithSpend, changes } = await syncAdSpend(since, today);
     const recomputed = changes.length > 0 ? await processDirtyDates() : 0;
+    const insights = await syncCampaignInsights(since, today);
     console.log(
       `adSpendSync: ${daysWithSpend} days with spend, ${changes.length} changed ` +
         `(${changes.map((c) => `${c.day} ${c.from ?? '-'}→${c.to ?? '-'}`).join(', ') || 'none'}), ` +
-        `aggregates: ${recomputed === null ? 'left for ordersSync' : `${recomputed} dates recomputed`}`
+        `aggregates: ${recomputed === null ? 'left for ordersSync' : `${recomputed} dates recomputed`}, ` +
+        `campaign days: ${insights.rows} (${insights.written} written)`
     );
   }
 );

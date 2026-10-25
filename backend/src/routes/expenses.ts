@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { requireAdmin } from './adminAuth';
-import { MetaAdPerformance } from '../models';
+import { spendByDay } from '../services/metaInsightsService';
 import type { AuthenticatedRequest } from '../types';
 import { recomputeForDate } from '../services/roasService';
 import { markDatesDirty } from '../db/aggregatesDirty';
@@ -213,25 +213,15 @@ router.get('/daily-ad-spend', requireAdmin, async (_req: AuthenticatedRequest, r
       return d !== 0 ? d : new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
     });
 
-    // Older CSV uploads were saved in MetaAdPerformance before the dedicated
-    // dailyAmountSpent field existed. Reconstruct their CSV total by date so
-    // the new column is immediately useful without overwriting manual amounts.
+    // The Meta spend column: a row's own dailyAmountSpent when set (CSV imports, the hourly
+    // Meta sync), else that day's spend from Meta's daily campaign insights.
     const dateKeys = entries.map(entry => new Date(entry.date).toISOString().slice(0, 10));
-    const csvSpendByDate = new Map<string, number>();
-    if (dateKeys.length > 0) {
-      const levelTotals = await MetaAdPerformance.aggregate([
-        { $match: { date: { $in: dateKeys } } },
-        { $group: { _id: { date: '$date', level: '$level' }, total: { $sum: '$spend' } } },
-      ]);
-
-      for (const row of levelTotals) {
-        const dateKey = String(row._id.date);
-        const total = Number(row.total) || 0;
-        // Campaign/ad-set/ad exports can all describe the same daily spend.
-        // Use the largest level total rather than adding report levels together.
-        csvSpendByDate.set(dateKey, Math.max(csvSpendByDate.get(dateKey) || 0, total));
-      }
-    }
+    const metaSpendByDate = dateKeys.length > 0
+      ? await spendByDay(
+          dateKeys.reduce((a, b) => (a < b ? a : b)),
+          dateKeys.reduce((a, b) => (a > b ? a : b))
+        )
+      : new Map<string, number>();
 
     res.json({
       success: true,
@@ -240,7 +230,7 @@ router.get('/daily-ad-spend', requireAdmin, async (_req: AuthenticatedRequest, r
         date: entry.date,
         amount: entry.amount,
         dailyAmountSpent: entry.dailyAmountSpent ?? (
-          csvSpendByDate.get(new Date(entry.date).toISOString().slice(0, 10)) ?? null
+          metaSpendByDate.get(new Date(entry.date).toISOString().slice(0, 10)) ?? null
         ),
         notes: entry.notes,
         createdAt: entry.createdAt,

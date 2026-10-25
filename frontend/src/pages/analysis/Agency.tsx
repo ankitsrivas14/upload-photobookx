@@ -395,7 +395,7 @@ export function Agency() {
         <div>
           <h1 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 600, color: '#1e293b' }}>Agency</h1>
           <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.8rem', color: '#94a3b8' }}>
-            Every campaign the agency runs, with its daily history. Data comes from the campaign CSVs you sync on the <strong>Ads Analysis</strong> page.
+            Every campaign the agency runs, with its daily history. Data comes from Meta's daily campaign figures, synced every hour.
             {month
               ? <> Showing <strong>{monthLabel(month)}</strong> — every number below counts that month only.</>
               : <> Showing <strong>all time</strong>.</>}
@@ -527,7 +527,7 @@ export function Agency() {
           <div style={{ ...card, padding: '2.5rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.85rem' }}>
             {month
               ? `No agency campaigns ran in ${monthLabel(month)}.`
-              : 'No agency campaigns found. Sync a campaigns CSV on the Ads Analysis page, and check your prefixes above.'}
+              : 'No agency campaigns found. Check your prefixes above.'}
           </div>
         ) : (
           campaigns.map((c) => <CampaignCard key={c.name} c={c} month={month} />)
