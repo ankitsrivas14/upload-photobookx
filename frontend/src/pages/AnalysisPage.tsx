@@ -98,16 +98,16 @@ export function AnalysisPage() {
             <main className={styles['dashboard-main']}>
                 <div className={styles['analysis-nav']}>
                     <Link
-                        to="/admin/analysis/ads"
-                        className={`${styles['analysis-nav-item']} ${isAds ? styles.active : ''}`}
-                    >
-                        Ads Analysis
-                    </Link>
-                    <Link
                         to="/admin/analysis/claude"
                         className={`${styles['analysis-nav-item']} ${isClaude ? styles.active : ''}`}
                     >
                         Claude Analysis
+                    </Link>
+                    <Link
+                        to="/admin/analysis/ads"
+                        className={`${styles['analysis-nav-item']} ${isAds ? styles.active : ''}`}
+                    >
+                        Ads Analysis
                     </Link>
                     <Link
                         to="/admin/analysis/failed-orders"
