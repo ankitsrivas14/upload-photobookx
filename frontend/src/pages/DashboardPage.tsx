@@ -11,15 +11,33 @@ import {
   Tooltip,
   ResponsiveContainer,
   CartesianGrid,
-  Legend,
   ReferenceLine,
-  PieChart,
-  Pie,
 } from 'recharts';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
 import type { AdminUser } from '../services/api';
 import type { SalesPageProps } from './SalesPage';
+import {
+  Amount,
+  Button,
+  Card,
+  DataList,
+  DeliveryBadge,
+  Dialog,
+  Drawer,
+  EmptyState,
+  Heatmap,
+  Menu,
+  PageHeader,
+  Select,
+  Skeleton,
+  StatCard,
+  StatStrip,
+} from '../components/ui/pbx';
+import { formatINR } from '../components/ui/format';
+import type { HeatmapDay } from '../components/ui/pbx';
+import { AXIS_TICK, CURSOR_FILL, REF_LABEL, TOOLTIP_ITEM, TOOLTIP_LABEL, TOOLTIP_STYLE } from './dashboard/chartStyles';
+import { ShippingChart } from './dashboard/ShippingChart';
 import styles from './DashboardPage.module.css';
 
 // The orders modal is heavy (the whole Sales page); load it only when the modal first opens.
@@ -47,6 +65,25 @@ function orderStatsRange(): { start: string; end: string } {
   return { start: thirtyDaysAgo < '2026-01-28' ? '2026-01-28' : thirtyDaysAgo, end };
 }
 
+/** Delivery-status fills for the order-distribution bars: green delivered, orange failed, greys in between. */
+const SHARE_COLORS: Record<string, string> = {
+  Delivered: 'var(--positive-solid)',
+  'Out for Delivery': 'var(--ink-subtle)',
+  'Attempted Delivery': 'var(--chart-amber)',
+  'In Transit': 'var(--chart-bar)',
+  Confirmed: 'var(--tile-pending)',
+  Failed: 'var(--negative-solid)',
+};
+
+
+/** A short dashed line that keys a footer figure to its reference line in the chart. */
+function LineSwatch({ color }: { color: string }) {
+  return (
+    <svg width="14" height="6" aria-hidden="true">
+      <line x1="0" y1="3" x2="14" y2="3" stroke={color} strokeWidth={1.5} strokeDasharray="4 3" />
+    </svg>
+  );
+}
 
 export function DashboardPage() {
   const navigate = useNavigate();
@@ -73,8 +110,7 @@ export function DashboardPage() {
     loading: boolean;
     orders: Array<{ orderNumber: string; amount: number; deliveryStatus: string; trackingUrl: string | null }>;
   }>({ open: false, date: '', loading: false, orders: [] });
-  // Which drawer row's 3-dot menu is open, and which order is being updated
-  const [drawerMenuOrder, setDrawerMenuOrder] = useState<string | null>(null);
+  // Which drawer order is being marked delivered/failed
   const [markingOrder, setMarkingOrder] = useState<string | null>(null);
   // Orders per month (prepaid + COD), oldest first — for the bar chart
   const [monthlyOrderCounts, setMonthlyOrderCounts] = useState<Array<{ month: string; orders: number }>>([]);
@@ -104,8 +140,6 @@ export function DashboardPage() {
   // Sales Modal State
   const [salesModalOpen, setSalesModalOpen] = useState(false);
   const [salesModalFilter, setSalesModalFilter] = useState<SalesPageProps['initialFilter']>();
-
-  const [tooltip, setTooltip] = useState<{ dateLabel: string; pnl: number | null; x: number; y: number } | null>(null);
 
   // Shipping chart controls
   const [shippingGranularity, setShippingGranularity] = useState<'day' | 'week' | 'month'>('day');
@@ -365,7 +399,6 @@ export function DashboardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedYear]);
 
-  const weekLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S']; // Monday to Sunday
   const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
   // A grey bar = incomplete day (has orders not yet delivered/failed). Clicking one
@@ -376,7 +409,6 @@ export function DashboardPage() {
   const openIncompleteDrawer = async (entry: any) => {
     const e = entry?.payload ?? entry;
     if (!isGreyDay(e) || !e.dateKey) return;
-    setDrawerMenuOrder(null);
     setPnlDrawer({ open: true, date: e.dateKey, loading: true, orders: [] });
     try {
       const res = await api.getIncompleteDayOrders(e.dateKey);
@@ -388,7 +420,6 @@ export function DashboardPage() {
   };
 
   const markDrawerOrder = async (orderNumber: string, status: 'Delivered' | 'Failed') => {
-    setDrawerMenuOrder(null);
     setMarkingOrder(orderNumber);
     const toastId = toast.loading(`Marking ${orderNumber} as ${status}…`);
     try {
@@ -412,32 +443,11 @@ export function DashboardPage() {
     }
   };
 
-  const getPnlForDateKey = (dateKey: string): number | null => {
-    const val = heatmapByDate[dateKey];
-    return val !== undefined ? val : null;
-  };
-
-  const getCellColor = (pnl: number | null): string => {
-    if (pnl === null) return 'var(--tile-empty)';
-    if (pnl > 0) return 'var(--tile-profit)';
-    if (pnl < 0) return 'var(--tile-loss)';
-    return 'var(--tile-zero)';
-  };
-
-  const getCellIntensity = (pnl: number | null): number => {
-    if (pnl === null || pnl === 0) return 0;
-    const abs = Math.abs(pnl);
-    if (abs >= 5000) return 4;
-    if (abs >= 2000) return 3;
-    if (abs >= 500) return 2;
-    if (abs >= 100) return 1;
-    return 0;
-  };
-
   // Orders-per-month bar chart data (oldest → newest)
   const monthLabel = (ym: string) => {
     const [y, mo] = ym.split('-').map(Number);
-    return new Date(y, mo - 1, 1).toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+    // "Dec ’25", so a month never reads like a date
+    return `${new Date(y, mo - 1, 1).toLocaleDateString('en-US', { month: 'short' })} ’${String(y).slice(2)}`;
   };
   const ordinal = (n: number) => {
     const s = ['th', 'st', 'nd', 'rd'];
@@ -576,25 +586,9 @@ export function DashboardPage() {
     };
   })();
 
-
-
-  const handleTileHover = (e: React.MouseEvent, dateKey: string | null, dateLabel: string, pnl: number | null) => {
-    if (!dateKey) {
-      setTooltip(null);
-      return;
-    }
-    const rect = (e.target as HTMLElement).getBoundingClientRect();
-    setTooltip({
-      dateLabel,
-      pnl,
-      x: rect.left + rect.width / 2,
-      y: rect.top,
-    });
-  };
-
   const handleLegendClick = (data: any) => {
     // Determine filter type and value based on clicked item
-    // Data can be from Legend (has value or id) or Pie Sector (has name)
+    // Data comes from an order-distribution legend button ({ name })
     const name = data.value || data.name || data.id;
 
     if (!name) return;
@@ -615,1375 +609,538 @@ export function DashboardPage() {
 
   if (isLoading) {
     return (
-      <div className={styles['dashboard-loading']}>
-        <div className={styles.spinner}></div>
+      <div className={styles.page} aria-busy="true">
+        <Skeleton height={26} width={200} />
+        <Skeleton height={64} />
+        <Skeleton height={240} />
       </div>
     );
   }
 
+  // ── Figures for the strip ────────────────────────────────────────────────
+  const todayKey = new Date().toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
+  const currentMonth = todayKey.slice(0, 7);
+  const ordersNow = monthlyOrderChartData.find((m) => m.month === currentMonth);
+  const revenueNow = monthlyRevenueChartData.find((m) => m.month === currentMonth);
+  const vsPace = (value: number | undefined, average: number) =>
+    value !== undefined && average > 0 ? ((value - average) / average) * 100 : null;
+  const ordersVsPace = vsPace(ordersNow?.orders, orderPace.average);
+  const revenueVsPace = vsPace(revenueNow?.revenue, revenuePace.average);
+  const mean = (values: number[]) => (values.length ? values.reduce((s, v) => s + v, 0) / values.length : null);
+  // ROAS figures count only completed days (every order delivered or failed), as before
+  const completedRoasDays = roasChartData.filter((d) => completedDatesDb.has(d.dateKey));
+  const avgRoas = mean(completedRoasDays.map((d) => d.roas).filter((v): v is number => v !== null && v > 0));
+  const completedRevenue = completedRoasDays.reduce((s, d) => s + d.revenue, 0);
+  const completedAdSpend = completedRoasDays.reduce((s, d) => s + d.adSpend, 0);
+  const weekdayName = new Date().toLocaleDateString('en-IN', { weekday: 'long' });
+  const weekdayRoas = mean(
+    roasChartData
+      .filter((d) => new Date(d.dateKey).getDay() === new Date().getDay())
+      .map((d) => d.roas)
+      .filter((v): v is number => v !== null && v > 0),
+  );
+  const bookedPnl = profitChartData.reduce((s, d) => s + (d.bookedProfit ?? 0), 0);
+  const pendingPnl = profitChartData.reduce((s, d) => s + (d.unrealizedProfit ?? 0), 0);
+  const completedDays = profitChartData.filter((d) => d.bookedProfit !== null).length;
+  const greyDays = profitChartData.filter(isGreyDay).length;
+  const profitMonths = monthlyProfitData.filter((d): d is { month: string; profit: number } => d.profit !== null);
+  const bestMonth = profitMonths.reduce<(typeof profitMonths)[number] | null>((a, b) => (!a || b.profit > a.profit ? b : a), null);
+  const worstMonth = profitMonths.reduce<(typeof profitMonths)[number] | null>((a, b) => (!a || b.profit < a.profit ? b : a), null);
+  const yearProfit = profitMonths.reduce((s, d) => s + d.profit, 0);
+  const currentMonthShort = new Date().toLocaleDateString('en-IN', { month: 'short' });
+  const finalOrders = breakevenMetrics.deliveredCount + breakevenMetrics.failedCount;
+  const failRate = finalOrders > 0 ? (breakevenMetrics.failedCount / finalOrders) * 100 : null;
+  const roasRangeLabel =
+    roasStartDate && roasEndDate
+      ? `${new Date(roasStartDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} – ${new Date(roasEndDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`
+      : `last ${roasDays} days`;
+  const selectedMonthLabel = new Date(selectedYear, selectedMonth, 1).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' });
+
+  // ── Heatmap: daily P/L keyed by IST date; a day stays grey until all its orders are final ──
+  const heatData: Record<string, HeatmapDay> = {};
+  for (const rec of yearlyPnlRecords) {
+    heatData[rec.dateKey] = { value: heatmapByDate[rec.dateKey] ?? null, pending: !rec.isCompleted };
+  }
+
+  // ── Order distribution as stacked shares ────────────────────────────────
+  const shareRows = [
+    {
+      label: 'Payment method',
+      total: `${pieChartsData.totalOrders.toLocaleString('en-IN')} orders`,
+      segs: [
+        { name: 'Prepaid', value: pieChartsData.paymentMethod[0].value, color: 'var(--chart-line)' },
+        { name: 'COD', value: pieChartsData.paymentMethod[1].value, color: 'var(--chart-bar)' },
+      ],
+    },
+    {
+      label: 'Delivery status',
+      total: `${pieChartsData.deliveryStatus.reduce((s, d) => s + d.value, 0).toLocaleString('en-IN')} orders`,
+      segs: pieChartsData.deliveryStatus.map((d) => ({ name: d.name, value: d.value, color: SHARE_COLORS[d.name] ?? 'var(--chart-bar)' })),
+    },
+    {
+      label: 'COD delivery status',
+      total: `${pieChartsData.codTotal.toLocaleString('en-IN')} final COD orders`,
+      segs: pieChartsData.codStatus.map((d) => ({ name: d.name, value: d.value, color: SHARE_COLORS[d.name] ?? 'var(--chart-bar)' })),
+    },
+  ];
+
+  const lastOrdersIndex = monthlyOrderChartData.length - 1;
+  const lastRevenueIndex = monthlyRevenueChartData.length - 1;
+
   return (
-    <>
-      <header className={styles.header}>
-        <h1 className={styles.title}>Dashboard</h1>
-        <div className={styles['year-select']}>
-          <label htmlFor="year">Year:</label>
-          <select
-            id="year"
-            value={selectedYear}
+    <div className={styles.page}>
+      <PageHeader
+        title="Dashboard"
+        description={`${new Date().toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })} · all days in IST`}
+        actions={
+          <Select
+            label="Year"
+            inlineLabel
+            size="sm"
+            value={String(selectedYear)}
             onChange={(e) => setSelectedYear(Number(e.target.value))}
-            className={styles.select}
-          >
-            {[new Date().getFullYear(), new Date().getFullYear() - 1, new Date().getFullYear() - 2].map((y) => (
-              <option key={y} value={y}>
-                {y}
-              </option>
-            ))}
-          </select>
-        </div>
-      </header>
+            options={[0, 1, 2].map((back) => {
+              const y = new Date().getFullYear() - back;
+              return { value: String(y), label: String(y) };
+            })}
+          />
+        }
+      />
 
+      <StatStrip>
+        <StatCard
+          label="Orders this month"
+          value={ordersNow ? ordersNow.orders.toLocaleString('en-IN') : '—'}
+          spark={monthlyOrderChartData.map((m) => m.orders)}
+          trend={ordersVsPace !== null ? { label: `${Math.abs(ordersVsPace).toFixed(1)}%`, direction: ordersVsPace >= 0 ? 'up' : 'down', good: ordersVsPace >= 0 } : undefined}
+          sub={orderPace.day > 0 ? `vs avg ${orderPace.average.toLocaleString('en-IN')} by the ${ordinal(orderPace.day)}` : undefined}
+        />
+        <StatCard
+          label="Revenue this month"
+          value={revenueNow ? formatINR(revenueNow.revenue) : '—'}
+          spark={monthlyRevenueChartData.map((m) => m.revenue)}
+          trend={revenueVsPace !== null ? { label: `${Math.abs(revenueVsPace).toFixed(1)}%`, direction: revenueVsPace >= 0 ? 'up' : 'down', good: revenueVsPace >= 0 } : undefined}
+          sub={revenuePace.day > 0 ? `vs avg ${formatINR(revenuePace.average)} by the ${ordinal(revenuePace.day)}` : undefined}
+        />
+        <StatCard
+          label={`Booked profit · ${selectedMonthLabel}`}
+          value={formatINR(bookedPnl, { signed: true })}
+          tone={bookedPnl > 0 ? 'positive' : bookedPnl < 0 ? 'negative' : 'neutral'}
+          spark={profitChartData.filter((d) => d.displayProfit !== null).map((d) => d.displayProfit as number)}
+          sub={`completed days · ${formatINR(pendingPnl, { signed: true })} not final yet`}
+        />
+        <StatCard
+          label={`Avg ROAS · ${roasRangeLabel}`}
+          value={avgRoas !== null ? `${avgRoas.toFixed(2)}×` : '—'}
+          tone={avgRoas !== null && breakevenMetrics.breakevenROAS > 0 && avgRoas < breakevenMetrics.breakevenROAS ? 'negative' : 'neutral'}
+          spark={roasChartData.filter((d) => d.roas !== null).map((d) => d.roas as number)}
+          sub={`completed days${breakevenMetrics.breakevenROAS > 0 ? ` · breakeven ${breakevenMetrics.breakevenROAS.toFixed(2)}×` : ''}`}
+        />
+        <StatCard
+          label={`Ad spend · ${roasRangeLabel}`}
+          value={formatINR(completedAdSpend)}
+          spark={roasChartData.map((d) => d.adSpend || 0)}
+          sub={`completed days · revenue ${formatINR(completedRevenue, { compact: true })}`}
+        />
+        <StatCard
+          label="Failed orders"
+          value={failRate !== null ? `${failRate.toFixed(1)}%` : '—'}
+          tone={failRate !== null && failRate > 15 ? 'negative' : 'neutral'}
+          sub={finalOrders > 0 ? `${breakevenMetrics.failedCount.toLocaleString('en-IN')} of ${finalOrders.toLocaleString('en-IN')} final` : undefined}
+        />
+      </StatStrip>
 
-
-      <section className={styles.section}>
-        <div className={styles['roas-header']}>
-          <div>
-            <h2 className={styles['section-title']}>
-              ROAS —{' '}
-              {roasStartDate && roasEndDate
-                ? `${new Date(roasStartDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} – ${new Date(roasEndDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`
-                : `Last ${roasDays} Days`}
-            </h2>
-            <p className={styles['section-desc']}>
-              Return on Ad Spend (ROAS) = Total Revenue ÷ Ad Spend for each day. Higher is better.
-            </p>
-          </div>
-          <div className={styles['roas-controls']}>
-            <div className={styles['roas-control-group']}>
-              <label className={styles['roas-control-label']}>Last N days</label>
-              <input
-                ref={roasDaysRef}
-                type="number"
-                min={1}
-                max={365}
-                className={styles['roas-days-input']}
-                defaultValue={30}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    const days = Math.max(1, Number(roasDaysRef.current?.value) || 30);
+      <div className={styles.row}>
+        <Card
+          className={styles.wide}
+          title="Return on ad spend · daily"
+          eyebrow={roasRangeLabel}
+          footer={
+            <>
+              <span>{`${weekdayName} average ${weekdayRoas !== null ? `${weekdayRoas.toFixed(2)}×` : '—'}`}</span>
+              <span>ROAS = revenue ÷ ad spend, per day</span>
+            </>
+          }
+          actions={
+            <div className={styles.controls}>
+              <label className={styles.ctl}>
+                <span>Last</span>
+                <span className="pbx-input pbx-input--sm">
+                  <input
+                    ref={roasDaysRef}
+                    type="number"
+                    min={1}
+                    max={365}
+                    defaultValue={30}
+                    aria-label="Last N days"
+                    style={{ width: 44 }}
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Enter') return;
+                      const days = Math.max(1, Number(roasDaysRef.current?.value) || 30);
+                      setRoasDays(days);
+                      setRoasStartDate('');
+                      setRoasEndDate('');
+                      if (roasStartRef.current) roasStartRef.current.value = '';
+                      if (roasEndRef.current) roasEndRef.current.value = '';
+                      loadROAS(days, '', '');
+                    }}
+                  />
+                </span>
+                <span>days</span>
+              </label>
+              <span className={styles.or}>or</span>
+              <span className="pbx-input pbx-input--sm">
+                <input ref={roasStartRef} type="date" aria-label="From" defaultValue="" />
+              </span>
+              <span className="pbx-input pbx-input--sm">
+                <input ref={roasEndRef} type="date" aria-label="To" defaultValue="" />
+              </span>
+              <Button
+                size="sm"
+                onClick={() => {
+                  const start = roasStartRef.current?.value || '';
+                  const end = roasEndRef.current?.value || '';
+                  const days = Math.max(1, Number(roasDaysRef.current?.value) || 30);
+                  if (start && end) {
+                    setRoasStartDate(start);
+                    setRoasEndDate(end);
+                    loadROAS(days, start, end);
+                  } else {
                     setRoasDays(days);
+                    setRoasStartDate('');
+                    setRoasEndDate('');
+                    loadROAS(days, '', '');
+                  }
+                }}
+              >
+                Apply
+              </Button>
+              {(roasStartDate || roasEndDate) && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
                     setRoasStartDate('');
                     setRoasEndDate('');
                     if (roasStartRef.current) roasStartRef.current.value = '';
                     if (roasEndRef.current) roasEndRef.current.value = '';
-                    loadROAS(days, '', '');
-                  }
-                }}
-              />
-            </div>
-            <span className={styles['roas-divider']}>or</span>
-            <div className={styles['roas-control-group']}>
-              <label className={styles['roas-control-label']}>From</label>
-              <input
-                ref={roasStartRef}
-                type="date"
-                className={styles['roas-date-input']}
-                defaultValue=""
-              />
-            </div>
-            <div className={styles['roas-control-group']}>
-              <label className={styles['roas-control-label']}>To</label>
-              <input
-                ref={roasEndRef}
-                type="date"
-                className={styles['roas-date-input']}
-                defaultValue=""
-              />
-            </div>
-            <button
-              className={styles['roas-go-btn']}
-              onClick={() => {
-                const start = roasStartRef.current?.value || '';
-                const end = roasEndRef.current?.value || '';
-                const days = Math.max(1, Number(roasDaysRef.current?.value) || 30);
-                if (start && end) {
-                  setRoasStartDate(start);
-                  setRoasEndDate(end);
-                  loadROAS(days, start, end);
-                } else {
-                  setRoasDays(days);
-                  setRoasStartDate('');
-                  setRoasEndDate('');
-                  loadROAS(days, '', '');
-                }
-              }}
-            >
-              Go
-            </button>
-            {(roasStartDate || roasEndDate) && (
-              <button
-                className={styles['roas-clear-btn']}
-                onClick={() => {
-                  setRoasStartDate('');
-                  setRoasEndDate('');
-                  if (roasStartRef.current) roasStartRef.current.value = '';
-                  if (roasEndRef.current) roasEndRef.current.value = '';
-                  loadROAS(roasDays, '', '');
-                }}
-              >
-                Clear
-              </button>
-            )}
-          </div>
-        </div>
-        <div className={styles.chartWrap}>
-          {roasLoading ? (
-            <div className={styles['roas-skeleton']} />
-          ) : (
-          <ResponsiveContainer width="100%" height={280}>
-            <LineChart
-              data={roasChartData}
-              margin={{ top: 12, right: 12, left: 0, bottom: 8 }}
-            >
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
-              <XAxis
-                dataKey="date"
-                tick={{ fontSize: 11, fill: 'var(--chart-muted)' }}
-                tickLine={false}
-                axisLine={{ stroke: 'var(--chart-axis)' }}
-                interval="preserveStartEnd"
-                minTickGap={30}
-              />
-              <YAxis
-                tick={{ fontSize: 11, fill: 'var(--chart-muted)' }}
-                tickLine={false}
-                axisLine={false}
-                width={40}
-                tickFormatter={(v) => v.toFixed(1)}
-                domain={[0, 'auto']}
-              />
-              <Tooltip
-                contentStyle={{
-                  border: 'none',
-                  borderRadius: 8,
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
-                  padding: '10px 14px',
-                }}
-                labelStyle={{ color: 'var(--chart-muted)', fontWeight: 500, marginBottom: 4 }}
-                formatter={(value, name, props) => {
-                  if (name === 'ROAS') {
-                    const payload = props.payload;
-                    return [
-                      <>
-                        <div style={{ marginBottom: 4 }}>
-                          <strong>ROAS: {value !== null ? Number(value).toFixed(2) : 'N/A'}</strong>
-                        </div>
-                        <div style={{ fontSize: 11, color: 'var(--chart-muted)' }}>
-                          Revenue: ₹{payload.revenue?.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                        </div>
-                        <div style={{ fontSize: 11, color: 'var(--chart-muted)' }}>
-                          Ad Spend: ₹{payload.adSpend?.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                        </div>
-                      </>,
-                      ''
-                    ];
-                  }
-                  return [value, name];
-                }}
-              />
-              <Legend
-                wrapperStyle={{ paddingTop: 12 }}
-                iconType="line"
-                iconSize={10}
-                formatter={(value) => <span className={styles.chartLegendText}>{value}</span>}
-              />
-              <Line
-                type="monotone"
-                dataKey="roas"
-                name="ROAS"
-                stroke="#8b5cf6"
-                strokeWidth={2.5}
-                dot={(props: any) => {
-                  const { cx, cy, payload } = props;
-                  const date = new Date(payload.dateKey);
-                  const todayIdx = new Date().getDay();
-                  const isMatchingDay = date.getDay() === todayIdx;
-                  
-                  if (isMatchingDay) {
-                    return (
-                      <g key={payload.dateKey}>
-                        <circle cx={cx} cy={cy} r={5} fill="#8b5cf6" stroke="#fff" strokeWidth={2} />
-                        <text 
-                          x={cx} 
-                          y={cy - 12} 
-                          textAnchor="middle" 
-                          fontSize={10} 
-                          fontWeight="700" 
-                          fill="#7c3aed"
-                        >
-                          {payload.roas !== null ? payload.roas.toFixed(1) : ''}
-                        </text>
-                      </g>
-                    );
-                  }
-                  return null as any;
-                }}
-                activeDot={{ r: 6, strokeWidth: 0, fill: '#8b5cf6' }}
-                connectNulls
-              />
-              {breakevenMetrics.breakevenROAS > 0 && (
-                <ReferenceLine
-                  y={breakevenMetrics.breakevenROAS}
-                  stroke="#dc2626"
-                  strokeWidth={2}
-                  strokeDasharray="5 5"
-                  label={{
-                    value: `Breakeven: ${breakevenMetrics.breakevenROAS.toFixed(2)}`,
-                    position: 'insideTopRight',
-                    fill: '#dc2626',
-                    fontSize: 11,
-                    fontWeight: 600,
+                    loadROAS(roasDays, '', '');
                   }}
+                >
+                  Clear
+                </Button>
+              )}
+            </div>
+          }
+        >
+          {roasLoading ? (
+            <Skeleton height={220} />
+          ) : (
+            <ResponsiveContainer width="100%" height={220}>
+              <LineChart data={roasChartData} margin={{ top: 8, right: 16, left: -12, bottom: 0 }}>
+                <CartesianGrid vertical={false} stroke="var(--chart-grid)" />
+                <XAxis dataKey="date" tick={AXIS_TICK} tickLine={false} axisLine={{ stroke: 'var(--rule)' }} minTickGap={24} />
+                <YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} tickFormatter={(v: number) => `${v}×`} width={40} />
+                <Tooltip contentStyle={TOOLTIP_STYLE} labelStyle={TOOLTIP_LABEL} itemStyle={TOOLTIP_ITEM} formatter={(v) => [`${Number(v).toFixed(2)}×`, 'ROAS']} />
+                {breakevenMetrics.breakevenROAS > 0 && (
+                  <ReferenceLine
+                    y={breakevenMetrics.breakevenROAS}
+                    stroke="var(--negative-solid)"
+                    strokeDasharray="4 3"
+                    label={{ ...REF_LABEL, value: `breakeven ${breakevenMetrics.breakevenROAS.toFixed(2)}×`, position: 'insideTopRight' }}
+                  />
+                )}
+                <Line type="linear" dataKey="roas" stroke="var(--chart-line)" strokeWidth={1.5} dot={false} activeDot={{ r: 3, fill: 'var(--chart-highlight)', stroke: 'none' }} connectNulls />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+        </Card>
+
+        <Card
+          title="Breakeven"
+          eyebrow={`${breakevenMetrics.completedDaysCount} completed days in view`}
+          footer="Breakeven ROAS = avg revenue ÷ contribution margin, from completed days only"
+        >
+          <DataList
+            items={[
+              { label: 'Avg revenue per order', sub: 'includes ₹0 from failed orders', value: formatINR(breakevenMetrics.aov, { decimals: 2 }) },
+              { label: 'Avg COGS per order', sub: 'delivered: COGS · failed: NDR', value: formatINR(-breakevenMetrics.avgCOGS, { decimals: 2 }) },
+              { label: 'Avg shipping per order', value: formatINR(-breakevenMetrics.avgShipping, { decimals: 2 }) },
+              { label: 'Contribution margin', sub: 'revenue − COGS − shipping', value: formatINR(breakevenMetrics.contributionMargin, { decimals: 2 }) },
+            ]}
+            total={{ label: 'Breakeven ROAS', value: breakevenMetrics.breakevenROAS > 0 ? `${breakevenMetrics.breakevenROAS.toFixed(2)}×` : '—' }}
+          />
+        </Card>
+      </div>
+
+      <div className={styles.row}>
+        <Card
+          title="Orders per month"
+          eyebrow={ordersNow ? `${currentMonthShort} to date ${ordersNow.orders.toLocaleString('en-IN')}` : undefined}
+          footer={
+            <>
+              <span className={styles.key}><LineSwatch color="var(--ink-subtle)" />{`avg ${Math.round(avgMonthlyOrders).toLocaleString('en-IN')} a month`}</span>
+              {orderPace.day > 0 && (
+                <span className={styles.key}><LineSwatch color="var(--chart-amber)" />{`avg ${orderPace.average.toLocaleString('en-IN')} by the ${ordinal(orderPace.day)}`}</span>
+              )}
+            </>
+          }
+        >
+          <ResponsiveContainer width="100%" height={170}>
+            <BarChart data={monthlyOrderChartData} margin={{ top: 8, right: 4, left: -16, bottom: 0 }}>
+              <CartesianGrid vertical={false} stroke="var(--chart-grid)" />
+              <XAxis dataKey="label" tick={AXIS_TICK} tickLine={false} axisLine={{ stroke: 'var(--rule)' }} />
+              <YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} width={40} />
+              <Tooltip cursor={CURSOR_FILL} contentStyle={TOOLTIP_STYLE} labelStyle={TOOLTIP_LABEL} itemStyle={TOOLTIP_ITEM} formatter={(v) => [Number(v).toLocaleString('en-IN'), 'Orders']} />
+              {avgMonthlyOrders > 0 && (
+                <ReferenceLine
+                  y={avgMonthlyOrders}
+                  stroke="var(--ink-subtle)"
+                  strokeDasharray="4 3"
                 />
               )}
-            </LineChart>
-          </ResponsiveContainer>
-          )}
-        </div>
-        <div className={styles.chartStats}>
-          <div className={styles.chartStatBlock}>
-            <span className={styles.chartStatLabel}>Completed Days Average ROAS</span>
-            <span className={styles.chartStatValue} style={{ fontSize: '1.5rem', fontWeight: 600 }}>
-              {(() => {
-                const validRoas = roasChartData.filter(d => completedDatesDb.has(d.dateKey) && d.roas !== null && d.roas > 0);
-                if (validRoas.length === 0) return 'N/A';
-                const avgRoas = validRoas.reduce((sum, d) => sum + (d.roas || 0), 0) / validRoas.length;
-                return avgRoas.toFixed(2);
-              })()}
-            </span>
-          </div>
-          <div className={styles.chartStatBlock}>
-            <span className={styles.chartStatLabel}>Breakeven ROAS</span>
-            <span
-              className={styles.chartStatValue}
-              style={{
-                fontSize: '1.5rem',
-                fontWeight: 600,
-                color: breakevenMetrics.breakevenROAS > 0 ? '#dc2626' : 'inherit'
-              }}
-              title={`AOV: ₹${breakevenMetrics.aov.toFixed(0)} | COGS: ₹${breakevenMetrics.avgCOGS.toFixed(0)} | Shipping: ₹${breakevenMetrics.avgShipping.toFixed(0)}`}
-            >
-              {breakevenMetrics.breakevenROAS > 0 ? breakevenMetrics.breakevenROAS.toFixed(2) : 'N/A'}
-            </span>
-            <span style={{ fontSize: '0.7rem', color: 'var(--chart-muted)', marginTop: '4px', display: 'block' }}>
-              ROAS must be above this to profit
-            </span>
-          </div>
-          <div className={styles.chartStatBlock}>
-            <span className={styles.chartStatLabel}>{new Date().toLocaleDateString('en-IN', { weekday: 'long' })} Average ROAS</span>
-            <span className={styles.chartStatValue} style={{ fontSize: '1.5rem', fontWeight: 600, color: '#7c3aed' }}>
-              {(() => {
-                const todayIdx = new Date().getDay();
-                const matchingDays = roasChartData.filter(d => {
-                  const date = new Date(d.dateKey);
-                  return date.getDay() === todayIdx && d.roas !== null && d.roas > 0;
-                });
-                if (matchingDays.length === 0) return 'N/A';
-                const avgRoas = matchingDays.reduce((sum, d) => sum + (d.roas || 0), 0) / matchingDays.length;
-                return avgRoas.toFixed(2);
-              })()}
-            </span>
-          </div>
-          <div className={styles.chartStatBlock}>
-            <span className={styles.chartStatLabel}>Completed Total Revenue</span>
-            <span className={styles.chartStatValue} style={{ fontSize: '1.5rem', fontWeight: 600 }}>
-              ₹{roasChartData.filter(d => completedDatesDb.has(d.dateKey)).reduce((sum, d) => sum + d.revenue, 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-            </span>
-          </div>
-          <div className={styles.chartStatBlock}>
-            <span className={styles.chartStatLabel}>Completed Total Ad Spend</span>
-            <span className={styles.chartStatValue} style={{ fontSize: '1.5rem', fontWeight: 600 }}>
-              ₹{roasChartData.filter(d => completedDatesDb.has(d.dateKey)).reduce((sum, d) => sum + d.adSpend, 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-            </span>
-          </div>
-        </div>
-
-        {/* Breakeven Analysis */}
-        <div style={{
-          marginTop: '1.5rem',
-          padding: '1rem',
-          background: 'var(--tile-empty)',
-          borderRadius: '8px',
-          fontSize: '0.875rem',
-          color: 'var(--chart-muted)'
-        }}>
-          <div style={{ fontWeight: 600, marginBottom: '0.5rem', color: '#1f2937' }}>
-            Breakeven Analysis (based on {breakevenMetrics.completedDaysCount} completed days in view):
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem' }}>
-            <div>
-              <strong>Avg Revenue per Order:</strong> ₹{breakevenMetrics.aov.toFixed(2)}
-              <div style={{ fontSize: '0.75rem', color: 'var(--chart-muted)' }}>
-                (Includes ₹0 from failed orders)
-              </div>
-            </div>
-            <div>
-              <strong>Avg COGS per Order:</strong> ₹{breakevenMetrics.avgCOGS.toFixed(2)}
-              <div style={{ fontSize: '0.75rem', color: 'var(--chart-muted)' }}>
-                (Delivered: COGS, Failed: NDR)
-              </div>
-            </div>
-            <div>
-              <strong>Avg Shipping per Order:</strong> ₹{breakevenMetrics.avgShipping.toFixed(2)}
-            </div>
-            <div>
-              <strong>Contribution Margin:</strong> ₹{breakevenMetrics.contributionMargin.toFixed(2)}
-              <div style={{ fontSize: '0.75rem', color: 'var(--chart-muted)' }}>
-                (Revenue - COGS - Shipping)
-              </div>
-            </div>
-          </div>
-          <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', fontStyle: 'italic' }}>
-            Formula: Breakeven ROAS = Avg Revenue ÷ Contribution Margin. Based on fully completed days to avoid bias from pending orders.
-          </div>
-        </div>
-      </section>
-
-      <section className={styles.section}>
-        <div>
-          <h2 className={styles['section-title']}>Orders per Month</h2>
-          <p className={styles['section-desc']}>
-            Total orders placed each month (prepaid + COD). Each bar is a month.
-          </p>
-        </div>
-        <div className={styles.chartWrap}>
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart
-              data={monthlyOrderChartData}
-              margin={{ top: 12, right: 12, left: 0, bottom: 8 }}
-              barCategoryGap="6%"
-            >
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
-              <XAxis
-                dataKey="label"
-                tick={{ fontSize: 11, fill: 'var(--chart-muted)' }}
-                tickLine={false}
-                axisLine={{ stroke: 'var(--chart-axis)' }}
-              />
-              <YAxis
-                tick={{ fontSize: 11, fill: 'var(--chart-muted)' }}
-                tickLine={false}
-                axisLine={false}
-                width={44}
-                allowDecimals={false}
-              />
-              <Tooltip
-                cursor={{ fill: 'var(--chart-grid)', opacity: 0.35 }}
-                contentStyle={{
-                  border: 'none',
-                  borderRadius: 8,
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
-                  padding: '10px 14px',
-                }}
-                labelStyle={{ color: 'var(--chart-muted)', fontWeight: 500, marginBottom: 4 }}
-                formatter={(value) => [`${Number(value).toLocaleString('en-IN')} orders`, 'Orders']}
-              />
-              <Bar dataKey="orders" name="Orders" fill="#6366f1" radius={[3, 3, 0, 0]} />
-              <ReferenceLine
-                y={avgMonthlyOrders}
-                stroke="#4f46e5"
-                strokeDasharray="4 4"
-                strokeWidth={1.5}
-                label={{
-                  value: `Avg ${Math.round(avgMonthlyOrders).toLocaleString('en-IN')}`,
-                  position: 'insideTopRight',
-                  fill: '#4f46e5',
-                  fontSize: 11,
-                  fontWeight: 600,
-                }}
-              />
               {orderPace.day > 0 && (
                 <ReferenceLine
                   y={orderPace.average}
-                  stroke="#f59e0b"
-                  strokeDasharray="4 4"
-                  strokeWidth={1.5}
-                  label={{
-                    value: `By ${ordinal(orderPace.day)}: avg ${orderPace.average.toLocaleString('en-IN')}`,
-                    position: 'insideBottomRight',
-                    fill: '#d97706',
-                    fontSize: 11,
-                    fontWeight: 600,
-                  }}
+                  stroke="var(--chart-amber)"
+                  strokeDasharray="4 3"
                 />
               )}
+              <Bar dataKey="orders" isAnimationActive={false}>
+                {monthlyOrderChartData.map((d, i) => (
+                  <Cell key={d.month} fill={i === lastOrdersIndex ? 'var(--chart-highlight)' : 'var(--chart-bar)'} />
+                ))}
+              </Bar>
             </BarChart>
           </ResponsiveContainer>
-        </div>
-      </section>
+        </Card>
 
-      <section className={styles.section}>
-        <div>
-          <h2 className={styles['section-title']}>Revenue per Month</h2>
-          <p className={styles['section-desc']}>
-            Gross order value each month (prepaid + COD, excludes cancelled). Each bar is a month.
-          </p>
-        </div>
-        <div className={styles.chartWrap}>
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart
-              data={monthlyRevenueChartData}
-              margin={{ top: 12, right: 12, left: 0, bottom: 8 }}
-              barCategoryGap="6%"
-            >
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
-              <XAxis
-                dataKey="label"
-                tick={{ fontSize: 11, fill: 'var(--chart-muted)' }}
-                tickLine={false}
-                axisLine={{ stroke: 'var(--chart-axis)' }}
-              />
-              <YAxis
-                tick={{ fontSize: 11, fill: 'var(--chart-muted)' }}
-                tickLine={false}
-                axisLine={false}
-                width={52}
-                tickFormatter={(v) => (v >= 1000 ? `₹${(v / 1000).toFixed(0)}k` : `₹${v}`)}
-              />
-              <Tooltip
-                cursor={{ fill: 'var(--chart-grid)', opacity: 0.35 }}
-                contentStyle={{
-                  border: 'none',
-                  borderRadius: 8,
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
-                  padding: '10px 14px',
-                }}
-                labelStyle={{ color: 'var(--chart-muted)', fontWeight: 500, marginBottom: 4 }}
-                formatter={(value) => [`₹${Number(value).toLocaleString('en-IN')}`, 'Revenue']}
-              />
-              <Bar dataKey="revenue" name="Revenue" fill="#10b981" radius={[3, 3, 0, 0]} />
-              <ReferenceLine
-                y={avgMonthlyRevenue}
-                stroke="#059669"
-                strokeDasharray="4 4"
-                strokeWidth={1.5}
-                label={{
-                  value: `Avg ₹${Math.round(avgMonthlyRevenue).toLocaleString('en-IN')}`,
-                  position: 'insideTopRight',
-                  fill: '#059669',
-                  fontSize: 11,
-                  fontWeight: 600,
-                }}
-              />
+        <Card
+          title="Revenue per month"
+          eyebrow={revenueNow ? `${currentMonthShort} to date ${formatINR(revenueNow.revenue, { compact: true })}` : undefined}
+          footer={
+            <>
+              <span className={styles.key}><LineSwatch color="var(--ink-subtle)" />{`avg ${formatINR(avgMonthlyRevenue, { compact: true })} a month`}</span>
+              {revenuePace.day > 0 && (
+                <span className={styles.key}><LineSwatch color="var(--chart-amber)" />{`avg ${formatINR(revenuePace.average, { compact: true })} by the ${ordinal(revenuePace.day)}`}</span>
+              )}
+            </>
+          }
+        >
+          <ResponsiveContainer width="100%" height={170}>
+            <BarChart data={monthlyRevenueChartData} margin={{ top: 8, right: 4, left: -8, bottom: 0 }}>
+              <CartesianGrid vertical={false} stroke="var(--chart-grid)" />
+              <XAxis dataKey="label" tick={AXIS_TICK} tickLine={false} axisLine={{ stroke: 'var(--rule)' }} />
+              <YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} width={48} tickFormatter={(v: number) => formatINR(v, { compact: true })} />
+              <Tooltip cursor={CURSOR_FILL} contentStyle={TOOLTIP_STYLE} labelStyle={TOOLTIP_LABEL} itemStyle={TOOLTIP_ITEM} formatter={(v) => [formatINR(Number(v)), 'Revenue']} />
+              {avgMonthlyRevenue > 0 && (
+                <ReferenceLine
+                  y={avgMonthlyRevenue}
+                  stroke="var(--ink-subtle)"
+                  strokeDasharray="4 3"
+                />
+              )}
               {revenuePace.day > 0 && (
                 <ReferenceLine
                   y={revenuePace.average}
-                  stroke="#f59e0b"
-                  strokeDasharray="4 4"
-                  strokeWidth={1.5}
-                  label={{
-                    value: `By ${ordinal(revenuePace.day)}: avg ₹${revenuePace.average.toLocaleString('en-IN')}`,
-                    position: 'insideBottomRight',
-                    fill: '#d97706',
-                    fontSize: 11,
-                    fontWeight: 600,
-                  }}
+                  stroke="var(--chart-amber)"
+                  strokeDasharray="4 3"
                 />
               )}
+              <Bar dataKey="revenue" isAnimationActive={false}>
+                {monthlyRevenueChartData.map((d, i) => (
+                  <Cell key={d.month} fill={i === lastRevenueIndex ? 'var(--chart-highlight)' : 'var(--chart-bar)'} />
+                ))}
+              </Bar>
             </BarChart>
           </ResponsiveContainer>
-        </div>
-      </section>
+        </Card>
 
-      <section className={styles.section}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-          <div>
-            <h2 className={styles['section-title']} style={{ marginBottom: '0.25rem', marginTop: 0 }}>
-              Profit & Loss — {monthNames[selectedMonth]} {selectedYear}
-            </h2>
-            <p className={styles['section-desc']} style={{ marginBottom: 0 }}>
-              Shows booked profit for completed days only (all orders delivered/failed). Incomplete days are left empty. Green = profit, Red = loss.
-            </p>
-          </div>
-          <select
-            value={selectedMonth}
-            onChange={(e) => setSelectedMonth(Number(e.target.value))}
-            className={styles.select}
-            style={{ width: 'auto' }}
-          >
-            {monthNames.map((month, index) => (
-              <option key={index} value={index}>
-                {month}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className={styles.chartWrap}>
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart
-              data={profitChartData}
-              margin={{ top: 12, right: 12, left: 0, bottom: 8 }}
-              barGap={1}
-              barCategoryGap="15%"
-            >
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
-              <XAxis
-                dataKey="date"
-                tick={{ fontSize: 11, fill: 'var(--chart-muted)' }}
-                tickLine={false}
-                axisLine={{ stroke: 'var(--chart-axis)' }}
-                interval="preserveStartEnd"
-                minTickGap={30}
-              />
-              <YAxis
-                tick={{ fontSize: 11, fill: 'var(--chart-muted)' }}
-                tickLine={false}
-                axisLine={false}
-                width={50}
-                tickFormatter={(v) => `₹${v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v >= -1000 ? v : `${(v / 1000).toFixed(0)}k`}`}
-              />
+        <Card
+          title="Monthly profit"
+          eyebrow={`${selectedYear} · final days only`}
+          footer={
+            <>
+              <span>
+                {bestMonth ? `best ${bestMonth.month} ${formatINR(bestMonth.profit, { signed: true, compact: true })}` : 'best —'}
+                {worstMonth ? ` · worst ${worstMonth.month} ${formatINR(worstMonth.profit, { signed: true, compact: true })}` : ''}
+              </span>
+              <span>{`year ${formatINR(yearProfit, { signed: true })}`}</span>
+            </>
+          }
+        >
+          <ResponsiveContainer width="100%" height={170}>
+            <BarChart data={monthlyProfitData} margin={{ top: 8, right: 4, left: -8, bottom: 0 }}>
+              <CartesianGrid vertical={false} stroke="var(--chart-grid)" />
+              <XAxis dataKey="month" tick={AXIS_TICK} tickLine={false} axisLine={false} />
+              <YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} width={48} tickFormatter={(v: number) => formatINR(v, { compact: true })} />
+              <Tooltip cursor={CURSOR_FILL} contentStyle={TOOLTIP_STYLE} labelStyle={TOOLTIP_LABEL} itemStyle={TOOLTIP_ITEM} formatter={(v) => [formatINR(Number(v), { signed: true }), 'Profit']} />
+              <ReferenceLine y={0} stroke="var(--rule)" />
+              <Bar dataKey="profit" isAnimationActive={false}>
+                {monthlyProfitData.map((d) => (
+                  <Cell key={d.month} fill={(d.profit ?? 0) < 0 ? 'var(--negative-solid)' : 'var(--positive-solid)'} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </Card>
+      </div>
+
+      <div className={styles.row}>
+        <Card
+          className={styles.wide}
+          title={`Profit and loss · ${monthNames[selectedMonth]} ${selectedYear}`}
+          eyebrow="grey days still have orders in transit — click one to see them"
+          footer={
+            <>
+              <span>{`${completedDays} completed days · ${greyDays} with orders in transit`}</span>
+              <span>{`booked ${formatINR(bookedPnl, { signed: true })}`}</span>
+            </>
+          }
+          actions={
+            <Select
+              label="Month"
+              inlineLabel
+              size="sm"
+              value={String(selectedMonth)}
+              onChange={(e) => setSelectedMonth(Number(e.target.value))}
+              options={monthNames.map((name, i) => ({ value: String(i), label: name }))}
+            />
+          }
+        >
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={profitChartData} margin={{ top: 8, right: 16, left: -8, bottom: 0 }}>
+              <CartesianGrid vertical={false} stroke="var(--chart-grid)" />
+              <XAxis dataKey="date" tick={AXIS_TICK} tickLine={false} axisLine={false} minTickGap={16} />
+              <YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} width={48} tickFormatter={(v: number) => formatINR(v, { compact: true })} />
               <Tooltip
-                contentStyle={{
-                  border: 'none',
-                  borderRadius: 8,
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
-                  padding: '10px 14px',
-                }}
-                labelStyle={{ color: 'var(--chart-muted)', fontWeight: 500, marginBottom: 4 }}
-                formatter={(value, name) => [
-                  `${Number(value) >= 0 ? '+' : ''}₹${Number(value).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,
-                  name
-                ]}
+                cursor={CURSOR_FILL}
+                contentStyle={TOOLTIP_STYLE}
+                labelStyle={TOOLTIP_LABEL}
+                itemStyle={TOOLTIP_ITEM}
+                formatter={(v, _name, item) => [formatINR(Number(v), { signed: true }), isGreyDay(item?.payload) ? 'Not final yet' : 'Profit']}
               />
-              <Legend
-                wrapperStyle={{ paddingTop: 12 }}
-                iconType="rect"
-                iconSize={10}
-                formatter={(value) => <span className={styles.chartLegendText}>{value}</span>}
-              />
-              <ReferenceLine
-                y={0}
-                stroke="#94a3b8"
-                strokeWidth={1.5}
-                strokeDasharray="3 3"
-              />
-              <Bar
-                dataKey="displayProfit"
-                name="Profit"
-                maxBarSize={24}
-                radius={[2, 2, 2, 2]}
-                onClick={(data: any) => openIncompleteDrawer(data)}
-              >
-                {profitChartData.map((entry, index) => (
+              <ReferenceLine y={0} stroke="var(--rule)" />
+              <Bar dataKey="displayProfit" isAnimationActive={false} onClick={(entry) => openIncompleteDrawer(entry)}>
+                {profitChartData.map((d) => (
                   <Cell
-                    key={`cell-${index}`}
-                    cursor={isGreyDay(entry) ? 'pointer' : 'default'}
-                    fill={isGreyDay(entry) ? '#e2e8f0' : (entry.bookedProfit ?? 0) >= 0 ? '#10b981' : '#ef4444'}
+                    key={d.dateKey}
+                    cursor={isGreyDay(d) ? 'pointer' : 'default'}
+                    fill={isGreyDay(d) ? 'var(--tile-pending)' : (d.displayProfit ?? 0) < 0 ? 'var(--negative-solid)' : 'var(--positive-solid)'}
                   />
                 ))}
               </Bar>
             </BarChart>
           </ResponsiveContainer>
-        </div>
-        <div className={styles.chartStats}>
-          <div className={styles.chartStatBlock}>
-            <span className={styles.chartStatLabel}>Booked Profit (this month)</span>
-            <span
-              className={styles.chartStatValue}
-              style={{
-                fontSize: '1.5rem',
-                fontWeight: 600,
-                color: profitChartData.filter(d => d.bookedProfit !== null).reduce((sum, d) => sum + (d.bookedProfit || 0), 0) >= 0 ? '#10b981' : '#ef4444'
-              }}
-            >
-              {profitChartData.filter(d => d.bookedProfit !== null).reduce((sum, d) => sum + (d.bookedProfit || 0), 0) >= 0 ? '+' : ''}₹{profitChartData.filter(d => d.bookedProfit !== null).reduce((sum, d) => sum + (d.bookedProfit || 0), 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-            </span>
-            <span style={{ fontSize: '0.7rem', color: 'var(--chart-muted)', marginTop: '4px', display: 'block' }}>
-              From completed days only
-            </span>
-          </div>
-          <div className={styles.chartStatBlock}>
-            <span className={styles.chartStatLabel}>Completed Days</span>
-            <span
-              className={styles.chartStatValue}
-              style={{
-                fontSize: '1.5rem',
-                fontWeight: 600,
-                color: '#6366f1'
-              }}
-            >
-              {profitChartData.filter(d => d.bookedProfit !== null).length}
-            </span>
-            <span style={{ fontSize: '0.7rem', color: 'var(--chart-muted)', marginTop: '4px', display: 'block' }}>
-              All orders delivered/failed
-            </span>
-          </div>
-          <div className={styles.chartStatBlock}>
-            <span className={styles.chartStatLabel}>Incomplete Days</span>
-            <span
-              className={styles.chartStatValue}
-              style={{
-                fontSize: '1.5rem',
-                fontWeight: 600,
-                color: '#94a3b8'
-              }}
-            >
-              {profitChartData.filter(d => d.bookedProfit === null).length}
-            </span>
-            <span style={{ fontSize: '0.7rem', color: 'var(--chart-muted)', marginTop: '4px', display: 'block' }}>
-              With in-transit orders
-            </span>
-          </div>
-        </div>
-      </section>
+        </Card>
 
-      <section className={styles.section}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-          <div>
-            <h2 className={styles['section-title']} style={{ marginBottom: '0.25rem', marginTop: 0 }}>
-              Monthly Profit — {selectedYear}
-            </h2>
-            <p className={styles['section-desc']} style={{ marginBottom: 0 }}>
-              Total booked profit per month (completed days only).
-            </p>
-          </div>
-          <select
-            value={selectedYear}
-            onChange={(e) => setSelectedYear(Number(e.target.value))}
-            className={styles.select}
-            style={{ width: 'auto' }}
-          >
-            {[2024, 2025, 2026].map((y) => (
-              <option key={y} value={y}>{y}</option>
-            ))}
-          </select>
-        </div>
-        <div className={styles.chartWrap}>
-          <ResponsiveContainer width="100%" height={280}>
-            <LineChart data={monthlyProfitData} margin={{ top: 12, right: 12, left: 0, bottom: 8 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
-              <XAxis
-                dataKey="month"
-                tick={{ fontSize: 11, fill: 'var(--chart-muted)' }}
-                tickLine={false}
-                axisLine={{ stroke: 'var(--chart-axis)' }}
-              />
-              <YAxis
-                tick={{ fontSize: 11, fill: 'var(--chart-muted)' }}
-                tickLine={false}
-                axisLine={false}
-                width={55}
-                tickFormatter={(v) => `₹${Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(0)}k` : v}`}
-              />
-              <Tooltip
-                contentStyle={{ border: 'none', borderRadius: 8, boxShadow: '0 4px 12px rgba(0,0,0,0.08)', padding: '10px 14px' }}
-                labelStyle={{ color: 'var(--chart-muted)', fontWeight: 500, marginBottom: 4 }}
-                formatter={(value) => [
-                  `${Number(value) >= 0 ? '+' : ''}₹${Number(value).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,
-                  'Profit'
-                ]}
-              />
-              <ReferenceLine y={0} stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="3 3" />
-              <Line
-                type="monotone"
-                dataKey="profit"
-                stroke="#6366f1"
-                strokeWidth={2.5}
-                connectNulls={false}
-                dot={(props: any) => {
-                  const { cx, cy, value } = props;
-                  if (value === null || value === undefined) return <g key={props.key} />;
-                  return <circle key={props.key} cx={cx} cy={cy} r={5} fill={value >= 0 ? '#10b981' : '#ef4444'} stroke="white" strokeWidth={2} />;
-                }}
-                activeDot={{ r: 6, stroke: 'white', strokeWidth: 2 }}
-              />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-        <div className={styles.chartStats}>
-          <div className={styles.chartStatBlock}>
-            <span className={styles.chartStatLabel}>Best Month</span>
-            <span className={styles.chartStatValue} style={{ fontSize: '1.25rem', fontWeight: 700, color: '#10b981' }}>
-              {(() => {
-                const best = monthlyProfitData.filter(d => d.profit !== null).reduce((a, b) => (b.profit! > (a?.profit ?? -Infinity) ? b : a), null as typeof monthlyProfitData[0] | null);
-                return best ? `${best.month} · +₹${best.profit!.toLocaleString('en-IN')}` : '—';
-              })()}
-            </span>
-          </div>
-          <div className={styles.chartStatBlock}>
-            <span className={styles.chartStatLabel}>Worst Month</span>
-            <span className={styles.chartStatValue} style={{ fontSize: '1.25rem', fontWeight: 700, color: '#ef4444' }}>
-              {(() => {
-                const worst = monthlyProfitData.filter(d => d.profit !== null).reduce((a, b) => (b.profit! < (a?.profit ?? Infinity) ? b : a), null as typeof monthlyProfitData[0] | null);
-                return worst ? `${worst.month} · ${worst.profit! >= 0 ? '+' : ''}₹${worst.profit!.toLocaleString('en-IN')}` : '—';
-              })()}
-            </span>
-          </div>
-          <div className={styles.chartStatBlock}>
-            <span className={styles.chartStatLabel}>Year Total</span>
-            <span className={styles.chartStatValue} style={{ fontSize: '1.25rem', fontWeight: 700, color: '#6366f1' }}>
-              {(() => {
-                const total = monthlyProfitData.filter(d => d.profit !== null).reduce((sum, d) => sum + d.profit!, 0);
-                return `${total >= 0 ? '+' : ''}₹${total.toLocaleString('en-IN')}`;
-              })()}
-            </span>
-          </div>
-        </div>
-      </section>
-
-      <section className={styles.section}>
-        <h2 className={styles['section-title']}>Order Distribution — Last 30 Days</h2>
-        <p className={styles['section-desc']}>
-          Breakdown of orders by payment method and delivery status (from Jan 28, 2026 onwards).
-        </p>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '2rem', marginTop: '1rem' }}>
-          {/* Chart 1: Prepaid vs COD */}
-          <div className={styles.chartWrap} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-            <h3 style={{ fontSize: '1rem', marginBottom: '1rem', color: '#374151' }}>Payment Method</h3>
-            <ResponsiveContainer width="100%" height={250}>
-              <PieChart>
-                <Pie
-                  data={pieChartsData.paymentMethod}
-                  cx="50%"
-                  cy={110}
-                  innerRadius={60}
-                  outerRadius={80}
-                  paddingAngle={5}
-                  dataKey="value"
-                  onClick={handleLegendClick}
-                  style={{ cursor: 'pointer' }}
-                >
-                  {pieChartsData.paymentMethod.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} style={{ outline: 'none' }} />
-                  ))}
-                </Pie>
-                <Legend
-                  verticalAlign="bottom"
-                  height={36}
-                  iconType="circle"
-                  onClick={handleLegendClick}
-                  wrapperStyle={{ cursor: 'pointer' }}
-                  formatter={(value, entry: any) => {
-                    const { payload } = entry;
-                    return <span className={styles.chartLegendText}>{value}: {payload.value} ({((payload.value / (pieChartsData.totalOrders || 1)) * 100).toFixed(0)}%)</span>;
-                  }}
-                />
-                <text x="50%" y={110} textAnchor="middle" dominantBaseline="middle" style={{ fontFamily: 'Inter, sans-serif' }}>
-                  {(() => {
-                    const cod = pieChartsData.paymentMethod.find(i => i.name === 'COD')?.value || 0;
-                    const total = pieChartsData.totalOrders || 1;
-                    const pct = ((cod / total) * 100).toFixed(0);
-                    return (
-                      <>
-                        <tspan x="50%" dy="-10" style={{ fontSize: '11px', fill: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>COD</tspan>
-                        <tspan x="50%" dy="22" style={{ fontSize: '16px', fill: '#0f172a', fontWeight: 700 }}>{cod} ({pct}%)</tspan>
-                      </>
-                    );
-                  })()}
-                </text>
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-
-          {/* Chart 2: Delivered vs Failed */}
-          <div className={styles.chartWrap} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-            <h3 style={{ fontSize: '1rem', marginBottom: '1rem', color: '#374151' }}>Overall Delivery Status</h3>
-            <ResponsiveContainer width="100%" height={320}>
-              <PieChart>
-                <Pie
-                  data={pieChartsData.deliveryStatus}
-                  cx="50%"
-                  cy={110}
-                  innerRadius={60}
-                  outerRadius={80}
-                  paddingAngle={5}
-                  dataKey="value"
-                  onClick={handleLegendClick}
-                  style={{ cursor: 'pointer' }}
-                >
-                  {pieChartsData.deliveryStatus.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} style={{ outline: 'none' }} />
-                  ))}
-                </Pie>
-                <Legend
-                  verticalAlign="bottom"
-                  height={80}
-                  iconType="circle"
-                  onClick={handleLegendClick}
-                  wrapperStyle={{ cursor: 'pointer' }}
-                  formatter={(value, entry: any) => {
-                    const { payload } = entry;
-                    const total = pieChartsData.deliveryStatus.reduce((acc: number, curr: any) => acc + curr.value, 0);
-                    const percentage = total > 0 ? ((payload.value / total) * 100).toFixed(0) : 0;
-                    return <span className={styles.chartLegendText}>{value}: {payload.value} ({percentage}%)</span>;
-                  }}
-                />
-                <text x="50%" y={110} textAnchor="middle" dominantBaseline="middle" style={{ fontFamily: 'Inter, sans-serif' }}>
-                  {(() => {
-                    const failed = pieChartsData.deliveryStatus.find(i => i.name === 'Failed')?.value || 0;
-                    const total = pieChartsData.deliveryStatus.reduce((a, b: any) => a + b.value, 0) || 1;
-                    const pct = ((failed / total) * 100).toFixed(0);
-                    return (
-                      <>
-                        <tspan x="50%" dy="-10" style={{ fontSize: '11px', fill: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>FAILED</tspan>
-                        <tspan x="50%" dy="22" style={{ fontSize: '16px', fill: '#0f172a', fontWeight: 700 }}>{failed} ({pct}%)</tspan>
-                      </>
-                    );
-                  })()}
-                </text>
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-
-          {/* Chart 3: COD Status */}
-          <div className={styles.chartWrap} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-            <h3 style={{ fontSize: '1rem', marginBottom: '1rem', color: '#374151' }}>COD Delivery Status</h3>
-            <ResponsiveContainer width="100%" height={320}>
-              <PieChart>
-                <Pie
-                  data={pieChartsData.codStatus}
-                  cx="50%"
-                  cy={110}
-                  innerRadius={60}
-                  outerRadius={80}
-                  paddingAngle={5}
-                  dataKey="value"
-                  onClick={handleLegendClick}
-                  style={{ cursor: 'pointer' }}
-                >
-                  {pieChartsData.codStatus.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} style={{ outline: 'none' }} />
-                  ))}
-                </Pie>
-                <Legend
-                  verticalAlign="bottom"
-                  height={80}
-                  iconType="circle"
-                  onClick={handleLegendClick}
-                  wrapperStyle={{ cursor: 'pointer' }}
-                  formatter={(value, entry: any) => {
-                    const { payload } = entry;
-                    if (payload.name === 'In Progress') return null;
-                    const total = pieChartsData.codTotal || 1;
-                    const percentage = ((payload.value / total) * 100).toFixed(0);
-                    return <span className={styles.chartLegendText}>{value}: {payload.value} ({percentage}%)</span>;
-                  }}
-                />
-                <text x="50%" y={110} textAnchor="middle" dominantBaseline="middle" style={{ fontFamily: 'Inter, sans-serif' }}>
-                  {(() => {
-                    const failed = pieChartsData.codStatus.find(i => i.name === 'Failed')?.value || 0;
-                    const total = pieChartsData.codTotal || 1;
-                    const pct = ((failed / total) * 100).toFixed(0);
-                    return (
-                      <>
-                        <tspan x="50%" dy="-10" style={{ fontSize: '11px', fill: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>FAILED</tspan>
-                        <tspan x="50%" dy="22" style={{ fontSize: '16px', fill: '#0f172a', fontWeight: 700 }}>{failed} ({pct}%)</tspan>
-                      </>
-                    );
-                  })()}
-                </text>
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      </section>
-
-
-      {/* ─── Avg Shipping Charge on Fulfilled Orders ─── */}
-      {(() => {
-        type DbRecord = { dateKey: string; avgShipping: number | null; avgShippingSmall: number | null; avgShippingLarge: number | null };
-        type ChartPoint = { date: string; dateKey?: string; avgShipping: number | null; avgShippingSmall: number | null; avgShippingLarge: number | null };
-
-        const avgOfNums = (arr: (number | null)[]): number | null => {
-          const valid = arr.filter((v): v is number => v !== null && v > 0);
-          return valid.length ? valid.reduce((s, v) => s + v, 0) / valid.length : null;
-        };
-
-        // Filter to 30-point lookback window
-        const now = new Date();
-        const todayKey = now.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
-        const windowStart = new Date(now);
-        if (shippingGranularity === 'day') windowStart.setDate(windowStart.getDate() - 29);
-        else if (shippingGranularity === 'week') windowStart.setDate(windowStart.getDate() - 29 * 7);
-        else { windowStart.setMonth(windowStart.getMonth() - 29); windowStart.setDate(1); }
-        const cutoffKey = '2026-01-01';
-        const windowKey = windowStart.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
-        const effectiveStartKey = cutoffKey > windowKey ? cutoffKey : windowKey;
-
-        const windowedRecords = shippingDbRecords.filter(
-          (r) => r.dateKey >= effectiveStartKey && r.dateKey <= todayKey
-        );
-
-        const toLabel = (dateKey: string) =>
-          new Date(dateKey).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: STORE_TIMEZONE });
-
-        let shippingData: ChartPoint[];
-
-        if (shippingGranularity === 'day') {
-          // Raw daily values — the real per-day average shipping charge, no smoothing.
-          shippingData = windowedRecords.map((r) => ({
-            date: toLabel(r.dateKey),
-            dateKey: r.dateKey,
-            avgShipping:      r.avgShipping,
-            avgShippingSmall: r.avgShippingSmall,
-            avgShippingLarge: r.avgShippingLarge,
-          }));
-        } else if (shippingGranularity === 'week') {
-          const weeks: DbRecord[][] = [];
-          let cur: DbRecord[] = [];
-          windowedRecords.forEach((r) => {
-            const dow = new Date(r.dateKey).getDay();
-            if (dow === 1 && cur.length > 0) { weeks.push(cur); cur = []; }
-            cur.push(r);
-          });
-          if (cur.length) weeks.push(cur);
-          shippingData = weeks.map((g) => ({
-            date: `${toLabel(g[0].dateKey)} – ${toLabel(g[g.length - 1].dateKey)}`,
-            avgShipping:      avgOfNums(g.map((r) => r.avgShipping)),
-            avgShippingSmall: avgOfNums(g.map((r) => r.avgShippingSmall)),
-            avgShippingLarge: avgOfNums(g.map((r) => r.avgShippingLarge)),
-          }));
-        } else {
-          const months: Record<string, DbRecord[]> = {};
-          windowedRecords.forEach((r) => {
-            const key = r.dateKey.slice(0, 7);
-            if (!months[key]) months[key] = [];
-            months[key].push(r);
-          });
-          shippingData = Object.entries(months).map(([, g]) => ({
-            date: new Date(g[0].dateKey).toLocaleDateString('en-IN', { month: 'short', year: '2-digit', timeZone: STORE_TIMEZONE }),
-            avgShipping:      avgOfNums(g.map((r) => r.avgShipping)),
-            avgShippingSmall: avgOfNums(g.map((r) => r.avgShippingSmall)),
-            avgShippingLarge: avgOfNums(g.map((r) => r.avgShippingLarge)),
-          }));
-        }
-
-        // Summary stats over last-30-day daily records
-        const last30 = shippingDbRecords.filter((r) => {
-          const s = new Date(now); s.setDate(s.getDate() - 29);
-          return r.dateKey >= s.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
-        });
-        const fmt = (v: number | null) => v !== null ? `₹${v.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : 'N/A';
-        const avg30All   = avgOfNums(last30.map((r) => r.avgShipping));
-        const avg30Small = avgOfNums(last30.map((r) => r.avgShippingSmall));
-        const avg30Large = avgOfNums(last30.map((r) => r.avgShippingLarge));
-
-        const lines = [
-          { key: 'all'   as const, dataKey: 'avgShipping',      name: 'All Fulfilled', color: '#0ea5e9', width: 2.5, dash: undefined },
-          { key: 'small' as const, dataKey: 'avgShippingSmall', name: 'Small Variant', color: '#10b981', width: 2,   dash: '6 3' },
-          { key: 'large' as const, dataKey: 'avgShippingLarge', name: 'Large Variant', color: '#f59e0b', width: 2,   dash: '6 3' },
-        ];
-
-        const toggleLine = (key: 'all' | 'small' | 'large') =>
-          setActiveShippingLines((prev) => ({ ...prev, [key]: !prev[key] }));
-
-        const shippingAvgKey = activeShippingLines.all ? 'avgShipping' : activeShippingLines.small ? 'avgShippingSmall' : 'avgShippingLarge';
-        const shippingAvgValues = shippingData.map((d) => (d as any)[shippingAvgKey]).filter((v: unknown): v is number => v !== null && v !== undefined);
-        const shippingAvg = shippingAvgValues.length ? shippingAvgValues.reduce((s: number, v: number) => s + v, 0) / shippingAvgValues.length : null;
-
-        const shippingValues = shippingData.flatMap((d) => [
-          activeShippingLines.all   ? (d.avgShipping      ?? null) : null,
-          activeShippingLines.small ? (d.avgShippingSmall ?? null) : null,
-          activeShippingLines.large ? (d.avgShippingLarge ?? null) : null,
-        ]).filter((v): v is number => v !== null);
-        const shippingTickMin = shippingValues.length ? Math.floor(Math.min(...shippingValues) / 30) * 30 : 0;
-        const shippingTickMax = shippingValues.length ? Math.ceil(Math.max(...shippingValues)  / 30) * 30 : 120;
-        const shippingTicks: number[] = [];
-        for (let t = shippingTickMin; t <= shippingTickMax; t += 30) shippingTicks.push(t);
-
-        const granularityBtns: { label: string; value: 'day' | 'week' | 'month' }[] = [
-          { label: 'Day',   value: 'day'   },
-          { label: 'Week',  value: 'week'  },
-          { label: 'Month', value: 'month' },
-        ];
-
-        const btnBase: React.CSSProperties = {
-          padding: '4px 12px', fontSize: '0.8rem', fontWeight: 500, borderRadius: 6,
-          border: '1px solid #e2e8f0', cursor: 'pointer', transition: 'all 0.15s',
-        };
-
-        return (
-          <section className={styles.section}>
-            {/* Header row */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.25rem' }}>
-              <div>
-                <h2 className={styles['section-title']} style={{ margin: 0 }}>Avg Shipping Charge on Fulfilled Orders</h2>
-                <p className={styles['section-desc']} style={{ marginBottom: 0, marginTop: '0.25rem' }}>
-                  Average Shiprocket shipping charge, split by variant size.
-                  Orders with both Small &amp; Large items appear only in the overall line.
-                </p>
-              </div>
-
-              {/* Controls: granularity + line toggles */}
-              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.5rem' }}>
-                {/* Granularity */}
-                <div style={{ display: 'flex', gap: '2px', background: '#f1f5f9', borderRadius: 8, padding: '3px' }}>
-                  {granularityBtns.map(({ label, value }) => (
-                    <button
-                      key={value}
-                      style={{
-                        ...btnBase,
-                        border: 'none',
-                        background: shippingGranularity === value ? 'white' : 'transparent',
-                        boxShadow: shippingGranularity === value ? '0 1px 4px rgba(0,0,0,0.1)' : 'none',
-                        color: shippingGranularity === value ? '#0f172a' : '#64748b',
-                      }}
-                      onClick={() => setShippingGranularity(value)}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Line toggles */}
-                <div style={{ display: 'flex', gap: '6px' }}>
-                  {lines.map(({ key, name, color }) => (
-                    <button
-                      key={key}
-                      onClick={() => toggleLine(key)}
-                      style={{
-                        ...btnBase,
-                        background: activeShippingLines[key] ? color : 'transparent',
-                        borderColor: color,
-                        color: activeShippingLines[key] ? 'white' : color,
-                        opacity: activeShippingLines[key] ? 1 : 0.6,
-                      }}
-                    >
-                      {name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Chart */}
-            <div className={styles.chartWrap}>
-              <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={shippingData} margin={{ top: 12, right: 20, left: 0, bottom: 8 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
-                  <XAxis
-                    dataKey="date"
-                    tick={{ fontSize: 11, fill: 'var(--chart-muted)' }}
-                    tickLine={false}
-                    axisLine={{ stroke: 'var(--chart-axis)' }}
-                    interval="preserveStartEnd"
-                    minTickGap={30}
-                  />
-                  <YAxis
-                    tick={{ fontSize: 11, fill: 'var(--chart-muted)' }}
-                    tickLine={false}
-                    axisLine={false}
-                    width={56}
-                    tickFormatter={(v) => `₹${v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v}`}
-                    ticks={shippingTicks}
-                    domain={[shippingTickMin, shippingTickMax]}
-
-                  />
-                  <Tooltip
-                    contentStyle={{ border: 'none', borderRadius: 8, boxShadow: '0 4px 12px rgba(0,0,0,0.08)', padding: '10px 14px' }}
-                    labelStyle={{ color: 'var(--chart-muted)', fontWeight: 500, marginBottom: 4 }}
-                    formatter={(value, name) => [
-                      value !== null && value !== undefined
-                        ? `₹${Number(value).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
-                        : 'N/A',
-                      name,
-                    ]}
-                  />
-                  {lines.map(({ key, dataKey, name, color, width, dash }) =>
-                    activeShippingLines[key] ? (
-                      <Line
-                        key={key}
-                        type="monotone"
-                        dataKey={dataKey}
-                        name={name}
-                        stroke={color}
-                        strokeWidth={width}
-                        strokeDasharray={dash}
-                        dot={false}
-                        activeDot={{ r: 5, strokeWidth: 0, fill: color }}
-                        connectNulls={false}
-                      />
-                    ) : null
-                  )}
-                  {shippingAvg !== null && (
-                    <ReferenceLine
-                      y={shippingAvg}
-                      stroke="#94a3b8"
-                      strokeDasharray="4 4"
-                      strokeWidth={1.5}
-                      label={{ value: `Avg ₹${shippingAvg.toFixed(0)}`, position: 'insideTopRight', fontSize: 11, fill: '#94a3b8', dy: -6 }}
-                    />
-                  )}
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-
-            {/* Summary stats */}
-            <div className={styles.chartStats}>
-              <div className={styles.chartStatBlock}>
-                <span className={styles.chartStatLabel} style={{ color: '#0ea5e9' }}>All Fulfilled — 30-day Avg</span>
-                <span className={styles.chartStatValue} style={{ fontSize: '1.5rem', fontWeight: 600, color: '#0ea5e9' }}>{fmt(avg30All)}</span>
-                <span style={{ fontSize: '0.7rem', color: 'var(--chart-muted)', marginTop: '4px', display: 'block' }}>Avg across all fulfilled orders</span>
-              </div>
-              <div className={styles.chartStatBlock}>
-                <span className={styles.chartStatLabel} style={{ color: '#10b981' }}>Small Variant — 30-day Avg</span>
-                <span className={styles.chartStatValue} style={{ fontSize: '1.5rem', fontWeight: 600, color: '#10b981' }}>{fmt(avg30Small)}</span>
-                <span style={{ fontSize: '0.7rem', color: 'var(--chart-muted)', marginTop: '4px', display: 'block' }}>Pure small orders only (no large items)</span>
-              </div>
-              <div className={styles.chartStatBlock}>
-                <span className={styles.chartStatLabel} style={{ color: '#f59e0b' }}>Large Variant — 30-day Avg</span>
-                <span className={styles.chartStatValue} style={{ fontSize: '1.5rem', fontWeight: 600, color: '#f59e0b' }}>{fmt(avg30Large)}</span>
-                <span style={{ fontSize: '0.7rem', color: 'var(--chart-muted)', marginTop: '4px', display: 'block' }}>Pure large orders only (no small items)</span>
-              </div>
-            </div>
-          </section>
-        );
-      })()}
-
-
-      <section className={styles.section}>
-        <h2 className={styles['section-title']}>Daily Profit &amp; Loss — {selectedYear}</h2>
-
-        <div className={styles.legend}>
-          <span className={styles['legend-label']}>Less</span>
-          <span className={styles['legend-tile']} style={{ background: 'var(--tile-empty)' }} />
-          <span className={styles['legend-tile']} style={{ background: 'var(--tile-zero)' }} />
-          <span className={styles['legend-tile']} style={{ background: 'var(--tile-profit)' }} />
-          <span className={styles['legend-tile']} style={{ background: 'var(--tile-loss)' }} />
-          <span className={styles['legend-label']}>More</span>
-        </div>
-
-        <div className={styles.calendarContainer}>
-          <div className={styles.weekdayLabels}>
-            {weekLabels.map((label) => (
-              <span key={label} className={styles.weekdayLabel}>{label}</span>
-            ))}
-          </div>
-
-          <div className={styles.monthsGrid}>
-            {monthNames.map((monthName, monthIndex) => {
-              // getDay() returns 0-6 (Sun-Sat), convert to Monday=0, Sunday=6
-              const firstDayOfMonth = (new Date(selectedYear, monthIndex, 1).getDay() + 6) % 7;
-              const daysInMonth = new Date(selectedYear, monthIndex + 1, 0).getDate();
-              const numWeeks = Math.ceil((daysInMonth + firstDayOfMonth) / 7);
-
-              // Generate tiles column-by-column (week by week), only for valid days
-              const tiles = [];
-              for (let col = 0; col < numWeeks; col++) {
-                for (let row = 0; row < 7; row++) {
-                  const dayOfMonth = col * 7 + row - firstDayOfMonth + 1;
-
-                  // Skip invalid days
-                  if (dayOfMonth < 1 || dayOfMonth > daysInMonth) {
-                    continue;
-                  }
-
-                  const dateKey = `${selectedYear}-${String(monthIndex + 1).padStart(2, '0')}-${String(dayOfMonth).padStart(2, '0')}`;
-                  const pnl = getPnlForDateKey(dateKey);
-                  const color = getCellColor(pnl);
-                  const intensity = getCellIntensity(pnl);
-                  const dateLabel = new Date(selectedYear, monthIndex, dayOfMonth).toLocaleDateString('en-IN', {
-                    weekday: 'short',
-                    day: 'numeric',
-                    month: 'short',
-                    year: 'numeric',
-                  });
-
-                  tiles.push(
-                    <div
-                      key={dateKey}
-                      className={styles.tile}
-                      style={{
-                        background: color,
-                        opacity: pnl !== null && pnl !== 0 ? 0.55 + intensity * 0.12 : 0.4,
-                        gridColumn: col + 1,
-                        gridRow: row + 1,
-                      }}
-                      onMouseEnter={(e) =>
-                        handleTileHover(e, dateKey, dateLabel, pnl)
-                      }
-                      onMouseLeave={() => setTooltip(null)}
-                    />
-                  );
-                }
-              }
-
+        <Card title="Order distribution" eyebrow="last 30 days · click a status to see its orders">
+          <div className={styles.dist}>
+            {shareRows.map((row) => {
+              const total = row.segs.reduce((s, x) => s + x.value, 0);
               return (
-                <div key={monthIndex} className={styles.monthBlock}>
-                  <div
-                    className={styles.monthGrid}
-                    style={{
-                      gridTemplateColumns: `repeat(${numWeeks}, 12px)`,
-                      gridTemplateRows: 'repeat(7, 12px)',
-                    }}
-                  >
-                    {tiles}
+                <div key={row.label}>
+                  <div className={styles.distHead}>
+                    <span>{row.label}</span>
+                    <span>{row.total}</span>
                   </div>
-                  <div className={styles.monthLabel}>{monthName.toUpperCase()}</div>
+                  <div className={styles.stack}>
+                    {row.segs.map((x) => (
+                      <span key={x.name} title={`${x.name}: ${x.value}`} style={{ width: total ? `${(x.value / total) * 100}%` : 0, background: x.color }} />
+                    ))}
+                  </div>
+                  <div className={styles.legend}>
+                    {row.segs.map((x) => (
+                      <button key={x.name} type="button" className={styles.legendBtn} onClick={() => handleLegendClick({ name: x.name })}>
+                        <b style={{ background: x.color }} />
+                        {x.name}
+                        <em>{`${x.value.toLocaleString('en-IN')} · ${total ? Math.round((x.value / total) * 100) : 0}%`}</em>
+                      </button>
+                    ))}
+                  </div>
                 </div>
               );
             })}
           </div>
-        </div>
+        </Card>
+      </div>
 
-        {tooltip && (
-          <div
-            className={styles.tooltip}
-            style={{
-              left: tooltip.x,
-              top: tooltip.y,
-              transform: 'translate(-50%, -100%) translateY(-8px)',
-            }}
-          >
-            <div className={styles.tooltipDate}>{tooltip.dateLabel}</div>
-            <div className={styles.tooltipPnl}>
-              {tooltip.pnl !== null ? (
-                <span className={tooltip.pnl >= 0 ? styles.tooltipProfit : styles.tooltipLoss}>
-                  {tooltip.pnl >= 0 ? '+' : ''}₹{tooltip.pnl.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                </span>
-              ) : (
-                <span className={styles.tooltipNone}>No data</span>
-              )}
-            </div>
+      <Card className={styles.heat} title={`Daily profit and loss · ${selectedYear}`} eyebrow="hover a day for its value · click a grey day for its pending orders">
+        <Heatmap
+          year={selectedYear}
+          data={heatData}
+          onDayClick={(dateKey, day) => {
+            if (day.pending) openIncompleteDrawer({ dateKey, unrealizedProfit: day.value, bookedProfit: null });
+          }}
+        />
+      </Card>
+
+      <div className={styles.row}>
+        <ShippingChart
+          records={shippingDbRecords}
+          granularity={shippingGranularity}
+          onGranularity={setShippingGranularity}
+          active={activeShippingLines}
+          onToggle={(key) => setActiveShippingLines((prev) => ({ ...prev, [key]: !prev[key] }))}
+        />
+      </div>
+
+      <Drawer
+        open={pnlDrawer.open}
+        onClose={() => setPnlDrawer((p) => ({ ...p, open: false }))}
+        title="Pending orders"
+        description={pnlDrawer.date ? `${new Date(pnlDrawer.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })} — not final until these are delivered or failed` : undefined}
+        footer={
+          !pnlDrawer.loading && pnlDrawer.orders.length > 0 ? (
+            <>
+              <span>{pnlDrawer.orders.length} pending order{pnlDrawer.orders.length > 1 ? 's' : ''}</span>
+              <Amount value={pnlDrawer.orders.reduce((s, o) => s + o.amount, 0)} />
+            </>
+          ) : undefined
+        }
+      >
+        {pnlDrawer.loading ? (
+          <Skeleton lines={4} />
+        ) : pnlDrawer.orders.length === 0 ? (
+          <EmptyState size="sm" icon="circle-check" title="No pending orders" description="Every order from this day is delivered or failed." />
+        ) : (
+          <div className={styles.pending}>
+            {pnlDrawer.orders.map((o) => (
+              <div key={o.orderNumber} className={styles.pendingRow} style={{ opacity: markingOrder === o.orderNumber ? 0.5 : 1 }}>
+                <span className="pbx-mono">{o.orderNumber}</span>
+                <DeliveryBadge status={o.deliveryStatus} size="sm" />
+                <Amount value={o.amount} />
+                {o.trackingUrl ? (
+                  <a href={o.trackingUrl} target="_blank" rel="noopener noreferrer" className={styles.track}>Track</a>
+                ) : (
+                  <span className={styles.track}>—</span>
+                )}
+                <Menu
+                  label={`Actions for ${o.orderNumber}`}
+                  trigger={<Button size="sm" variant="ghost" iconOnly icon="ellipsis-vertical" disabled={markingOrder === o.orderNumber}>{`Actions for ${o.orderNumber}`}</Button>}
+                  items={[
+                    { label: 'Mark as delivered', icon: 'circle-check', tone: 'positive', onSelect: () => markDrawerOrder(o.orderNumber, 'Delivered') },
+                    { label: 'Mark as failed', icon: 'circle-x', tone: 'negative', onSelect: () => markDrawerOrder(o.orderNumber, 'Failed') },
+                  ]}
+                />
+              </div>
+            ))}
           </div>
         )}
-      </section>
+      </Drawer>
 
-      {/* Sales Modal */}
-      {salesModalOpen && (
-        <div className={styles.modalOverlay} onClick={() => setSalesModalOpen(false)}>
-          <div className={styles.modalContent} onClick={e => e.stopPropagation()}>
-            <button className={styles.modalCloseBtn} onClick={() => setSalesModalOpen(false)}>
-              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="18" y1="6" x2="6" y2="18"></line>
-                <line x1="6" y1="6" x2="18" y2="18"></line>
-              </svg>
-            </button>
-            <div className={styles.modalBody}>
-              <Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.85rem' }}>Loading...</div>}>
-                <SalesPage initialFilter={salesModalFilter} />
-              </Suspense>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Incomplete-day (grey bar) pending-orders drawer */}
-      {pnlDrawer.open && (
-        <div
-          onClick={() => setPnlDrawer((p) => ({ ...p, open: false }))}
-          style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.35)', zIndex: 1000 }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              position: 'absolute', top: 0, right: 0, height: '100%', width: 'min(440px, 92vw)',
-              background: '#fff', boxShadow: '-8px 0 24px rgba(0,0,0,0.15)',
-              display: 'flex', flexDirection: 'column',
-            }}
-          >
-            <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div>
-                <div style={{ fontSize: '1rem', fontWeight: 600 }}>Pending orders</div>
-                <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: 2 }}>
-                  {pnlDrawer.date ? new Date(pnlDrawer.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' }) : ''} — not yet delivered/failed, so this day is grey
-                </div>
-              </div>
-              <button
-                onClick={() => setPnlDrawer((p) => ({ ...p, open: false }))}
-                style={{ border: 'none', background: 'transparent', fontSize: '1.25rem', cursor: 'pointer', color: '#64748b', lineHeight: 1 }}
-                aria-label="Close"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div style={{ padding: '0.5rem 1.25rem 1rem', overflowY: 'auto', flex: 1 }}>
-              {pnlDrawer.loading ? (
-                <div style={{ color: '#64748b', padding: '1rem 0' }}>Loading…</div>
-              ) : pnlDrawer.orders.length === 0 ? (
-                <div style={{ color: '#64748b', padding: '1rem 0' }}>No pending orders found for this day.</div>
-              ) : (
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-                  <thead>
-                    <tr style={{ textAlign: 'left', color: '#64748b' }}>
-                      <th style={{ padding: '8px 4px', fontWeight: 500 }}>Order</th>
-                      <th style={{ padding: '8px 4px', fontWeight: 500, textAlign: 'right' }}>Amount</th>
-                      <th style={{ padding: '8px 4px', fontWeight: 500 }}>Status</th>
-                      <th style={{ padding: '8px 4px', fontWeight: 500 }}>Track</th>
-                      <th style={{ padding: '8px 4px', fontWeight: 500, width: 28 }} />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {pnlDrawer.orders.map((o) => (
-                      <tr
-                        key={o.orderNumber}
-                        style={{
-                          borderTop: '1px solid #f1f5f9',
-                          opacity: markingOrder === o.orderNumber ? 0.5 : 1,
-                          transition: 'opacity 0.15s',
-                        }}
-                      >
-                        <td style={{ padding: '8px 4px', fontWeight: 500 }}>{o.orderNumber}</td>
-                        <td style={{ padding: '8px 4px', textAlign: 'right' }}>₹{o.amount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
-                        <td style={{ padding: '8px 4px', color: '#64748b', textTransform: 'capitalize' }}>{o.deliveryStatus.replace(/_/g, ' ')}</td>
-                        <td style={{ padding: '8px 4px' }}>
-                          {o.trackingUrl ? (
-                            <a href={o.trackingUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#4f46e5', fontWeight: 500 }}>Track</a>
-                          ) : (
-                            <span style={{ color: '#cbd5e1' }}>—</span>
-                          )}
-                        </td>
-                        <td style={{ padding: '8px 4px', position: 'relative', textAlign: 'right' }}>
-                          {markingOrder === o.orderNumber ? (
-                            <span style={{ color: '#6366f1', fontSize: '0.75rem', fontWeight: 500, whiteSpace: 'nowrap' }}>Updating…</span>
-                          ) : (
-                            <button
-                              onClick={() => setDrawerMenuOrder((cur) => (cur === o.orderNumber ? null : o.orderNumber))}
-                              aria-label="Order actions"
-                              style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#64748b', fontSize: '1.1rem', lineHeight: 1, padding: '0 4px' }}
-                            >
-                              ⋮
-                            </button>
-                          )}
-                          {drawerMenuOrder === o.orderNumber && (
-                            <div
-                              style={{
-                                position: 'absolute', right: 4, top: '100%', zIndex: 10, minWidth: 160,
-                                background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8,
-                                boxShadow: '0 6px 18px rgba(0,0,0,0.12)', overflow: 'hidden',
-                              }}
-                            >
-                              <button
-                                onClick={() => markDrawerOrder(o.orderNumber, 'Delivered')}
-                                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 14px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: '0.85rem', color: '#059669' }}
-                              >
-                                Mark as Delivered
-                              </button>
-                              <button
-                                onClick={() => markDrawerOrder(o.orderNumber, 'Failed')}
-                                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 14px', border: 'none', borderTop: '1px solid #f1f5f9', background: 'transparent', cursor: 'pointer', fontSize: '0.85rem', color: '#dc2626' }}
-                              >
-                                Mark as Failed
-                              </button>
-                            </div>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-
-            {!pnlDrawer.loading && pnlDrawer.orders.length > 0 && (
-              <div style={{ padding: '0.75rem 1.25rem', borderTop: '1px solid #e2e8f0', fontSize: '0.8rem', color: '#64748b' }}>
-                {pnlDrawer.orders.length} pending order{pnlDrawer.orders.length > 1 ? 's' : ''} · Total ₹{pnlDrawer.orders.reduce((s, o) => s + o.amount, 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-    </>
+      <Dialog
+        open={salesModalOpen}
+        onClose={() => setSalesModalOpen(false)}
+        size="full"
+        title={salesModalFilter ? `${salesModalFilter.value} orders` : 'Orders'}
+        description="Last 30 days, from the order distribution"
+      >
+        <Suspense fallback={<Skeleton lines={6} />}>
+          <SalesPage initialFilter={salesModalFilter} />
+        </Suspense>
+      </Dialog>
+    </div>
   );
 }
+
