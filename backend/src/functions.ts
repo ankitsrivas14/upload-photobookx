@@ -15,7 +15,6 @@ export { scheduledRefresh, ordersSync, adSpendSync } from './scheduled';
  * ads analysis and the per-order zip download.
  */
 const secrets = [
-  'MONGO_URI',
   'JWT_SECRET',
   'FRONTEND_URL',
   'ADMIN_REGISTRATION_SECRET',
@@ -42,7 +41,7 @@ export const api = onRequest(
     timeoutSeconds: 540,
     memory: '1GiB',
     // One instance stays warm so the first request after a quiet spell doesn't pay a cold start
-    // (loading the whole module graph and opening the Atlas connection).
+    // (loading the whole module graph).
     minInstances: 1,
     secrets,
   },

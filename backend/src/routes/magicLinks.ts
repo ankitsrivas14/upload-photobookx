@@ -7,7 +7,6 @@ import aiService from '../services/aiService';
 import type { AuthenticatedRequest } from '../types';
 import config from '../config';
 import * as uploads from '../db/uploadsRepo';
-import OrderDeliveryDate from '../models/OrderDeliveryDate';
 import { getMany as getCharges } from '../db/shippingRepo';
 import { GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { getS3Client } from '../services/s3';

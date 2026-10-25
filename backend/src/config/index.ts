@@ -10,7 +10,6 @@ dotenv.config({ path: `${__dirname}/../../.env.local` });
 interface Config {
   port: number;
   nodeEnv: string;
-  mongoUri: string;
   shopify: {
     storeDomain: string;
     accessToken: string;
@@ -36,7 +35,6 @@ interface Config {
 const config: Config = {
   port: parseInt(process.env.PORT || '3001', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
-  mongoUri: process.env.MONGO_URI || 'mongodb://localhost:27017/photobooks',
   
   shopify: {
     storeDomain: process.env.SHOPIFY_STORE_DOMAIN || '',
