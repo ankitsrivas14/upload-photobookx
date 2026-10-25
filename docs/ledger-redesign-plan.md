@@ -71,7 +71,7 @@ Reference screens: `DashboardPage.tsx` and `SalesPage.tsx`.
 | Tools | Variant performance | `pages/tools/VariantPerformance` | 232 | Done |
 | Tools | Profit prediction | `pages/ProfitPredictionCalculator` | 437 | Done |
 | Tools | Stock prediction | `pages/StockPrediction` | 334 | Done |
-| People | Attendance | `pages/AttendancePage` | 864 | To do |
+| People | Attendance | `pages/AttendancePage` | 864 | Done |
 | Access | Login | `pages/AdminLogin` | 116 | To do |
 | Customer | Photo upload (magic link) | `pages/UploadPage` | 954 | To do |
 
