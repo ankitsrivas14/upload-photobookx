@@ -69,7 +69,7 @@ Reference screens: `DashboardPage.tsx` and `SalesPage.tsx`.
 | Tools | Products | `pages/tools/ProductsManager` | 480 | In progress |
 | Tools | Labels | `pages/tools/Labels` | 270 | In progress |
 | Tools | Variant performance | `pages/tools/VariantPerformance` | 232 | In progress |
-| Tools | Profit prediction | `pages/ProfitPredictionCalculator` | 437 | In progress |
+| Tools | Profit prediction | `pages/ProfitPredictionCalculator` | 437 | Done |
 | Tools | Stock prediction | `pages/StockPrediction` | 334 | In progress |
 | People | Attendance | `pages/AttendancePage` | 864 | To do |
 | Access | Login | `pages/AdminLogin` | 116 | To do |

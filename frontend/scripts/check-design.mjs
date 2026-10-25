@@ -25,7 +25,6 @@ const LEGACY = new Set([
   'pages/ExpensesPage.tsx',
   'pages/FixedMonthlyPage.tsx',
   'pages/MetaAdsPage.tsx',
-  'pages/ProfitPredictionCalculator.tsx',
   'pages/StockPrediction.tsx',
   'pages/UploadPage.tsx',
   'pages/analysis/Agency.tsx',

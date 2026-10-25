@@ -1,19 +1,20 @@
 import { useState, useEffect, useMemo } from 'react';
-import {
-  ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine,
-} from 'recharts';
+import toast from 'react-hot-toast';
+import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { api } from '../services/api';
+import { Alert, Button, Card, DataList, EmptyState, SegmentedControl, Skeleton, StatCard, StatStrip, TextField } from '../components/ui/pbx';
+import { formatINR } from '../components/ui/format';
+import { AXIS_TICK, TOOLTIP_ITEM, TOOLTIP_LABEL, TOOLTIP_STYLE } from './dashboard/chartStyles';
 import styles from './ProfitPredictionCalculator.module.css';
 
-function fmt(num: number, decimals = 0): string {
-  const [intPart, decPart] = num.toFixed(decimals).split('.');
-  const lastThree = intPart.slice(-3);
-  const rest = intPart.slice(0, -3);
-  const formatted = rest ? rest.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + ',' + lastThree : lastThree;
-  return decPart ? `${formatted}.${decPart}` : formatted;
-}
-
 type DayOption = 7 | 14 | 30 | 90;
+
+const PERIODS = [
+  { value: '7', label: '7 days' },
+  { value: '14', label: '14 days' },
+  { value: '30', label: '30 days' },
+  { value: '90', label: '90 days' },
+];
 
 interface Summary {
   days: number;
@@ -44,66 +45,46 @@ interface DailyRow {
   roas: number;
 }
 
-interface ChartPoint {
+interface WeekPoint {
   label: string;
-  isCompleted: boolean;
-  [key: string]: number | string | boolean | null;
+  avgRevenue: number | null;
+  avgCosts: number | null;
+  avgProfit: number | null;
+  profitMargin: number | null;
+  roas: number | null;
 }
 
-interface MetricChartProps {
+const rupees = (value: number, decimals = 0) => formatINR(value, { decimals });
+const count = (value: number) => value.toLocaleString('en-IN');
+
+interface TrendChartProps {
   title: string;
-  data: ChartPoint[];
-  dataKey: string;
-  color: string;
+  data: WeekPoint[];
+  dataKey: keyof Omit<WeekPoint, 'label'>;
   formatValue: (v: number) => string;
   zeroLine?: boolean;
 }
 
-function MetricChart({ title, data, dataKey, color, formatValue, zeroLine }: MetricChartProps) {
-  const completedData = data.filter(d => d.isCompleted);
-  if (completedData.length === 0) return null;
-
+/** One weekly metric as a small line chart on the Ledger chart styles. */
+function TrendChart({ title, data, dataKey, formatValue, zeroLine }: TrendChartProps) {
   return (
-    <div className={styles['chart-item']}>
-      <div className={styles['chart-title']}>{title}</div>
-      <ResponsiveContainer width="100%" height={200}>
-        <LineChart data={completedData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-          <XAxis
-            dataKey="label"
-            tick={{ fontSize: 11, fill: '#94a3b8' }}
-            tickLine={false}
-            axisLine={false}
-            interval="preserveStartEnd"
-          />
-          <YAxis
-            tick={{ fontSize: 11, fill: '#94a3b8' }}
-            tickLine={false}
-            axisLine={false}
-            tickFormatter={formatValue}
-            width={60}
-          />
-          {zeroLine && <ReferenceLine y={0} stroke="#e2e8f0" />}
-          <Tooltip
-            contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e2e8f0', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}
-            formatter={(v: any) => [formatValue(Number(v)), title] as any}
-            labelStyle={{ color: '#64748b', marginBottom: 4 }}
-          />
-          <Line
-            type="monotone"
-            dataKey={dataKey}
-            stroke={color}
-            strokeWidth={2}
-            dot={false}
-            activeDot={{ r: 4, strokeWidth: 0 }}
-            connectNulls={false}
-          />
+    <figure className={styles.chart}>
+      <figcaption className={styles.chartTitle}>{title}</figcaption>
+      <ResponsiveContainer width="100%" height={160}>
+        <LineChart data={data} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
+          <CartesianGrid vertical={false} stroke="var(--chart-grid)" />
+          <XAxis dataKey="label" tick={AXIS_TICK} tickLine={false} axisLine={{ stroke: 'var(--rule)' }} minTickGap={24} interval="preserveStartEnd" />
+          <YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} tickFormatter={formatValue} width={56} />
+          {zeroLine ? <ReferenceLine y={0} stroke="var(--line-strong)" /> : null}
+          <Tooltip contentStyle={TOOLTIP_STYLE} labelStyle={TOOLTIP_LABEL} itemStyle={TOOLTIP_ITEM} formatter={(v) => [formatValue(Number(v)), title]} />
+          <Line type="linear" dataKey={dataKey} stroke="var(--chart-line)" strokeWidth={1.5} dot={false} activeDot={{ r: 3, fill: 'var(--chart-highlight)', stroke: 'none' }} connectNulls={false} />
         </LineChart>
       </ResponsiveContainer>
-    </div>
+    </figure>
   );
 }
 
+/** Profit calculator: per-order averages and totals for a period, and what a monthly profit target needs. */
 export function ProfitPredictionCalculator() {
   const [days, setDays] = useState<DayOption>(90);
   const [isLoading, setIsLoading] = useState(true);
@@ -126,6 +107,7 @@ export function ProfitPredictionCalculator() {
       }
     } catch (err) {
       console.error('Failed to load daily averages:', err);
+      toast.error('Could not load the averages. Try again.');
     } finally {
       setIsLoading(false);
     }
@@ -134,10 +116,13 @@ export function ProfitPredictionCalculator() {
   const handleSync = async () => {
     setIsSyncing(true);
     try {
-      await api.backfillDailyPnl();
+      const res = await api.backfillDailyPnl();
+      if (res.success) toast.success('Profit and loss recomputed');
+      else toast.error(res.error || 'Could not sync profit and loss');
       await load(days);
     } catch (err) {
       console.error('Failed to sync PnL data:', err);
+      toast.error('Could not sync profit and loss');
     } finally {
       setIsSyncing(false);
     }
@@ -145,7 +130,7 @@ export function ProfitPredictionCalculator() {
 
   const needsSync = summary !== null && summary.orders > 0 && summary.revenue === 0;
 
-  const chartData = useMemo(() => {
+  const chartData = useMemo<WeekPoint[]>(() => {
     const completed = daily.filter(d => d.isCompleted);
 
     // Group into ISO weeks (Mon–Sun). Key = 'YYYY-Www'
@@ -182,7 +167,6 @@ export function ProfitPredictionCalculator() {
           avgProfit:    avg(orderedRows.map(r => r.avgProfitPerOrder)),
           profitMargin: totRevenue > 0 ? (totProfit / totRevenue) * 100 : null,
           roas:         totAdSpend > 0 ? totRevenue / totAdSpend : null,
-          isCompleted:  true,
         };
       });
   }, [daily]);
@@ -207,228 +191,115 @@ export function ProfitPredictionCalculator() {
     };
   })();
 
+  const syncButton = (
+    <Button size="sm" icon="refresh-cw" loading={isSyncing} disabled={isLoading} onClick={handleSync}>
+      {isSyncing ? 'Syncing…' : 'Sync P/L'}
+    </Button>
+  );
+
   return (
-    <div className={styles['calculator-content']}>
-      <header className={styles['page-header']}>
-        <div>
-          <h1 className={styles['page-title']}>Profit Prediction Calculator</h1>
-          <p className={styles['page-subtitle']}>
-            Real averages from your DailyPnl data — same numbers used in the Sales page bar chart.
-          </p>
-        </div>
-        <div className={styles['header-controls']}>
-          <button
-            className={`${styles['sync-btn']} ${needsSync ? styles['sync-btn-warn'] : ''}`}
-            onClick={handleSync}
-            disabled={isSyncing || isLoading}
-          >
-            {isSyncing ? 'Syncing…' : 'Sync PnL'}
-          </button>
-          <div className={styles['day-selector']}>
-            {([7, 14, 30, 90] as DayOption[]).map(d => (
-              <button
-                key={d}
-                className={`${styles['day-btn']} ${days === d ? styles['day-btn-active'] : ''}`}
-                onClick={() => setDays(d)}
-              >
-                {d}d
-              </button>
-            ))}
-          </div>
-        </div>
-      </header>
+    <div className={styles.calculator}>
+      <div className={styles.toolbar}>
+        <SegmentedControl size="sm" label="Period" value={String(days)} onChange={(v) => setDays(Number(v) as DayOption)} options={PERIODS} />
+        {syncButton}
+      </div>
 
       {needsSync && (
-        <div className={styles['sync-notice']}>
-          Revenue data is missing — click <strong>Sync PnL</strong> to recompute from order history.
-        </div>
+        <Alert tone="caution" title="Revenue is missing for this period">
+          Sync P/L recomputes daily profit and loss from the order history.
+        </Alert>
       )}
 
       {isLoading ? (
-        <div className={styles['calculator-loading']}>
-          <div className={styles.spinner} />
+        <div className={styles.loading}>
+          <Skeleton height={72} />
+          <Skeleton height={72} />
+          <Skeleton height={160} />
         </div>
       ) : !summary ? (
-        <div className={styles['empty-state']}>
-          No data available. Run a backfill from the Sales page first.
-        </div>
+        <EmptyState icon="calculator" title="No profit and loss data yet" description="Sync P/L to compute it from the order history." action={syncButton} />
       ) : (
         <>
-          {/* ── Current Averages ── */}
-          <section className={styles.card}>
-            <h2 className={styles['card-title']}>
-              Current Averages
-              <span className={styles['card-subtitle']}>
-                {summary.completedDays} completed days · {fmt(summary.orders)} orders
-                {summary.completedDays < summary.days && (
-                  <span className={styles['subtitle-note']}> (pending days excluded)</span>
-                )}
-              </span>
-            </h2>
-            <div className={styles['averages-grid']}>
-              <div className={styles['average-item']}>
-                <div className={styles['average-label']}>Avg. Revenue per Order</div>
-                <div className={styles['average-value']}>₹{fmt(summary.avgRevenuePerOrder, 2)}</div>
-              </div>
-              <div className={styles['average-item']}>
-                <div className={styles['average-label']}>Avg. Costs per Order</div>
-                <div className={styles['average-value']}>₹{fmt(summary.avgCogsPerOrder, 2)}</div>
-                <div className={styles['average-note']}>COGS + shipping + ad spend</div>
-              </div>
-              <div className={styles['average-item']}>
-                <div className={styles['average-label']}>Avg. Profit per Order</div>
-                <div className={`${styles['average-value']} ${summary.avgProfitPerOrder >= 0 ? styles.positive : styles.negative}`}>
-                  ₹{fmt(summary.avgProfitPerOrder, 2)}
-                </div>
-              </div>
-              <div className={styles['average-item']}>
-                <div className={styles['average-label']}>Profit Margin</div>
-                <div className={`${styles['average-value']} ${summary.profitMargin >= 0 ? styles.positive : styles.negative}`}>
-                  {summary.profitMargin.toFixed(1)}%
-                </div>
-              </div>
-              <div className={styles['average-item']}>
-                <div className={styles['average-label']}>Current ROAS</div>
-                <div className={styles['average-value']}>{summary.roas.toFixed(2)}x</div>
-              </div>
-            </div>
-          </section>
-
-          {/* ── Period Totals ── */}
-          <section className={styles.card}>
-            <h2 className={styles['card-title']}>
-              Period Totals
-              <span className={styles['card-subtitle']}>last {summary.days} days</span>
-            </h2>
-            <div className={styles['averages-grid']}>
-              <div className={styles['average-item']}>
-                <div className={styles['average-label']}>Total Revenue</div>
-                <div className={styles['average-value']}>₹{fmt(summary.revenue, 0)}</div>
-              </div>
-              <div className={styles['average-item']}>
-                <div className={styles['average-label']}>Total COGS + Shipping</div>
-                <div className={styles['average-value']}>₹{fmt(summary.cogs, 0)}</div>
-              </div>
-              <div className={styles['average-item']}>
-                <div className={styles['average-label']}>Total Ad Spend</div>
-                <div className={styles['average-value']}>₹{fmt(summary.adSpend, 0)}</div>
-              </div>
-              <div className={styles['average-item']}>
-                <div className={styles['average-label']}>Total Profit</div>
-                <div className={`${styles['average-value']} ${summary.profit >= 0 ? styles.positive : styles.negative}`}>
-                  {summary.profit >= 0 ? '+' : ''}₹{fmt(summary.profit, 0)}
-                </div>
-              </div>
-            </div>
-          </section>
-
-          {/* ── Prediction Calculator ── */}
-          <section className={styles.card}>
-            <h2 className={styles['card-title']}>Profit Prediction Calculator</h2>
-            <p className={styles['card-description']}>
-              Enter your target monthly profit to see what's required to achieve it.
-            </p>
-            <div className={styles['input-group']}>
-              <label className={styles.label} htmlFor="target-profit">
-                Target Monthly Profit (₹)
-              </label>
-              <input
-                id="target-profit"
-                type="number"
-                min="0"
-                step="1000"
-                className={styles.input}
-                placeholder="e.g. 500000"
-                value={targetMonthlyProfit}
-                onChange={(e) => setTargetMonthlyProfit(e.target.value)}
+          <Card
+            title="Current averages"
+            eyebrow={`${summary.completedDays} completed days · ${count(summary.orders)} orders`}
+            description={summary.completedDays < summary.days ? 'Days with orders still pending are left out.' : undefined}
+            padding="none"
+          >
+            <StatStrip label="Current averages" minWidth={140}>
+              <StatCard label="Revenue per order" value={rupees(summary.avgRevenuePerOrder, 2)} />
+              <StatCard label="Costs per order" value={rupees(summary.avgCogsPerOrder, 2)} sub="COGS, shipping and ads" />
+              <StatCard
+                label="Profit per order"
+                value={formatINR(summary.avgProfitPerOrder, { decimals: 2, signed: true })}
+                tone={summary.avgProfitPerOrder >= 0 ? 'positive' : 'negative'}
               />
-            </div>
+              <StatCard label="Profit margin" value={`${summary.profitMargin.toFixed(1)}%`} tone={summary.profitMargin >= 0 ? 'positive' : 'negative'} />
+              <StatCard label="ROAS" value={`${summary.roas.toFixed(2)}×`} />
+            </StatStrip>
+          </Card>
+
+          <Card title="Period totals" eyebrow={`Last ${summary.days} days`} padding="none">
+            <StatStrip label="Period totals" minWidth={140}>
+              <StatCard label="Revenue" value={rupees(summary.revenue)} />
+              <StatCard label="COGS and shipping" value={rupees(summary.cogs)} />
+              <StatCard label="Ad spend" value={rupees(summary.adSpend)} />
+              <StatCard label="Profit" value={formatINR(summary.profit, { signed: true })} tone={summary.profit >= 0 ? 'positive' : 'negative'} />
+            </StatStrip>
+          </Card>
+
+          <Card
+            title="Profit target"
+            description="What a monthly profit needs at the averages above."
+            footer={prediction ? `At ${rupees(summary.avgProfitPerOrder, 2)} profit per order and ${summary.roas.toFixed(2)}× ROAS; a month is 30 days.` : undefined}
+          >
+            <TextField
+              className={styles.target}
+              label="Monthly profit target"
+              prefix="₹"
+              type="number"
+              min="0"
+              step="1000"
+              placeholder="500000"
+              value={targetMonthlyProfit}
+              onChange={(e) => setTargetMonthlyProfit(e.target.value)}
+              hint={targetNum > 0 && !prediction ? 'Profit per order is zero or negative, so no number of orders reaches this target.' : undefined}
+            />
 
             {prediction && (
-              <div className={styles['results-grid']}>
-                <div className={styles['result-item']}>
-                  <div className={styles['result-label']}>Monthly orders required</div>
-                  <div className={styles['result-value']}>{fmt(Math.ceil(prediction.monthlyOrders))}</div>
-                </div>
-                <div className={styles['result-item']}>
-                  <div className={styles['result-label']}>Daily orders required</div>
-                  <div className={styles['result-value']}>{prediction.dailyOrders.toFixed(1)}</div>
-                </div>
-                <div className={styles['result-item']}>
-                  <div className={styles['result-label']}>Monthly revenue required</div>
-                  <div className={styles['result-value']}>₹{fmt(prediction.monthlyRevenue, 0)}</div>
-                </div>
-                <div className={styles['result-item']}>
-                  <div className={styles['result-label']}>Daily revenue required</div>
-                  <div className={styles['result-value']}>₹{fmt(prediction.dailyRevenue, 0)}</div>
-                </div>
-                <div className={styles['result-item']}>
-                  <div className={styles['result-label']}>Daily profit required</div>
-                  <div className={`${styles['result-value']} ${styles.positive}`}>₹{fmt(prediction.dailyProfit, 0)}</div>
-                </div>
-                <div className={styles['result-item']}>
-                  <div className={styles['result-label']}>Monthly ad spend required</div>
-                  <div className={styles['result-value']}>₹{fmt(prediction.monthlyAdSpend, 0)}</div>
-                </div>
-                <div className={styles['result-item']}>
-                  <div className={styles['result-label']}>Daily ad spend required</div>
-                  <div className={styles['result-value']}>₹{fmt(prediction.dailyAdSpend, 0)}</div>
-                </div>
-                <div className={styles['result-item']}>
-                  <div className={styles['result-label']}>ROAS required</div>
-                  <div className={`${styles['result-value']} ${styles.highlight}`}>{summary.roas.toFixed(2)}x</div>
-                </div>
+              <div className={styles.results}>
+                <DataList
+                  title="Each month"
+                  items={[
+                    { label: 'Orders', value: count(Math.ceil(prediction.monthlyOrders)) },
+                    { label: 'Revenue', value: rupees(prediction.monthlyRevenue) },
+                    { label: 'Ad spend', value: rupees(prediction.monthlyAdSpend) },
+                  ]}
+                  total={{ label: 'Profit', value: rupees(targetNum), tone: 'positive' }}
+                />
+                <DataList
+                  title="Each day"
+                  items={[
+                    { label: 'Orders', value: prediction.dailyOrders.toFixed(1) },
+                    { label: 'Revenue', value: rupees(prediction.dailyRevenue) },
+                    { label: 'Ad spend', value: rupees(prediction.dailyAdSpend) },
+                  ]}
+                  total={{ label: 'Profit', value: rupees(prediction.dailyProfit), tone: 'positive' }}
+                />
               </div>
             )}
-          </section>
+          </Card>
 
-          {/* ── Trend Charts ── */}
           {chartData.length > 0 && (
-            <section className={styles.card}>
-              <h2 className={styles['card-title']}>
-                Daily Trends
-                <span className={styles['card-subtitle']}>last {summary.days} days · weekly</span>
-              </h2>
-              <div className={styles['charts-grid']}>
-                <MetricChart
-                  title="Avg. Revenue per Order"
-                  data={chartData}
-                  dataKey="avgRevenue"
-                  color="#2563eb"
-                  formatValue={v => `₹${fmt(v)}`}
-                />
-                <MetricChart
-                  title="Avg. Costs per Order"
-                  data={chartData}
-                  dataKey="avgCosts"
-                  color="#7c3aed"
-                  formatValue={v => `₹${fmt(v)}`}
-                />
-                <MetricChart
-                  title="Avg. Profit per Order"
-                  data={chartData}
-                  dataKey="avgProfit"
-                  color="#059669"
-                  formatValue={v => `₹${fmt(v)}`}
-                  zeroLine
-                />
-                <MetricChart
-                  title="Profit Margin"
-                  data={chartData}
-                  dataKey="profitMargin"
-                  color="#0891b2"
-                  formatValue={v => `${v.toFixed(1)}%`}
-                  zeroLine
-                />
-                <MetricChart
-                  title="ROAS"
-                  data={chartData}
-                  dataKey="roas"
-                  color="#d97706"
-                  formatValue={v => `${v.toFixed(2)}x`}
-                />
+            <Card title="Weekly trends" eyebrow={`Last ${summary.days} days`}>
+              <div className={styles.charts}>
+                <TrendChart title="Revenue per order" data={chartData} dataKey="avgRevenue" formatValue={(v) => rupees(v)} />
+                <TrendChart title="Costs per order" data={chartData} dataKey="avgCosts" formatValue={(v) => rupees(v)} />
+                <TrendChart title="Profit per order" data={chartData} dataKey="avgProfit" formatValue={(v) => rupees(v)} zeroLine />
+                <TrendChart title="Profit margin" data={chartData} dataKey="profitMargin" formatValue={(v) => `${v.toFixed(1)}%`} zeroLine />
+                <TrendChart title="ROAS" data={chartData} dataKey="roas" formatValue={(v) => `${v.toFixed(2)}×`} />
               </div>
-            </section>
+            </Card>
           )}
         </>
       )}
