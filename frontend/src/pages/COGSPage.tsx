@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { api, type COGSVersion, type COGSTotalOverrides } from '../services/api';
+import { Badge, Button, Card, Dialog, EmptyState, SegmentedControl, Select, Skeleton, StatCard, StatStrip, TextField } from '../components/ui/pbx';
+import { cx, formatINR } from '../components/ui/format';
 import styles from './COGSPage.module.css';
 
 interface CostField {
@@ -44,10 +46,10 @@ function versionLabel(v: COGSVersion): string {
   });
 }
 
-function versionBadge(v: COGSVersion, now: Date): { label: string; cls: string } {
+function versionBadge(v: COGSVersion, now: Date): { label: string; tone: 'info' | 'neutral' } {
   const eff = new Date(v.effectiveFrom);
-  if (eff > now) return { label: 'Scheduled', cls: styles['badge-scheduled'] };
-  return { label: 'Past', cls: styles['badge-past'] };
+  if (eff > now) return { label: 'Scheduled', tone: 'info' };
+  return { label: 'Past', tone: 'neutral' };
 }
 
 function emptyField(category: 'pre' | 'post'): CostField {
@@ -69,9 +71,9 @@ function emptyField(category: 'pre' | 'post'): CostField {
 
 const VALUE_KEYS: ValueKey[] = ['smallPrepaidValue', 'smallCODValue', 'largePrepaidValue', 'largeCODValue'];
 const VALUE_LABELS: Record<ValueKey, string> = {
-  smallPrepaidValue: 'Small Prepaid',
+  smallPrepaidValue: 'Small prepaid',
   smallCODValue: 'Small COD',
-  largePrepaidValue: 'Large Prepaid',
+  largePrepaidValue: 'Large prepaid',
   largeCODValue: 'Large COD',
 };
 
@@ -112,154 +114,149 @@ function CostTable({ category, fields, overrides, onChange, onOverrideChange }: 
 
   const computedTotal = (key: ValueKey) => rows.reduce((s, f) => s + (f[key] || 0), 0);
 
-  const title = category === 'pre' ? 'Pre Cost' : 'Post Cost';
+  const title = category === 'pre' ? 'Pre cost' : 'Post cost';
   const subtitle = category === 'pre'
     ? 'Production costs before the order ships (materials, GST, payment fees…)'
     : 'Delivery & logistics costs after the order ships (shipping, COD handling…)';
 
   return (
-    <div className={styles['cost-table-section']}>
-      <div className={styles['cost-table-header']}>
-        <div>
-          <h3 className={styles['cost-table-title']}>{title}</h3>
-          <p className={styles['cost-table-subtitle']}>{subtitle}</p>
-        </div>
+    <Card title={title} eyebrow={subtitle} padding="sm">
+      <div className={styles.addRow}>
+        <span className="pbx-input pbx-input--sm">
+          <input
+            type="text"
+            placeholder={`New ${title.toLowerCase()} component`}
+            aria-label={`New ${title.toLowerCase()} component`}
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && addField()}
+          />
+        </span>
+        <Button size="sm" icon="plus" onClick={addField} disabled={!newName.trim()}>Add field</Button>
       </div>
 
-      <div className={styles['add-field-section']}>
-        <input
-          type="text"
-          placeholder={`New ${title.toLowerCase()} component`}
-          value={newName}
-          onChange={(e) => setNewName(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && addField()}
-          className={styles['field-name-input']}
-        />
-        <button className={styles['add-field-btn']} onClick={addField} disabled={!newName.trim()}>
-          + Add Field
-        </button>
-      </div>
-
-      <div className={styles['table-container']}>
-        <table className={styles['cogs-table']}>
-          <thead>
-            <tr>
-              <th>Cost Field</th>
-              {VALUE_KEYS.map((k) => (
-                <th key={k} className={styles['value-header']}>{VALUE_LABELS[k]}</th>
+      <div className="pbx-table">
+        <div className="pbx-table__scroll">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Cost field</th>
+                {VALUE_KEYS.map((k) => (
+                  <th key={k} scope="col" className={styles.right}>{VALUE_LABELS[k]}</th>
+                ))}
+                <th scope="col"><span className="pbx-sr">Actions</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((field) => (
+                <tr key={field.id}>
+                  <td className={styles.nameCell}>
+                    <span className={styles.fieldName}>{field.name}</span>
+                    <span className={styles.controls}>
+                      <Select
+                        size="sm"
+                        aria-label={`${field.name}: applies to`}
+                        value={field.type}
+                        onChange={(e) => setField(field.id, { type: e.target.value as CostField['type'] })}
+                        options={[{ value: 'cogs', label: 'COGS' }, { value: 'ndr', label: 'NDR' }, { value: 'both', label: 'Both' }]}
+                      />
+                      <Select
+                        size="sm"
+                        aria-label={`${field.name}: calculation`}
+                        value={field.calculationType}
+                        onChange={(e) => setField(field.id, { calculationType: e.target.value as CostField['calculationType'] })}
+                        options={[{ value: 'fixed', label: 'Fixed (₹)' }, { value: 'percentage', label: 'Percentage (%)' }]}
+                      />
+                      {field.calculationType === 'percentage' && (
+                        <SegmentedControl
+                          size="sm"
+                          label={`${field.name}: percentage of price`}
+                          value={field.percentageType}
+                          onChange={(v) => setField(field.id, { percentageType: v as CostField['percentageType'] })}
+                          options={[{ value: 'excluded', label: 'Excl. of price' }, { value: 'included', label: 'Incl. in price' }]}
+                        />
+                      )}
+                    </span>
+                  </td>
+                  {VALUE_KEYS.map((key) => {
+                    const isOverridden = overrides[key] !== undefined;
+                    return (
+                      <td key={key} className={styles.valueCell}>
+                        <span className={cx('pbx-input pbx-input--sm', styles.valueInput, isOverridden && styles.overridden)}>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            aria-label={`${field.name}, ${VALUE_LABELS[key]}`}
+                            value={isOverridden ? '' : field[key]}
+                            placeholder={isOverridden ? '—' : undefined}
+                            onFocus={() => { if (isOverridden) onOverrideChange(key, undefined); }}
+                            onChange={(e) => updateValue(field.id, key, parseFloat(e.target.value) || 0)}
+                            title={isOverridden ? 'Click to edit and clear the total override' : undefined}
+                          />
+                        </span>
+                      </td>
+                    );
+                  })}
+                  <td>
+                    <div className={styles.actions}>
+                      <Button size="sm" variant="ghost" iconOnly icon="trash-2" title="Delete field" onClick={() => deleteField(field.id)}>
+                        {`Delete ${field.name}`}
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
               ))}
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((field) => (
-              <tr key={field.id}>
-                <td className={styles['name-cell']}>
-                  <span className={styles['field-name']}>{field.name}</span>
-                  <div className={styles['field-controls']}>
-                    <select
-                      value={field.type}
-                      onChange={(e) => setField(field.id, { type: e.target.value as CostField['type'] })}
-                      className={styles['control-select']}
-                    >
-                      <option value="cogs">COGS</option>
-                      <option value="ndr">NDR</option>
-                      <option value="both">Both</option>
-                    </select>
-                    <select
-                      value={field.calculationType}
-                      onChange={(e) => setField(field.id, { calculationType: e.target.value as CostField['calculationType'] })}
-                      className={styles['control-select']}
-                    >
-                      <option value="fixed">Fixed (₹)</option>
-                      <option value="percentage">Percentage (%)</option>
-                    </select>
-                    {field.calculationType === 'percentage' && (
-                      <select
-                        value={field.percentageType}
-                        onChange={(e) => setField(field.id, { percentageType: e.target.value as CostField['percentageType'] })}
-                        className={styles['control-select']}
-                      >
-                        <option value="excluded">Excl. of price</option>
-                        <option value="included">Incl. in price</option>
-                      </select>
-                    )}
-                  </div>
-                </td>
+              {rows.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="pbx-table__empty">
+                    <EmptyState size="sm" icon="calculator" title="No fields yet" description="Add one above." />
+                  </td>
+                </tr>
+              )}
+            </tbody>
+            <tfoot>
+              <tr className={styles.totalRow}>
+                <td>{title} total</td>
                 {VALUE_KEYS.map((key) => {
                   const isOverridden = overrides[key] !== undefined;
+                  const displayValue = isOverridden ? overrides[key]! : computedTotal(key);
                   return (
-                    <td key={key}>
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={isOverridden ? '' : field[key]}
-                        placeholder={isOverridden ? '—' : undefined}
-                        className={`${styles['table-input']} ${isOverridden ? styles['cell-overridden'] : ''}`}
-                        onFocus={() => { if (isOverridden) onOverrideChange(key, undefined); }}
-                        onChange={(e) => updateValue(field.id, key, parseFloat(e.target.value) || 0)}
-                        title={isOverridden ? 'Click to edit and clear the total override' : undefined}
-                      />
+                    <td key={key} className={styles.valueCell}>
+                      <span className={cx('pbx-input pbx-input--sm', styles.valueInput, styles.totalInput, isOverridden && styles.overridden)}>
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          aria-label={`${title} total, ${VALUE_LABELS[key]}`}
+                          value={totalInputRefs.current[key] ?? displayValue}
+                          onChange={(e) => {
+                            totalInputRefs.current[key] = e.target.value;
+                            const v = parseFloat(e.target.value);
+                            if (!isNaN(v)) onOverrideChange(key, v);
+                          }}
+                          onFocus={(e) => {
+                            totalInputRefs.current[key] = String(displayValue);
+                            e.target.select();
+                          }}
+                          onBlur={() => {
+                            delete totalInputRefs.current[key];
+                            // If user cleared the field, remove override
+                            if (overrides[key] === undefined) return;
+                          }}
+                          title={isOverridden ? 'Override active — edit a cell above to revert to computed total' : 'Edit to override the total for this column'}
+                        />
+                      </span>
                     </td>
                   );
                 })}
-                <td>
-                  <button onClick={() => deleteField(field.id)} className={styles['table-delete-btn']} title="Delete">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                    </svg>
-                  </button>
-                </td>
+                <td />
               </tr>
-            ))}
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={6} style={{ textAlign: 'center', padding: '1.5rem', color: '#94a3b8', fontSize: '0.875rem' }}>
-                  No fields yet. Add one above.
-                </td>
-              </tr>
-            )}
-          </tbody>
-          <tfoot>
-            <tr>
-              <td className={styles['totals-label']}>{title} Total</td>
-              {VALUE_KEYS.map((key) => {
-                const isOverridden = overrides[key] !== undefined;
-                const displayValue = isOverridden ? overrides[key]! : computedTotal(key);
-                return (
-                  <td key={key} className={styles['totals-cell-editable']}>
-                    <input
-                      type="number"
-                      min="0"
-                      step="1"
-                      value={totalInputRefs.current[key] ?? displayValue}
-                      className={`${styles['total-input']} ${isOverridden ? styles['total-overridden'] : ''}`}
-                      onChange={(e) => {
-                        totalInputRefs.current[key] = e.target.value;
-                        const v = parseFloat(e.target.value);
-                        if (!isNaN(v)) onOverrideChange(key, v);
-                      }}
-                      onFocus={(e) => {
-                        totalInputRefs.current[key] = String(displayValue);
-                        e.target.select();
-                      }}
-                      onBlur={() => {
-                        delete totalInputRefs.current[key];
-                        // If user cleared the field, remove override
-                        if (overrides[key] === undefined) return;
-                      }}
-                      title={isOverridden ? 'Override active — edit a cell above to revert to computed total' : 'Edit to override the total for this column'}
-                    />
-                  </td>
-                );
-              })}
-              <td></td>
-            </tr>
-          </tfoot>
-        </table>
+            </tfoot>
+          </table>
+        </div>
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -277,6 +274,8 @@ export function COGSPage() {
   const [editEffectiveFrom, setEditEffectiveFrom] = useState('');
   const [preOverrides, setPreOverrides] = useState<COGSTotalOverrides>({});
   const [postOverrides, setPostOverrides] = useState<COGSTotalOverrides>({});
+  // The version waiting for a delete confirmation
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const now = new Date();
 
@@ -341,23 +340,22 @@ export function COGSPage() {
         toast.success('COGS version updated — P&L recomputing in background');
       }
       await loadVersions();
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to save');
+    } catch (err) {
+      toast.error(err instanceof Error && err.message ? err.message : 'Failed to save');
     } finally {
       setIsSaving(false);
     }
   };
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm('Delete this version? P&L will recompute for affected dates.')) return;
     try {
       await api.deleteCOGSVersion(id);
       toast.success('Version deleted');
       setSelectedId(null);
       setIsNewDraft(false);
       await loadVersions();
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to delete version');
+    } catch (err) {
+      toast.error(err instanceof Error && err.message ? err.message : 'Failed to delete version');
     }
   };
 
@@ -369,84 +367,62 @@ export function COGSPage() {
   };
 
   if (isLoading) {
-    return (
-      <div className={styles['loading-section']}>
-        <div className={styles.spinner}></div>
-        <p>Loading COGS versions...</p>
-      </div>
-    );
+    return <Skeleton lines={8} />;
   }
 
   const editorOpen = isNewDraft || selectedId !== null;
 
   return (
-    <div className={styles['cogs-page']}>
-      {/* Page header */}
-      <div className={styles['page-header']}>
-        <div>
-          <h2>COGS Configuration</h2>
-          <p>Version-based — Pre Cost + Post Cost combine into the final COGS per order</p>
-        </div>
-        <div className={styles['editor-actions']}>
-          {!isNewDraft && selectedId && versions.length > 1 && (
-            <button className={styles['delete-version-btn']} onClick={() => handleDelete(selectedId)}>
-              Delete version
-            </button>
+    <>
+      <Card
+        title="COGS versions"
+        eyebrow="pre cost + post cost make the COGS per order"
+        padding="sm"
+        actions={
+          <>
+            {!isNewDraft && selectedId && versions.length > 1 && (
+              <Button size="sm" variant="ghost" icon="trash-2" onClick={() => setConfirmDeleteId(selectedId)}>Delete version</Button>
+            )}
+            <Button size="sm" variant="primary" onClick={handleSave} loading={isSaving} disabled={!editorOpen}>
+              {isNewDraft ? 'Create version' : 'Save changes'}
+            </Button>
+          </>
+        }
+      >
+        <div className={styles.versions}>
+          {versions.map((v) => {
+            const isActive = v._id === currentVersion?._id;
+            const badge = isActive ? { label: 'Current', tone: 'positive' as const } : versionBadge(v, now);
+            const isSelected = !isNewDraft && selectedId === v._id;
+            return (
+              <button key={v._id} type="button" className={styles.version} aria-pressed={isSelected} onClick={() => openVersion(v)}>
+                <Badge size="sm" tone={badge.tone}>{badge.label}</Badge>
+                <span className={styles.versionDate}>{versionLabel(v)}</span>
+              </button>
+            );
+          })}
+          {isNewDraft && (
+            <span className={cx(styles.version, styles.draft)}>
+              <Badge size="sm" tone="caution">Draft</Badge>
+              <span className={styles.versionDate}>New version</span>
+            </span>
           )}
-          <button className={styles['save-btn']} onClick={handleSave} disabled={isSaving || !editorOpen}>
-            {isSaving ? 'Saving…' : isNewDraft ? 'Create Version' : 'Save Changes'}
-          </button>
+          <Button size="sm" variant="ghost" icon="plus" onClick={startNewVersion}>New version</Button>
         </div>
-      </div>
+      </Card>
 
-      {/* Version selector bar */}
-      <div className={styles['version-bar']}>
-        {versions.map((v) => {
-          const isActive = v._id === currentVersion?._id;
-          const badge = isActive
-            ? { label: 'Current', cls: styles['badge-current'] }
-            : versionBadge(v, now);
-          const isSelected = !isNewDraft && selectedId === v._id;
-          return (
-            <button
-              key={v._id}
-              className={`${styles['version-chip']} ${isSelected ? styles['chip-selected'] : ''}`}
-              onClick={() => openVersion(v)}
-            >
-              <span className={`${styles['version-badge']} ${badge.cls}`}>{badge.label}</span>
-              <span className={styles['chip-date']}>{versionLabel(v)}</span>
-            </button>
-          );
-        })}
-        {isNewDraft && (
-          <button className={`${styles['version-chip']} ${styles['chip-selected']} ${styles['chip-draft']}`}>
-            <span className={`${styles['version-badge']} ${styles['badge-draft']}`}>Draft</span>
-            <span className={styles['chip-date']}>New version</span>
-          </button>
-        )}
-        <button className={styles['new-version-chip']} onClick={startNewVersion}>
-          + New Version
-        </button>
-      </div>
-
-      {/* Editor */}
       {editorOpen ? (
-        <div className={styles['editor-panel']}>
-          {/* Effective-from date */}
-          <div className={styles['effective-date-row']}>
-            <span className={styles['effective-date-label']}>Effective from</span>
-            <input
+        <>
+          <div className={styles.effective}>
+            <TextField
+              label="Effective from"
               type="date"
-              className={styles['effective-date-input']}
               value={editEffectiveFrom}
               onChange={(e) => setEditEffectiveFrom(e.target.value)}
+              hint="Orders placed on this date or later use these values."
             />
-            <span className={styles['date-hint']}>
-              Orders placed on this date or later will use these values
-            </span>
           </div>
 
-          {/* Pre Cost table */}
           <CostTable
             category="pre"
             fields={editFields}
@@ -455,7 +431,6 @@ export function COGSPage() {
             onOverrideChange={makeOverrideHandler(setPreOverrides)}
           />
 
-          {/* Post Cost table */}
           <CostTable
             category="post"
             fields={editFields}
@@ -464,26 +439,31 @@ export function COGSPage() {
             onOverrideChange={makeOverrideHandler(setPostOverrides)}
           />
 
-          {/* Grand total summary */}
-          <div className={styles['grand-total-row']}>
-            <span className={styles['grand-total-label']}>Total COGS (Pre + Post)</span>
-            <div className={styles['grand-total-values']}>
-              {(['smallPrepaidValue', 'smallCODValue', 'largePrepaidValue', 'largeCODValue'] as ValueKey[]).map((key) => (
-                <div key={key} className={styles['grand-total-item']}>
-                  <span className={styles['grand-total-variant']}>
-                    {key === 'smallPrepaidValue' ? 'Small Prepaid' : key === 'smallCODValue' ? 'Small COD' : key === 'largePrepaidValue' ? 'Large Prepaid' : 'Large COD'}
-                  </span>
-                  <span className={styles['grand-total-amount']}>₹{grandTotal(key).toFixed(0)}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
+          <StatStrip label="Total COGS, pre plus post">
+            {VALUE_KEYS.map((key) => (
+              <StatCard key={key} label={`Total COGS · ${VALUE_LABELS[key]}`} value={formatINR(grandTotal(key))} sub="pre + post" />
+            ))}
+          </StatStrip>
+        </>
       ) : (
-        <div className={styles['no-version-placeholder']}>
-          <p>Select a version above or create a new one.</p>
-        </div>
+        <EmptyState icon="calculator" title="Select a version or create one" description="Each version applies from its effective date." />
       )}
-    </div>
+
+      <Dialog
+        open={!!confirmDeleteId}
+        onClose={() => setConfirmDeleteId(null)}
+        size="sm"
+        tone="negative"
+        icon="triangle-alert"
+        title="Delete this version?"
+        description="P&L recomputes for the dates it covered."
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setConfirmDeleteId(null)}>Cancel</Button>
+            <Button variant="danger" onClick={() => { const id = confirmDeleteId; setConfirmDeleteId(null); if (id) handleDelete(id); }}>Delete version</Button>
+          </>
+        }
+      />
+    </>
   );
 }

@@ -1,7 +1,6 @@
-import { Link, useNavigate, useLocation, Routes, Route } from 'react-router-dom';
-import { lazy, Suspense, useState, useEffect } from 'react';
-import { api } from '../services/api';
-import type { AdminUser } from '../services/api';
+import { useNavigate, useLocation, Routes, Route } from 'react-router-dom';
+import { lazy, Suspense, useEffect } from 'react';
+import { PageHeader, Skeleton, Tabs } from '../components/ui/pbx';
 import styles from './ExpensesPage.module.css';
 
 // Each section loads the first time it is opened (Bank Account alone pulls in xlsx).
@@ -10,24 +9,21 @@ const COGSPage = lazy(() => import('./COGSPage').then((m) => ({ default: m.COGSP
 const FixedMonthlyPage = lazy(() => import('./FixedMonthlyPage').then((m) => ({ default: m.FixedMonthlyPage })));
 const BankAccountPage = lazy(() => import('./BankAccountPage').then((m) => ({ default: m.BankAccountPage })));
 
+const SECTIONS = [
+  { id: 'meta-ads', label: 'Meta ads', href: '/admin/expenses/meta-ads' },
+  { id: 'cogs', label: 'COGS', href: '/admin/expenses/cogs' },
+  { id: 'fixed-monthly', label: 'Fixed monthly', href: '/admin/expenses/fixed-monthly' },
+  { id: 'bank-account', label: 'Bank account', href: '/admin/expenses/bank-account' },
+];
+
+// The admin shell loads the signed-in user and draws the topbar; this page is the sections.
 export function ExpensesPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const [user, setUser] = useState<AdminUser | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
 
   const currentPath = location.pathname;
   const isOverview = currentPath === '/admin/expenses' || currentPath === '/admin/expenses/';
-  const isMetaAds = currentPath === '/admin/expenses/meta-ads';
-
-  const isCOGS = currentPath === '/admin/expenses/cogs';
-  const isFixedMonthly = currentPath === '/admin/expenses/fixed-monthly';
-  const isBankAccount = currentPath === '/admin/expenses/bank-account';
-
-  useEffect(() => {
-    loadUser();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount
-  }, []);
+  const active = SECTIONS.find((s) => currentPath.startsWith(s.href))?.id ?? 'meta-ads';
 
   useEffect(() => {
     if (isOverview) {
@@ -35,112 +31,25 @@ export function ExpensesPage() {
     }
   }, [isOverview, navigate]);
 
-  const loadUser = async () => {
-    try {
-      const meRes = await api.getMe();
-      if (!meRes.success) {
-        api.logout();
-        navigate('/admin');
-        return;
-      }
-      setUser(meRes.user || null);
-    } catch (err) {
-      console.error('Failed to load user:', err);
-      api.logout();
-      navigate('/admin');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleLogout = () => {
-    api.logout();
-    navigate('/admin');
-  };
-
-  if (isLoading) {
-    return (
-      <div className={`${styles['expenses-page']} ${styles.loading}`}>
-        <div className={styles.spinner}></div>
-      </div>
-    );
-  }
-
   return (
-    <div className={styles['main-wrapper']}>
-      <header className={styles['dashboard-header']}>
-        <div className={styles['header-breadcrumb']}>
-          <Link to="/admin/expenses/meta-ads" className={styles['breadcrumb-item']}>Expenses</Link>
-          {isMetaAds && (
-            <>
-              <span className={styles['breadcrumb-separator']}>/</span>
-              <span className={`${styles['breadcrumb-item']} ${styles.active}`}>Meta Ads</span>
-            </>
-          )}
-          {isBankAccount && (
-            <>
-              <span className={styles['breadcrumb-separator']}>/</span>
-              <span className={`${styles['breadcrumb-item']} ${styles.active}`}>Bank Account</span>
-            </>
-          )}
-        </div>
-        <div className={styles['header-right']}>
-          <div className={styles['user-menu']}>
-            <div className={styles['user-avatar']}>{user?.name?.charAt(0) || 'A'}</div>
-            <span className={styles['user-name']}>{user?.name}</span>
-          </div>
-          <button onClick={handleLogout} className={styles['logout-btn']}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-              <polyline points="16 17 21 12 16 7" />
-              <line x1="21" y1="12" x2="9" y2="12" />
-            </svg>
-            Logout
-          </button>
-        </div>
-      </header>
+    <div className={styles.page}>
+      <PageHeader title="Expenses" description="Ad spend, cost of goods, fixed monthly costs and the bank account.">
+        <Tabs
+          label="Expenses sections"
+          items={SECTIONS}
+          value={active}
+          onChange={(id) => navigate(SECTIONS.find((s) => s.id === id)!.href)}
+        />
+      </PageHeader>
 
-      <main className={styles['dashboard-main']}>
-        <div className={styles['expenses-nav']}>
-
-          <Link
-            to="/admin/expenses/meta-ads"
-            className={`${styles['expenses-nav-item']} ${isMetaAds ? styles.active : ''}`}
-          >
-            Meta Ads
-          </Link>
-
-          <Link
-            to="/admin/expenses/cogs"
-            className={`${styles['expenses-nav-item']} ${isCOGS ? styles.active : ''}`}
-          >
-            COGS
-          </Link>
-
-          <Link
-            to="/admin/expenses/fixed-monthly"
-            className={`${styles['expenses-nav-item']} ${isFixedMonthly ? styles.active : ''}`}
-          >
-            Fixed Monthly
-          </Link>
-
-          <Link
-            to="/admin/expenses/bank-account"
-            className={`${styles['expenses-nav-item']} ${isBankAccount ? styles.active : ''}`}
-          >
-            Bank Account
-          </Link>
-        </div>
-
-        <Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.85rem' }}>Loading...</div>}>
-          <Routes>
-            <Route path="meta-ads" element={<MetaAdsPage />} />
-            <Route path="cogs" element={<COGSPage />} />
-            <Route path="fixed-monthly" element={<FixedMonthlyPage />} />
-            <Route path="bank-account" element={<BankAccountPage />} />
-          </Routes>
-        </Suspense>
-      </main>
+      <Suspense fallback={<Skeleton lines={6} />}>
+        <Routes>
+          <Route path="meta-ads" element={<MetaAdsPage />} />
+          <Route path="cogs" element={<COGSPage />} />
+          <Route path="fixed-monthly" element={<FixedMonthlyPage />} />
+          <Route path="bank-account" element={<BankAccountPage />} />
+        </Routes>
+      </Suspense>
     </div>
   );
 }
