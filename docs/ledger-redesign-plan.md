@@ -114,6 +114,9 @@ The new shell makes old-style screens look out of place, so `main` takes the red
 once phases 2–6 are done (the upload page can follow on its own). Merge `main` into the branch,
 check every route, then fast-forward `main` so Vercel ships it.
 
+Shipped on 2026-10-25: every route checked, then `main` fast-forwarded to the branch. Later changes
+still go on the branch first, then fast-forward `main` again.
+
 ## Working in parallel
 
 More than one session works in this worktree. Before starting a screen, set its Status to "In
