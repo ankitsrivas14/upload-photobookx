@@ -2,7 +2,7 @@ import { onRequest } from 'firebase-functions/v2/https';
 import { app } from './app';
 
 // Scheduled order sync + refresh jobs (deployed as their own functions alongside `api`).
-export { scheduledRefresh, ordersSync } from './scheduled';
+export { scheduledRefresh, ordersSync, adSpendSync } from './scheduled';
 
 /**
  * Cloud Functions (gen2) entry — the whole Express app behind one HTTPS function.
