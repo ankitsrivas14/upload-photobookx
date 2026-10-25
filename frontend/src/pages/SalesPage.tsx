@@ -1957,7 +1957,7 @@ export function SalesPage({ initialFilter, embedded = false }: SalesPageProps = 
         </Card>
       )}
 
-      <section className={styles.orders} aria-label="Orders">
+      <section className={styles.orders} aria-label="Order filters">
         <div className={styles.statusStrip} role="group" aria-label="Filter by delivery status">
           {statusFilters.map((f) => (
             <button key={f.key} type="button" className={styles.statusCell} aria-pressed={f.on} onClick={() => f.set(!f.on)}>
@@ -2004,59 +2004,59 @@ export function SalesPage({ initialFilter, embedded = false }: SalesPageProps = 
             <Switch label="AWB column" checked={showAWBColumn} onChange={(e) => setShowAWBColumn(e.target.checked)} />
           </span>
         </div>
-
-        {selectedOrders.size > 0 && (
-          <div className={cx('pbx-table__bulk', styles.bulk)} role="region" aria-label="Selection">
-            <span><strong>{selectedOrders.size.toLocaleString('en-IN')}</strong> selected</span>
-            <div className="pbx-table__bulk-actions">
-              <Button size="sm" variant="secondary" icon="bookmark" onClick={handleBulkAcknowledge} disabled={isProcessing}>Acknowledge</Button>
-              <Button size="sm" variant="secondary" icon="truck" onClick={handleMarkAsRTO} disabled={isProcessing}>Mark RTO</Button>
-              <Menu
-                label="More bulk actions"
-                trigger={<Button size="sm" variant="secondary" iconRight="chevron-down" loading={isProcessing}>More</Button>}
-                items={[
-                  { label: 'Unmark RTO', icon: 'x', onSelect: handleUnmarkRTO },
-                  { label: 'Tag customers no-COD', icon: 'tag', onSelect: handleBulkAddNoCOD },
-                  { divider: true },
-                  {
-                    label: 'Discard orders',
-                    icon: 'trash-2',
-                    tone: 'negative',
-                    onSelect: () => setConfirmAction({
-                      title: `Discard ${selectedOrders.size} ${selectedOrders.size === 1 ? 'order' : 'orders'}?`,
-                      description: 'They leave the orders list and every figure on this page.',
-                      confirmLabel: 'Discard',
-                      danger: true,
-                      run: handleDiscardOrders,
-                    }),
-                  },
-                ]}
-              />
-            </div>
-            <Button variant="ghost" size="sm" onClick={() => { setSelectedOrders(new Set()); setSelectAll(false); }}>Clear</Button>
-          </div>
-        )}
-        <OrdersByDay
-          days={ordersGroupedByDate}
-          hasStatusFilter={hasStatusFilter}
-          selectedOrders={selectedOrders}
-          onSelectOrder={handleSelectOrder}
-          onSelectDay={handleSelectDay}
-          orderProfitLoss={orderProfitLoss}
-          rtoOrderIds={rtoOrderIds}
-          getDelayDays={getDelayDays}
-          handleOpenCogsModal={handleOpenCogsModal}
-          avgPnlPerFinalOrder={avgPnlPerFinalOrder}
-          globalNdrRate={globalNdrRate}
-          onUpdateDeliveryStatus={handleUpdateDeliveryStatus}
-          onAddCustomerTag={handleAddCustomerTag}
-          onAcknowledgeOrder={handleAcknowledgeOrder}
-          acknowledgedOrderIds={acknowledgedOrderIds}
-          onMarkTicketRaised={handleMarkTicketRaised}
-          ticketRaisedOrderIds={ticketRaisedOrderIds}
-          showAWBColumn={showAWBColumn}
-        />
       </section>
+
+      {selectedOrders.size > 0 && (
+        <div className={cx('pbx-table__bulk', styles.bulk)} role="region" aria-label="Selection">
+          <span><strong>{selectedOrders.size.toLocaleString('en-IN')}</strong> selected</span>
+          <div className="pbx-table__bulk-actions">
+            <Button size="sm" variant="secondary" icon="bookmark" onClick={handleBulkAcknowledge} disabled={isProcessing}>Acknowledge</Button>
+            <Button size="sm" variant="secondary" icon="truck" onClick={handleMarkAsRTO} disabled={isProcessing}>Mark RTO</Button>
+            <Menu
+              label="More bulk actions"
+              trigger={<Button size="sm" variant="secondary" iconRight="chevron-down" loading={isProcessing}>More</Button>}
+              items={[
+                { label: 'Unmark RTO', icon: 'x', onSelect: handleUnmarkRTO },
+                { label: 'Tag customers no-COD', icon: 'tag', onSelect: handleBulkAddNoCOD },
+                { divider: true },
+                {
+                  label: 'Discard orders',
+                  icon: 'trash-2',
+                  tone: 'negative',
+                  onSelect: () => setConfirmAction({
+                    title: `Discard ${selectedOrders.size} ${selectedOrders.size === 1 ? 'order' : 'orders'}?`,
+                    description: 'They leave the orders list and every figure on this page.',
+                    confirmLabel: 'Discard',
+                    danger: true,
+                    run: handleDiscardOrders,
+                  }),
+                },
+              ]}
+            />
+          </div>
+          <Button variant="ghost" size="sm" onClick={() => { setSelectedOrders(new Set()); setSelectAll(false); }}>Clear</Button>
+        </div>
+      )}
+      <OrdersByDay
+        days={ordersGroupedByDate}
+        hasStatusFilter={hasStatusFilter}
+        selectedOrders={selectedOrders}
+        onSelectOrder={handleSelectOrder}
+        onSelectDay={handleSelectDay}
+        orderProfitLoss={orderProfitLoss}
+        rtoOrderIds={rtoOrderIds}
+        getDelayDays={getDelayDays}
+        handleOpenCogsModal={handleOpenCogsModal}
+        avgPnlPerFinalOrder={avgPnlPerFinalOrder}
+        globalNdrRate={globalNdrRate}
+        onUpdateDeliveryStatus={handleUpdateDeliveryStatus}
+        onAddCustomerTag={handleAddCustomerTag}
+        onAcknowledgeOrder={handleAcknowledgeOrder}
+        acknowledgedOrderIds={acknowledgedOrderIds}
+        onMarkTicketRaised={handleMarkTicketRaised}
+        ticketRaisedOrderIds={ticketRaisedOrderIds}
+        showAWBColumn={showAWBColumn}
+      />
 
       <Drawer
         open={showPendingDrawer}

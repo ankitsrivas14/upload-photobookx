@@ -2,7 +2,7 @@ import React from 'react';
 import { OrderRow } from './OrderRow';
 import styles from '../SalesPage.module.css';
 import { useVirtualRows, VIRTUALIZE_AFTER } from '../../lib/useVirtualRows';
-import { Amount, Checkbox, EmptyState } from '../../components/ui/pbx';
+import { Amount, Card, Checkbox, EmptyState } from '../../components/ui/pbx';
 
 import { type ShopifyOrder } from '../../services/api';
 
@@ -74,8 +74,9 @@ function dayFigures(
 }
 
 /**
- * Sales management orders: per day, a heading line with that day's figures, then its own table.
- * Long periods render only the days near the viewport.
+ * Sales management orders: one card per day, side by side with the page's other cards (not inside
+ * them), with the day's figures in the card header and its own table. Long periods render only the
+ * days near the viewport.
  */
 export const OrdersByDay: React.FC<OrdersByDayProps> = (props) => {
   const { days: allDays, hasStatusFilter, selectedOrders, onSelectDay, showAWBColumn = false } = props;
@@ -101,39 +102,38 @@ export const OrdersByDay: React.FC<OrdersByDayProps> = (props) => {
     const f = dayFigures(group, props.rtoOrderIds, props.orderProfitLoss, props.avgPnlPerFinalOrder, props.globalNdrRate);
     const hasOrders = group.orders.length > 0;
 
-    return (
-      <section aria-label={`Orders of ${group.dateLabel}`}>
-        <header className={styles.dayHead}>
-          <h3 className={styles.dayTitle}>{group.dateLabel}</h3>
-          <span className={styles.dayMeta}>
-            {`${weekday(group.dateKey)} · ${plural(group.orders.length, hasStatusFilter ? 'matching order' : 'order')}`}
-          </span>
-          {!hasStatusFilter && (
-            <dl className={styles.dayFigures}>
-              <div>
-                <dt>Revenue</dt>
-                <dd>{hasOrders ? <Amount value={f.revenue} /> : '—'}</dd>
-              </div>
-              <div>
-                <dt>Ad spend</dt>
-                <dd>{group.adSpend > 0 ? <Amount value={group.adSpend} /> : '—'}</dd>
-              </div>
-              <div>
-                <dt>P/L so far</dt>
-                <dd>{hasOrders || group.adSpend > 0 ? <Amount value={f.pnl} signed /> : '—'}</dd>
-              </div>
-              <div title={f.pendingCount > 0 ? `${plural(f.pendingCount, 'order')} still pending, counted at the average P/L` : undefined}>
-                <dt>Est. P/L</dt>
-                <dd>{hasOrders ? <Amount value={f.estimatedPnl} signed /> : '—'}</dd>
-              </div>
-              <div>
-                <dt>Expected NDR</dt>
-                <dd>{hasOrders ? f.expectedNdr.toLocaleString('en-IN') : '—'}</dd>
-              </div>
-            </dl>
-          )}
-        </header>
+    const figures = hasStatusFilter ? undefined : (
+          <dl className={styles.dayFigures}>
+            <div>
+              <dt>Revenue</dt>
+              <dd>{hasOrders ? <Amount value={f.revenue} /> : '—'}</dd>
+            </div>
+            <div>
+              <dt>Ad spend</dt>
+              <dd>{group.adSpend > 0 ? <Amount value={group.adSpend} /> : '—'}</dd>
+            </div>
+            <div>
+              <dt>P/L so far</dt>
+              <dd>{hasOrders || group.adSpend > 0 ? <Amount value={f.pnl} signed /> : '—'}</dd>
+            </div>
+            <div title={f.pendingCount > 0 ? `${plural(f.pendingCount, 'order')} still pending, counted at the average P/L` : undefined}>
+              <dt>Est. P/L</dt>
+              <dd>{hasOrders ? <Amount value={f.estimatedPnl} signed /> : '—'}</dd>
+            </div>
+            <div>
+              <dt>Expected NDR</dt>
+              <dd>{hasOrders ? f.expectedNdr.toLocaleString('en-IN') : '—'}</dd>
+            </div>
+          </dl>
+    );
 
+    return (
+      <Card
+        aria-label={`Orders of ${group.dateLabel}`}
+        title={group.dateLabel}
+        eyebrow={`${weekday(group.dateKey)} · ${plural(group.orders.length, hasStatusFilter ? 'matching order' : 'order')}`}
+        actions={figures}
+      >
         {hasOrders ? (
           <div className={`pbx-table pbx-table--comfortable ${styles.table}`}>
             <div className={styles.tableScroll}>
@@ -186,7 +186,7 @@ export const OrdersByDay: React.FC<OrdersByDayProps> = (props) => {
         ) : (
           <p className={styles.noOrders}>No orders this day.</p>
         )}
-      </section>
+      </Card>
     );
   };
 

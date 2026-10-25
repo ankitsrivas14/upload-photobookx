@@ -228,34 +228,15 @@
 
 /* Spacing lives inside each day (not as a gap) so the virtualiser measures it. */
 .day {
-  padding-bottom: var(--space-6);
+  padding-bottom: var(--space-4);
 }
 
-/* A day's heading line: date, weekday and count, then its figures, without a box of its own. */
-.dayHead {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--space-1) var(--space-3);
-  padding-bottom: var(--space-2);
-}
-
-.dayTitle {
-  margin: 0;
-  font: 600 14px/20px var(--font-sans);
-  color: var(--ink);
-}
-
-.dayMeta {
-  font: 400 12px/16px var(--font-sans);
-  color: var(--ink-muted);
-}
-
+/* A day's figures, inline in its card header. */
 .dayFigures {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-1) var(--space-5);
-  margin: 0 0 0 auto;
+  margin: 0;
 }
 
 .dayFigures div {
@@ -275,12 +256,6 @@
   color: var(--ink);
 }
 
-@media (max-width: 720px) {
-  .dayFigures {
-    width: 100%;
-    margin-left: 0;
-  }
-}
 
 .noOrders {
   margin: 0;
@@ -289,13 +264,15 @@
   color: var(--ink-muted);
 }
 
-/* The selection's bulk actions stay in view while you work down the days. */
+/* The selection's bulk actions: a bar of its own that stays in view while you work down the days. */
 .bulk {
   position: sticky;
   top: var(--topbar);
   z-index: var(--z-sticky);
-  margin-bottom: var(--space-3);
-  background: var(--paper);
+  padding: 4px var(--card-pad);
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-md);
 }
 
 .embedded .bulk {
