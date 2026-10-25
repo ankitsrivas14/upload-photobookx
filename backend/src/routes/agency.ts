@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { requireAdmin } from './adminAuth';
-import { AgencySettings } from '../models/AgencySettings';
+import { agencySettingsStore } from '../db/featureStores';
 import { MetaAdPerformance } from '../models/MetaAdPerformance';
 import { computeBreakevenMetrics } from '../services/breakevenService';
 import type { AuthenticatedRequest } from '../types';
@@ -54,7 +54,7 @@ const norm = (n: any) => (typeof n === 'string' ? n.trim().toLowerCase().replace
 
 /** The configured agency name prefixes ([] when unset = no filtering). */
 async function getNamePrefixes(): Promise<string[]> {
-  const s = await AgencySettings.findOne({ key: 'default' }).lean();
+  const s = await agencySettingsStore.getById('default');
   return ((s as any)?.namePrefixes ?? []).filter((p: string) => !!p && p.trim());
 }
 
@@ -321,11 +321,11 @@ router.put('/settings', requireAdmin, async (req: AuthenticatedRequest, res: Res
       ).values()
     );
 
-    const settings = await AgencySettings.findOneAndUpdate(
-      { key: 'default' },
-      { $set: { key: 'default', namePrefixes: cleaned } },
-      { upsert: true, new: true }
-    ).lean();
+    const settings = await agencySettingsStore.setById('default', {
+      key: 'default',
+      namePrefixes: cleaned,
+      updatedAt: new Date(),
+    });
 
     res.json({ success: true, namePrefixes: (settings as any).namePrefixes });
   } catch (error) {

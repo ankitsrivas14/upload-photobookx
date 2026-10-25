@@ -1,14 +1,21 @@
 import express, { Response } from 'express';
 import { requireAdmin } from './adminAuth';
 import { AuthenticatedRequest } from '../types';
-import { AbandonedCheckout, WhatsAppTemplate } from '../models';
+import { createHash } from 'crypto';
+import { abandonedCheckoutStore, whatsAppTemplateStore } from '../db/featureStores';
 
 const router = express.Router();
+
+// Newest paste first; within one paste (same createdAt), the order the rows were pasted in.
+// `seq` records that order (rows copied from Mongo carry their old id, which sorts the same way).
+const byPasteThenRow = (a: any, b: any) =>
+  new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime() ||
+  String(a.seq ?? '').localeCompare(String(b.seq ?? ''));
 
 router.get('/', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     // Return all abandoned checkouts sorted by date (newest first)
-    const checkouts = await AbandonedCheckout.find({}).sort({ createdAt: -1 });
+    const checkouts = (await abandonedCheckoutStore.all()).sort(byPasteThenRow);
     res.json({ success: true, checkouts });
   } catch (error) {
     console.error('Error fetching abandoned checkouts:', error);
@@ -18,7 +25,7 @@ router.get('/', requireAdmin, async (req: AuthenticatedRequest, res: Response) =
 
 router.get('/template', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const template = await WhatsAppTemplate.findOne({ name: 'abandoned_checkout' });
+    const template = await whatsAppTemplateStore.getById('abandoned_checkout');
     res.json({ success: true, message: template ? template.message : '' });
   } catch (error) {
     console.error('Error fetching template:', error);
@@ -34,11 +41,11 @@ router.post('/template', requireAdmin, async (req: AuthenticatedRequest, res: Re
       return;
     }
 
-    await WhatsAppTemplate.updateOne(
-      { name: 'abandoned_checkout' },
-      { $set: { message, updatedAt: new Date() } },
-      { upsert: true }
-    );
+    await whatsAppTemplateStore.setById('abandoned_checkout', {
+      name: 'abandoned_checkout',
+      message,
+      updatedAt: new Date(),
+    });
 
     res.json({ success: true, message: 'Template saved successfully' });
   } catch (error) {
@@ -95,26 +102,20 @@ router.post('/', requireAdmin, async (req: AuthenticatedRequest, res: Response) 
     let skipped = 0;
 
     if (records.length > 0) {
-      try {
-        const operations = records.map(record => ({
-          insertOne: {
-            document: {
-              phone: record.phone,
-              dateStr: record.dateStr,
-              name: record.name
-            }
-          }
-        }));
-
-        const result = await AbandonedCheckout.bulkWrite(operations, { ordered: false });
-        inserted = result.insertedCount;
-      } catch (err: any) {
-        // Bulk write error will be thrown if some documents have duplicate keys
-        if (err.code === 11000 || err.name === 'BulkWriteError') {
-          inserted = err.result?.nInserted || 0;
-        } else {
-          throw err;
-        }
+      // One doc per (phone, date): its id is derived from both, so pasting the same leads
+      // again inserts nothing new. Every row of a paste shares its createdAt.
+      const pastedAt = new Date();
+      for (const [index, record] of records.entries()) {
+        const id = createHash('sha1').update(`${record.phone}\u0000${record.dateStr}`).digest('hex');
+        const created = await abandonedCheckoutStore.createIfAbsent(id, {
+          phone: record.phone,
+          dateStr: record.dateStr,
+          name: record.name,
+          status: 'pending',
+          createdAt: pastedAt,
+          seq: `${pastedAt.getTime()}-${String(index).padStart(5, '0')}`,
+        });
+        if (created) inserted++;
       }
       skipped = records.length - inserted;
     }
@@ -142,11 +143,9 @@ router.put('/:id/status', requireAdmin, async (req: AuthenticatedRequest, res: R
       return;
     }
 
-    const updated = await AbandonedCheckout.findByIdAndUpdate(
-      id,
-      { $set: { status } },
-      { new: true }
-    );
+    const updated = (await abandonedCheckoutStore.getById(String(id)))
+      ? await abandonedCheckoutStore.updateById(String(id), { status })
+      : null;
 
     if (!updated) {
       res.status(404).json({ success: false, error: 'Record not found' });

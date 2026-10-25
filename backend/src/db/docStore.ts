@@ -1,3 +1,4 @@
+import { FieldValue } from 'firebase-admin/firestore';
 import { getFirestore } from './firestore';
 import { sanitizeForFirestore, fromFirestore } from './keyedStore';
 
@@ -65,6 +66,41 @@ export function docStore(collection: string) {
       await ref.set({ ...sanitizeForFirestore(data), _id: String(id), id: String(id) }, { merge: true });
       const s = await ref.get();
       return withId(s.id, s.data());
+    },
+
+    /** Create a doc with this id unless one exists. Returns false when it already existed. */
+    async createIfAbsent(id: string, data: any): Promise<boolean> {
+      try {
+        await col().doc(String(id)).create({ ...sanitizeForFirestore(data), _id: String(id), id: String(id) });
+        return true;
+      } catch (e: any) {
+        if (e?.code === 6) return false; // ALREADY_EXISTS
+        throw e;
+      }
+    },
+
+    /** Add (no duplicates) or remove one value in an array field. Returns the doc, or null. */
+    async updateArray(id: string, field: string, value: any, op: 'add' | 'remove'): Promise<any | null> {
+      const ref = col().doc(String(id));
+      if (!(await ref.get()).exists) return null;
+      await ref.update({
+        [field]: op === 'add' ? FieldValue.arrayUnion(value) : FieldValue.arrayRemove(value),
+        updatedAt: new Date(),
+      });
+      const s = await ref.get();
+      return withId(s.id, s.data());
+    },
+
+    /** Remove a value from an array field on every doc holding it. Returns count updated. */
+    async removeFromArrays(field: string, value: any): Promise<number> {
+      const snap = await col().where(field, 'array-contains', value).get();
+      const db = getFirestore();
+      for (let i = 0; i < snap.docs.length; i += 450) {
+        const batch = db.batch();
+        for (const d of snap.docs.slice(i, i + 450)) batch.update(d.ref, { [field]: FieldValue.arrayRemove(value) });
+        await batch.commit();
+      }
+      return snap.size;
     },
 
     async count(): Promise<number> {

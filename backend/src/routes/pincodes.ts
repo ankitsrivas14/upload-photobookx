@@ -1,15 +1,17 @@
 import { Router, Response } from 'express';
 import { requireAdmin } from './adminAuth';
-import BlockedPinCode from '../models/BlockedPinCode';
-import CodAddedCity from '../models/CodAddedCity';
+import { blockedPinCodeStore, codAddedCityStore } from '../db/featureStores';
 import type { AuthenticatedRequest } from '../types';
 
 const router = Router();
 
+// Cities are doc ids, which can't contain '/', so they are URI-encoded.
+const cityKey = (city: string) => encodeURIComponent(city);
+
 // GET /api/admin/pincodes/blocked
 router.get('/blocked', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
     try {
-        const pinCodes = await BlockedPinCode.find().sort({ createdAt: -1 });
+        const pinCodes = (await blockedPinCodeStore.all()).sort((a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
         res.json({ success: true, pinCodes });
     } catch (error) {
         console.error('Error fetching blocked pin codes:', error);
@@ -33,11 +35,7 @@ router.post('/blocked', requireAdmin, async (req: AuthenticatedRequest, res: Res
 
         const newPinCodes = [];
         for (const pinCode of uniquePinCodes) {
-            const newPinCode = await BlockedPinCode.findOneAndUpdate(
-                { pinCode },
-                { notes, createdAt: new Date() },
-                { upsert: true, new: true }
-            );
+            const newPinCode = await blockedPinCodeStore.setById(pinCode, { pinCode, notes, createdAt: new Date() });
             newPinCodes.push(newPinCode);
         }
 
@@ -52,7 +50,7 @@ router.post('/blocked', requireAdmin, async (req: AuthenticatedRequest, res: Res
 router.delete('/blocked/:pinCode', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
     try {
         const { pinCode } = req.params;
-        await BlockedPinCode.findOneAndDelete({ pinCode });
+        await blockedPinCodeStore.deleteById(String(pinCode));
         res.json({ success: true });
     } catch (error) {
         console.error('Error deleting blocked pin code:', error);
@@ -63,8 +61,8 @@ router.delete('/blocked/:pinCode', requireAdmin, async (req: AuthenticatedReques
 // GET /api/admin/pincodes/cod-added-cities
 router.get('/cod-added-cities', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
     try {
-        const cities = await CodAddedCity.find({}, { city: 1 }).lean();
-        res.json({ success: true, cities: cities.map(c => c.city) });
+        const cities = await codAddedCityStore.all();
+        res.json({ success: true, cities: cities.map((c) => c.city) });
     } catch {
         res.status(500).json({ success: false, error: 'Failed to fetch added cities' });
     }
@@ -75,7 +73,7 @@ router.post('/cod-added-cities', requireAdmin, async (req: AuthenticatedRequest,
     const { city } = req.body;
     if (!city) return res.status(400).json({ success: false, error: 'city is required' });
     try {
-        await CodAddedCity.findOneAndUpdate({ city }, { addedAt: new Date() }, { upsert: true });
+        await codAddedCityStore.setById(cityKey(city), { city, addedAt: new Date() });
         res.json({ success: true });
     } catch {
         res.status(500).json({ success: false, error: 'Failed to mark city' });
@@ -85,7 +83,7 @@ router.post('/cod-added-cities', requireAdmin, async (req: AuthenticatedRequest,
 // DELETE /api/admin/pincodes/cod-added-cities/:city
 router.delete('/cod-added-cities/:city', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
     try {
-        await CodAddedCity.findOneAndDelete({ city: decodeURIComponent(String(req.params.city)) });
+        await codAddedCityStore.deleteById(cityKey(decodeURIComponent(String(req.params.city))));
         res.json({ success: true });
     } catch {
         res.status(500).json({ success: false, error: 'Failed to unmark city' });

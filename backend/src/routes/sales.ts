@@ -1,5 +1,6 @@
 import express, { Response } from 'express';
-import { ProfitPrediction, MetaAdPerformance, MetaAdAnalysis, Reel, ReelStrategy } from '../models';
+import { MetaAdPerformance, MetaAdAnalysis } from '../models';
+import { profitPredictionStore, reelStore, reelStrategyStore } from '../db/featureStores';
 import { requireAdmin } from './adminAuth';
 import { AuthenticatedRequest } from '../types';
 import aiService from '../services/aiService';
@@ -407,8 +408,11 @@ router.delete('/mark-rto', requireAdmin, async (req: AuthenticatedRequest, res: 
 router.get('/prediction/:monthYear', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { monthYear } = req.params;
-    const prediction = await ProfitPrediction.findOne({ monthYear, status: 'active' });
-    res.json({ success: true, prediction });
+    const [prediction] = await profitPredictionStore.query([
+      ['monthYear', '==', monthYear],
+      ['status', '==', 'active'],
+    ]);
+    res.json({ success: true, prediction: prediction ?? null });
   } catch (error) {
     res.status(500).json({ success: false, error: 'Failed to fetch prediction' });
   }
@@ -448,20 +452,25 @@ router.post('/predict', requireAdmin, async (req: AuthenticatedRequest, res: Res
     });
 
     // Archive old prediction
-    await ProfitPrediction.updateMany({ monthYear, status: 'active' }, { status: 'archived' });
+    await profitPredictionStore.updateWhere(
+      [['monthYear', '==', monthYear], ['status', '==', 'active']],
+      { status: 'archived', updatedAt: new Date() }
+    );
 
     // Save new prediction
-    const prediction = new ProfitPrediction({
+    const now = new Date();
+    const prediction = await profitPredictionStore.create({
       monthYear,
       predictedFinalProfit: aiResult.predictedFinalProfit,
-      predictedOrders: aiResult.predictedOrders,
-      predictedNDR: aiResult.predictedNDR,
+      predictedOrders: aiResult.predictedOrders ?? 0,
+      predictedNDR: aiResult.predictedNDR ?? 0,
       reasoning: aiResult.reasoning,
       insight: (aiResult as any).insight, // Optional field
-      lastUpdated: new Date(),
-      status: 'active'
+      lastUpdated: now,
+      status: 'active',
+      createdAt: now,
+      updatedAt: now,
     });
-    await prediction.save();
 
     res.json({ 
       success: true, 
@@ -916,8 +925,10 @@ router.post('/ads-performance', requireAdmin, async (req: AuthenticatedRequest, 
         // Creative strategy matrix from the Reels page — lets the AI correlate winning
         // ad sets with the creative strategies behind their reels
         const [reels, strategies] = await Promise.all([
-          Reel.find().sort({ date: -1 }).limit(100).lean(),
-          ReelStrategy.find().lean(),
+          reelStore.all().then((rs) =>
+            rs.sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime()).slice(0, 100)
+          ),
+          reelStrategyStore.all(),
         ]);
         if (reels.length && strategies.length) {
           const stratName = new Map(strategies.map((s: any) => [String(s._id), s.name]));

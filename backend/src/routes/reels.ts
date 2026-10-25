@@ -1,7 +1,6 @@
 import { Router, Response } from 'express';
 import { requireAdmin } from './adminAuth';
-import { Reel } from '../models/Reel';
-import { ReelStrategy } from '../models/ReelStrategy';
+import { reelStore, reelStrategyStore } from '../db/featureStores';
 import type { AuthenticatedRequest } from '../types';
 
 const router = Router();
@@ -12,9 +11,10 @@ const router = Router();
  */
 router.get('/', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
   try {
+    const time = (v: any) => new Date(v || 0).getTime();
     const [reels, strategies] = await Promise.all([
-      Reel.find().sort({ date: -1, createdAt: -1 }).lean(),
-      ReelStrategy.find().sort({ createdAt: 1 }).lean(),
+      reelStore.all().then((rs) => rs.sort((a, b) => time(b.date) - time(a.date) || time(b.createdAt) - time(a.createdAt))),
+      reelStrategyStore.all().then((ss) => ss.sort((a, b) => time(a.createdAt) - time(b.createdAt))),
     ]);
     res.json({ success: true, reels, strategies });
   } catch (error) {
@@ -36,11 +36,14 @@ router.post('/reels', requireAdmin, async (req: AuthenticatedRequest, res: Respo
     if (isNaN(parsedDate.getTime())) {
       return res.status(400).json({ success: false, error: 'Invalid date' });
     }
-    const reel = await Reel.create({
+    const now = new Date();
+    const reel = await reelStore.create({
       name: name.trim(),
       url: url.trim(),
       date: parsedDate,
       strategyIds: [],
+      createdAt: now,
+      updatedAt: now,
     });
     res.status(201).json({ success: true, reel });
   } catch (error) {
@@ -54,7 +57,7 @@ router.post('/reels', requireAdmin, async (req: AuthenticatedRequest, res: Respo
  */
 router.delete('/reels/:id', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    await Reel.findByIdAndDelete(req.params.id);
+    await reelStore.deleteById(String(req.params.id));
     res.json({ success: true });
   } catch (error) {
     console.error('Error deleting reel:', error);
@@ -71,7 +74,8 @@ router.post('/strategies', requireAdmin, async (req: AuthenticatedRequest, res: 
     if (!name || !name.trim()) {
       return res.status(400).json({ success: false, error: 'name is required' });
     }
-    const strategy = await ReelStrategy.create({ name: name.trim() });
+    const now = new Date();
+    const strategy = await reelStrategyStore.create({ name: name.trim(), createdAt: now, updatedAt: now });
     res.status(201).json({ success: true, strategy });
   } catch (error) {
     console.error('Error creating strategy:', error);
@@ -85,8 +89,8 @@ router.post('/strategies', requireAdmin, async (req: AuthenticatedRequest, res: 
 router.delete('/strategies/:id', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
-    await ReelStrategy.findByIdAndDelete(id);
-    await Reel.updateMany({ strategyIds: id }, { $pull: { strategyIds: id } });
+    await reelStrategyStore.deleteById(String(id));
+    await reelStore.removeFromArrays('strategyIds', String(id));
     res.json({ success: true });
   } catch (error) {
     console.error('Error deleting strategy:', error);
@@ -102,10 +106,7 @@ router.put('/reels/:reelId/strategies/:strategyId', requireAdmin, async (req: Au
   try {
     const { reelId, strategyId } = req.params;
     const { marked } = req.body as { marked?: boolean };
-    const update = marked
-      ? { $addToSet: { strategyIds: strategyId } }
-      : { $pull: { strategyIds: strategyId } };
-    const reel = await Reel.findByIdAndUpdate(reelId, update, { new: true }).lean();
+    const reel = await reelStore.updateArray(String(reelId), 'strategyIds', String(strategyId), marked ? 'add' : 'remove');
     if (!reel) {
       return res.status(404).json({ success: false, error: 'Reel not found' });
     }
