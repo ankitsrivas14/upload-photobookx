@@ -37,9 +37,8 @@ Reference screens: `DashboardPage.tsx` and `SalesPage.tsx`.
    visible keyboard focus. Ask for confirmation with `Dialog`, never `window.confirm` or `alert`.
 7. Restyle without changing behaviour: data fetching, the query cache, virtualisation and API
    calls stay as they are. If a change is needed, say so in the commit.
-8. `npm run lint:design` (in `frontend/`) passes. It fails on colour literals, raw font
-   families, `confirm`/`alert` and `lucide-react` imports outside the files still listed as
-   legacy in `frontend/scripts/check-design.mjs`.
+8. `npm run lint:design` (in `frontend/`) passes; `npm run build` runs it first. It fails on
+   colour literals, raw font families, `confirm`/`alert` and `lucide-react` imports.
 
 ## Status
 
@@ -59,7 +58,7 @@ Reference screens: `DashboardPage.tsx` and `SalesPage.tsx`.
 | Analysis | Pincodes | `pages/analysis/PinCodesAnalysis` | 516 | Done |
 | Analysis | Reels | `pages/analysis/Reels` | 287 | Done |
 | Expenses | Section tabs | `pages/ExpensesPage` | 146 | Done |
-| Expenses | Overview | `pages/ExpensesOverview` (not routed or imported anywhere) | 106 | Delete in cleanup |
+| Expenses | Overview | `pages/ExpensesOverview` (was not routed or imported) | 106 | Deleted |
 | Expenses | Meta ads | `pages/MetaAdsPage` | 290 | Done |
 | Expenses | Fixed monthly | `pages/FixedMonthlyPage` | 233 | Done |
 | Expenses | COGS | `pages/COGSPage` | 489 | Done |
@@ -87,7 +86,7 @@ Reference screens: `DashboardPage.tsx` and `SalesPage.tsx`.
 6. **Attendance and login.**
 7. **Customer upload page.** Phone first, built from `Stepper`, `OptionCard`, `Dropzone` and
    `PhotoTile`. Customers see this page, so check it on a real phone.
-8. **Cleanup.**
+8. **Cleanup.** Done on 2026-10-25.
    - Delete the unrouted `pages/AdminDashboard.tsx` and its CSS; nothing else uses them now.
    - Delete the orphaned `pages/analysis/TaggingLogsAnalysis.module.css` and the unused
      `pages/ExpensesOverview`.
@@ -123,7 +122,9 @@ a screen that another session has in progress.
 This plan and `frontend/scripts/check-design.mjs` are shared files, so another session may have
 uncommitted edits in them. Before `git add` on either, run `git diff <file>` and stage it only if
 every change is yours; otherwise commit your lines alone (for example, write `git show HEAD:<file>`
-plus your change to a scratch file, then `git update-index --cacheinfo` it).
+plus your change to a scratch file, then `git update-index --cacheinfo` it). Commit with
+`git commit -m "…" -- <your paths>`: a bare `git commit` also takes anything another session has
+staged (`git rm` included).
 
 Current split (2026-10-25): one session works down the sidebar from the top (Backlog first);
 another did Tools, the login and the customer upload page (all done). Cleanup (phase 8) waits until

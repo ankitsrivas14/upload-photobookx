@@ -2,9 +2,9 @@
 // Ledger design check (`npm run lint:design`). Screens use the components in
 // src/components/ui/pbx.tsx and take every colour and font from src/styles/tokens.css, so this
 // fails on colour literals, raw font families, confirm()/alert() and lucide-react imports.
-// Files still on the old styles are listed in LEGACY and skipped until their screen moves (a .tsx
-// entry covers its .module.css too). Remove a screen's entries in the commit that moves it;
-// docs/ledger-redesign-plan.md tracks the rollout.
+// `npm run build` runs it first, so a problem fails the build and the Vercel deploy. Every screen is
+// on Ledger, so LEGACY is empty; add a file there only as a short-lived, explained exception (a .tsx
+// entry covers its .module.css too).
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
@@ -13,12 +13,7 @@ import { fileURLToPath } from 'node:url';
 const SRC = join(dirname(fileURLToPath(import.meta.url)), '..', 'src');
 const TOKENS = 'styles/tokens.css';
 
-const LEGACY = new Set([
-  'index.css',
-  'pages/AdminDashboard.tsx',
-  'pages/ExpensesOverview.tsx',
-  'pages/analysis/TaggingLogsAnalysis.module.css',
-]);
+const LEGACY = new Set([]);
 
 const RULES = [
   {

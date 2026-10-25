@@ -18,7 +18,8 @@ Every UI change in `frontend/` uses Ledger. No exceptions for "quick" screens, d
   inside a page.
 - Screens work in light and dark, at phone width, and by keyboard. Confirm with `Dialog`, never
   `window.confirm` or `alert`.
-- Run `npm run lint:design` and `npm run build` in `frontend/` before committing.
+- `npm run build` in `frontend/` runs `lint:design` first, so a violation fails the build and the
+  Vercel deploy. Run it before committing.
 - Reference screens: `pages/DashboardPage.tsx` and `pages/SalesPage.tsx`.
 
 The rollout plan, its status table and the per-screen steps are in `docs/ledger-redesign-plan.md`.
