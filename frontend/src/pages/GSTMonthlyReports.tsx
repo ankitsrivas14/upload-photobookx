@@ -119,7 +119,8 @@ export function GSTMonthlyReports() {
 
       if (result.success) {
         setUploadMessage(`✅ Successfully processed ${result.stats.processed} delivery dates`);
-        // Reload the report data
+        // Reload the report data (this upload bypasses the API client, so clear its cache)
+        api.invalidateCache();
         loadReportData();
       } else {
         setUploadMessage(`❌ Error: ${result.error}`);

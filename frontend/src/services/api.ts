@@ -1,4 +1,17 @@
+import { QueryClient } from '@tanstack/react-query';
+
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+
+/**
+ * Client cache for admin GET requests (TanStack Query, used through `request`): identical
+ * requests in flight share one fetch, and a successful response is reused for
+ * CACHE_FRESH_MS, so switching pages or remounting a widget doesn't refetch. Every write
+ * clears it, and so do login and logout.
+ */
+const CACHE_FRESH_MS = 30 * 1000;
+export const queryClient = new QueryClient({
+  defaultOptions: { queries: { staleTime: CACHE_FRESH_MS, gcTime: 5 * 60 * 1000, retry: false } },
+});
 
 // Admin Auth Types
 interface AdminUser {
@@ -220,10 +233,18 @@ class ApiService {
 
   setToken(token: string): void {
     localStorage.setItem('adminToken', token);
+    this.invalidateCache();
   }
 
   removeToken(): void {
     localStorage.removeItem('adminToken');
+    this.invalidateCache();
+  }
+
+  /** Drop every cached response. Writes through `request` do this themselves; call it after
+   *  a write that bypasses `request`, or before a Refresh that must hit the server. */
+  invalidateCache(): void {
+    queryClient.clear();
   }
 
   isAuthenticated(): boolean {
@@ -231,6 +252,26 @@ class ApiService {
   }
 
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+    const method = (options.method || 'GET').toUpperCase();
+    if (method === 'GET' && endpoint.startsWith('/api/admin/')) {
+      const queryKey = ['api', endpoint];
+      const data = await queryClient.fetchQuery({
+        queryKey,
+        queryFn: () => this.send<T>(endpoint, options),
+        staleTime: CACHE_FRESH_MS,
+      });
+      // Keep only successes; a failed response is fetched again next time.
+      if ((data as { success?: boolean } | null)?.success === false) {
+        queryClient.removeQueries({ queryKey, exact: true });
+      }
+      return data;
+    }
+    const data = await this.send<T>(endpoint, options);
+    if (method !== 'GET') this.invalidateCache();
+    return data;
+  }
+
+  private async send<T>(endpoint: string, options: RequestInit): Promise<T> {
     const token = this.getToken();
 
     const headers: HeadersInit = {
@@ -924,6 +965,7 @@ class ApiService {
       throw new Error((err as any).error || 'Failed to save COGS configuration');
     }
 
+    this.invalidateCache();
     return response.json();
   }
 
@@ -947,6 +989,7 @@ class ApiService {
       throw new Error((err as any).error || 'Failed to update COGS version');
     }
 
+    this.invalidateCache();
     return response.json();
   }
 
@@ -962,6 +1005,7 @@ class ApiService {
       throw new Error((err as any).error || 'Failed to delete COGS version');
     }
 
+    this.invalidateCache();
     return response.json();
   }
 
