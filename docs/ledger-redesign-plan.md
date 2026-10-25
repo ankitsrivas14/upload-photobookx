@@ -68,7 +68,7 @@ Reference screens: `DashboardPage.tsx` and `SalesPage.tsx`.
 | Tools | GST reports | `pages/GSTMonthlyReports` (unrouted `GSTReportsPage` deleted) | 427 | Done |
 | Tools | Products | `pages/tools/ProductsManager` | 480 | Done |
 | Tools | Labels | `pages/tools/Labels` | 270 | In progress |
-| Tools | Variant performance | `pages/tools/VariantPerformance` | 232 | In progress |
+| Tools | Variant performance | `pages/tools/VariantPerformance` | 232 | Done |
 | Tools | Profit prediction | `pages/ProfitPredictionCalculator` | 437 | Done |
 | Tools | Stock prediction | `pages/StockPrediction` | 334 | Done |
 | People | Attendance | `pages/AttendancePage` | 864 | To do |

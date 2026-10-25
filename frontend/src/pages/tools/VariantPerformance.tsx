@@ -1,16 +1,19 @@
 import { useState, useEffect, useMemo } from 'react';
+import toast from 'react-hot-toast';
 import { api } from '../../services/api';
+import { Amount, Card, DataTable, EmptyState, SegmentedControl, type Column } from '../../components/ui/pbx';
+import { cx } from '../../components/ui/format';
 import styles from './VariantPerformance.module.css';
 
-function fmt(num: number, decimals = 0): string {
-  const [intPart, decPart] = num.toFixed(decimals).split('.');
-  const lastThree = intPart.slice(-3);
-  const rest = intPart.slice(0, -3);
-  const formatted = rest ? rest.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + ',' + lastThree : lastThree;
-  return decPart ? `${formatted}.${decPart}` : formatted;
-}
-
 type DayOption = 7 | 14 | 30 | 90;
+type Tone = 'positive' | 'caution' | 'negative';
+
+const PERIODS = [
+  { value: '7', label: '7 days' },
+  { value: '14', label: '14 days' },
+  { value: '30', label: '30 days' },
+  { value: '90', label: '90 days' },
+];
 
 interface Bucket {
   variant: 'small' | 'large';
@@ -30,6 +33,21 @@ interface Bucket {
   profitMargin: number;
 }
 
+interface RankedRow extends Bucket {
+  key: string;
+  rank: number;
+  profitBar: number;
+  marginBar: number;
+}
+
+interface SplitRow {
+  label: string;
+  orders: number;
+  avgProfitPerOrder: number;
+  profitMargin: number;
+  rtoRate: number;
+}
+
 const LABELS: Record<string, string> = {
   'small-prepaid': 'Small · Prepaid',
   'small-cod':     'Small · COD',
@@ -37,15 +55,81 @@ const LABELS: Record<string, string> = {
   'large-cod':     'Large · COD',
 };
 
-const RANK_COLORS = ['#f59e0b', '#94a3b8', '#cd7c3a', '#cbd5e1'];
 const RANK_LABELS = ['1st', '2nd', '3rd', '4th'];
 
-function rtoColor(rate: number) {
-  if (rate <= 10) return '#059669';
-  if (rate <= 20) return '#f59e0b';
-  return '#dc2626';
+const count = (n: number) => n.toLocaleString('en-IN');
+const signedTone = (value: number): Tone => (value >= 0 ? 'positive' : 'negative');
+// Up to 10% RTO is healthy, up to 20% needs watching, above that is a problem.
+const rtoTone = (rate: number): Tone => (rate <= 10 ? 'positive' : rate <= 20 ? 'caution' : 'negative');
+
+/** A thin bar under a figure; `value` is 0–100. */
+function Meter({ value, tone }: { value: number; tone: Tone }) {
+  return (
+    <span className={styles.meter} aria-hidden="true">
+      <span className={cx(styles.fill, styles[tone])} style={{ width: `${Math.max(0, Math.min(100, value))}%` }} />
+    </span>
+  );
 }
 
+const Percent = ({ value, tone }: { value: number; tone: Tone }) => <span className={cx('pbx-num', styles[tone])}>{value.toFixed(1)}%</span>;
+
+const RANK_COLUMNS: Column<RankedRow>[] = [
+  { key: 'rank', header: 'Rank', width: 48, render: (r) => <span className={cx(styles.rank, r.rank === 0 && styles.first)}>{RANK_LABELS[r.rank]}</span> },
+  {
+    key: 'variant',
+    header: 'Variant and payment',
+    render: (r) => (
+      <span className={styles.name}>
+        <span className={styles.label}>{LABELS[r.key]}</span>
+        <span className={styles.sub}>{count(r.orders)} orders</span>
+      </span>
+    ),
+  },
+  {
+    key: 'avgProfitPerOrder',
+    header: 'Profit per order',
+    numeric: true,
+    render: (r) => (
+      <span className={styles.metric}>
+        <Amount value={r.avgProfitPerOrder} signed />
+        <Meter value={r.profitBar} tone={signedTone(r.avgProfitPerOrder)} />
+      </span>
+    ),
+  },
+  {
+    key: 'profitMargin',
+    header: 'Margin',
+    numeric: true,
+    render: (r) => (
+      <span className={styles.metric}>
+        <Percent value={r.profitMargin} tone={signedTone(r.profitMargin)} />
+        <Meter value={r.marginBar} tone={signedTone(r.profitMargin)} />
+      </span>
+    ),
+  },
+  {
+    key: 'rtoRate',
+    header: 'RTO',
+    numeric: true,
+    render: (r) => (
+      <span className={styles.metric}>
+        <Percent value={r.rtoRate} tone={rtoTone(r.rtoRate)} />
+        <Meter value={(r.rtoRate / 40) * 100} tone={rtoTone(r.rtoRate)} />
+      </span>
+    ),
+  },
+  { key: 'profit', header: 'Total profit', numeric: true, render: (r) => <Amount value={r.profit} signed /> },
+];
+
+const SPLIT_COLUMNS: Column<SplitRow>[] = [
+  { key: 'label', header: 'Group', render: (r) => <span className={styles.label}>{r.label}</span> },
+  { key: 'orders', header: 'Orders', numeric: true, render: (r) => count(r.orders) },
+  { key: 'avgProfitPerOrder', header: 'Profit per order', numeric: true, render: (r) => <Amount value={r.avgProfitPerOrder} signed /> },
+  { key: 'profitMargin', header: 'Margin', numeric: true, render: (r) => <Percent value={r.profitMargin} tone={signedTone(r.profitMargin)} /> },
+  { key: 'rtoRate', header: 'RTO', numeric: true, render: (r) => <Percent value={r.rtoRate} tone={rtoTone(r.rtoRate)} /> },
+];
+
+/** Variant performance: the four size and payment combinations ranked by profit per order, and two head-to-heads. */
 export function VariantPerformance() {
   const [days, setDays] = useState<DayOption>(30);
   const [isLoading, setIsLoading] = useState(true);
@@ -60,173 +144,75 @@ export function VariantPerformance() {
       if (res.success && res.buckets) setBuckets(res.buckets);
     } catch (err) {
       console.error('Failed to load variant performance:', err);
+      toast.error('Could not load variant performance. Try again.');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const ranked = useMemo(() =>
-    [...buckets].sort((a, b) => b.avgProfitPerOrder - a.avgProfitPerOrder),
-  [buckets]);
-
-  const maxProfit = ranked[0]?.avgProfitPerOrder ?? 1;
-  const maxMargin = Math.max(...ranked.map(b => Math.abs(b.profitMargin)), 1);
+  const ranked = useMemo<RankedRow[]>(() => {
+    const sorted = [...buckets].sort((a, b) => b.avgProfitPerOrder - a.avgProfitPerOrder);
+    const maxProfit = sorted[0]?.avgProfitPerOrder ?? 1;
+    const maxMargin = Math.max(...sorted.map(b => Math.abs(b.profitMargin)), 1);
+    return sorted.map((b, rank) => ({
+      ...b,
+      key: `${b.variant}-${b.payment}`,
+      rank,
+      profitBar: maxProfit > 0 ? Math.max((b.avgProfitPerOrder / maxProfit) * 100, 0) : 0,
+      marginBar: Math.min(Math.abs(b.profitMargin) / maxMargin * 100, 100),
+    }));
+  }, [buckets]);
 
   const totalPending = buckets.reduce((s, b) => s + b.pending, 0);
 
-  // Dimension splits
-  const small = buckets.filter(b => b.variant === 'small');
-  const large = buckets.filter(b => b.variant === 'large');
-  const prepaid = buckets.filter(b => b.payment === 'prepaid');
-  const cod = buckets.filter(b => b.payment === 'cod');
-
-  const agg = (rows: Bucket[]) => {
+  const agg = (label: string, rows: Bucket[]): SplitRow => {
     const orders = rows.reduce((s, b) => s + b.orders, 0);
     const profit = rows.reduce((s, b) => s + b.profit, 0);
     const revenue = rows.reduce((s, b) => s + b.revenue, 0);
     const rto = rows.reduce((s, b) => s + b.rto, 0);
     return {
+      label,
       orders,
-      profit,
       avgProfitPerOrder: orders > 0 ? profit / orders : 0,
       profitMargin: revenue > 0 ? (profit / revenue) * 100 : 0,
       rtoRate: orders > 0 ? (rto / orders) * 100 : 0,
     };
   };
 
-  const dims = [
-    { label: 'Small', sub: 'vs Large', a: agg(small), b: agg(large), bLabel: 'Large' },
-    { label: 'Prepaid', sub: 'vs COD', a: agg(prepaid), b: agg(cod), bLabel: 'COD' },
+  // Dimension splits
+  const splits = [
+    { title: 'Small vs Large', rows: [agg('Small', buckets.filter(b => b.variant === 'small')), agg('Large', buckets.filter(b => b.variant === 'large'))] },
+    { title: 'Prepaid vs COD', rows: [agg('Prepaid', buckets.filter(b => b.payment === 'prepaid')), agg('COD', buckets.filter(b => b.payment === 'cod'))] },
   ];
 
   return (
-    <div className={styles.page}>
-      <header className={styles.header}>
-        <div>
-          <h1 className={styles.title}>Variant Performance</h1>
-          <p className={styles.subtitle}>Ranked by avg profit per order · delivered &amp; failed orders only</p>
-        </div>
-        <div className={styles['day-selector']}>
-          {([7, 14, 30, 90] as DayOption[]).map(d => (
-            <button
-              key={d}
-              className={`${styles['day-btn']} ${days === d ? styles['day-btn-active'] : ''}`}
-              onClick={() => setDays(d)}
-            >
-              {d}d
-            </button>
-          ))}
-        </div>
-      </header>
+    <div className={styles.variants}>
+      <div className={styles.toolbar}>
+        <SegmentedControl size="sm" label="Period" value={String(days)} onChange={(v) => setDays(Number(v) as DayOption)} options={PERIODS} />
+        <p className={styles.note}>
+          Delivered and failed orders only.
+          {!isLoading && totalPending > 0 ? ` ${count(totalPending)} orders still in transit are left out until they settle.` : ''}
+        </p>
+      </div>
 
-      {isLoading ? (
-        <div className={styles.loading}><div className={styles.spinner} /></div>
-      ) : (
-        <>
-          {totalPending > 0 && (
-            <p className={styles['pending-note']}>
-              {fmt(totalPending)} orders still in transit — excluded until they settle.
-            </p>
-          )}
+      <Card title="Ranking" description="By profit per order." padding="none">
+        <DataTable
+          columns={RANK_COLUMNS}
+          rows={ranked}
+          getRowId={(r) => r.key}
+          loading={isLoading}
+          caption="Variant and payment combinations ranked by profit per order"
+          empty={<EmptyState size="sm" icon="layers" title="No settled orders" description="Nothing was delivered or failed in this period." />}
+        />
+      </Card>
 
-          {/* ── Ranked leaderboard ── */}
-          <div className={styles.leaderboard}>
-            {ranked.map((b, i) => {
-              const key = `${b.variant}-${b.payment}`;
-              const profitBarWidth = maxProfit > 0 ? Math.max((b.avgProfitPerOrder / maxProfit) * 100, 0) : 0;
-              const marginBarWidth = Math.min(Math.abs(b.profitMargin) / maxMargin * 100, 100);
-              return (
-                <div key={key} className={`${styles['rank-row']} ${i === 0 ? styles['rank-row-top'] : ''}`}>
-                  {/* Rank */}
-                  <div className={styles['rank-badge']} style={{ color: RANK_COLORS[i] }}>
-                    {RANK_LABELS[i]}
-                  </div>
-
-                  {/* Label + orders */}
-                  <div className={styles['rank-name']}>
-                    <span className={styles['rank-label']}>{LABELS[key]}</span>
-                    <span className={styles['rank-orders']}>{fmt(b.orders)} orders</span>
-                  </div>
-
-                  {/* Avg profit — primary metric */}
-                  <div className={styles['rank-primary']}>
-                    <div className={`${styles['rank-profit']} ${b.avgProfitPerOrder >= 0 ? styles.positive : styles.negative}`}>
-                      ₹{fmt(b.avgProfitPerOrder, 0)}
-                    </div>
-                    <div className={styles['rank-profit-label']}>avg profit / order</div>
-                    <div className={styles['profit-bar-track']}>
-                      <div
-                        className={`${styles['profit-bar-fill']} ${b.avgProfitPerOrder >= 0 ? styles['bar-positive'] : styles['bar-negative']}`}
-                        style={{ width: `${profitBarWidth}%` }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Secondary metrics */}
-                  <div className={styles['rank-secondaries']}>
-                    <div className={styles['secondary-item']}>
-                      <span className={styles['secondary-label']}>Margin</span>
-                      <span className={`${styles['secondary-value']} ${b.profitMargin >= 0 ? styles.positive : styles.negative}`}>
-                        {b.profitMargin.toFixed(1)}%
-                      </span>
-                      <div className={styles['bar-track']}>
-                        <div
-                          className={`${styles['bar-fill']} ${b.profitMargin >= 0 ? styles['bar-positive'] : styles['bar-negative']}`}
-                          style={{ width: `${marginBarWidth}%` }}
-                        />
-                      </div>
-                    </div>
-                    <div className={styles['secondary-item']}>
-                      <span className={styles['secondary-label']}>RTO Rate</span>
-                      <span className={styles['secondary-value']} style={{ color: rtoColor(b.rtoRate) }}>
-                        {b.rtoRate.toFixed(1)}%
-                      </span>
-                      <div className={styles['bar-track']}>
-                        <div
-                          className={styles['bar-fill']}
-                          style={{ width: `${Math.min(b.rtoRate / 40 * 100, 100)}%`, background: rtoColor(b.rtoRate) }}
-                        />
-                      </div>
-                    </div>
-                    <div className={styles['secondary-item']}>
-                      <span className={styles['secondary-label']}>Total Profit</span>
-                      <span className={`${styles['secondary-value']} ${b.profit >= 0 ? styles.positive : styles.negative}`}>
-                        {b.profit >= 0 ? '+' : ''}₹{fmt(b.profit, 0)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* ── Dimension splits ── */}
-          <div className={styles['splits-grid']}>
-            {dims.map(dim => (
-              <div key={dim.label} className={styles['split-card']}>
-                <div className={styles['split-title']}>{dim.label} <span className={styles['split-vs']}>{dim.sub}</span></div>
-                <div className={styles['split-rows']}>
-                  {[{ label: dim.label, d: dim.a }, { label: dim.bLabel, d: dim.b }].map(({ label, d }) => (
-                    <div key={label} className={styles['split-row']}>
-                      <span className={styles['split-row-label']}>{label}</span>
-                      <span className={styles['split-row-orders']}>{fmt(d.orders)} orders</span>
-                      <span className={`${styles['split-row-profit']} ${d.avgProfitPerOrder >= 0 ? styles.positive : styles.negative}`}>
-                        ₹{fmt(d.avgProfitPerOrder, 0)}/order
-                      </span>
-                      <span className={`${styles['split-row-margin']} ${d.profitMargin >= 0 ? styles.positive : styles.negative}`}>
-                        {d.profitMargin.toFixed(1)}%
-                      </span>
-                      <span className={styles['split-row-rto']} style={{ color: rtoColor(d.rtoRate) }}>
-                        {d.rtoRate.toFixed(1)}% RTO
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
+      <div className={styles.splits}>
+        {splits.map((split) => (
+          <Card key={split.title} title={split.title} padding="none">
+            <DataTable columns={SPLIT_COLUMNS} rows={split.rows} getRowId={(r) => r.label} loading={isLoading} caption={split.title} />
+          </Card>
+        ))}
+      </div>
     </div>
   );
 }
