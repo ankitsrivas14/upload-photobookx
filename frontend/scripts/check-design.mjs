@@ -14,20 +14,10 @@ const SRC = join(dirname(fileURLToPath(import.meta.url)), '..', 'src');
 const TOKENS = 'styles/tokens.css';
 
 const LEGACY = new Set([
-  'pages/UploadPage.tsx',
   'index.css',
   'pages/AdminDashboard.tsx',
-  'pages/AnalysisPage.tsx',
   'pages/ExpensesOverview.tsx',
-  'pages/analysis/Agency.tsx',
-  'pages/analysis/ClaudeAnalysis.tsx',
-  'pages/analysis/CreateTicketForm.tsx',
-  'pages/analysis/FailedOrdersAnalysis.tsx',
-  'pages/analysis/PinCodesAnalysis.tsx',
-  'pages/analysis/Reels.tsx',
-  'pages/analysis/StuckOrdersAnalysis.tsx',
   'pages/analysis/TaggingLogsAnalysis.module.css',
-  'pages/analysis/TicketsAnalysis.tsx',
 ]);
 
 const RULES = [

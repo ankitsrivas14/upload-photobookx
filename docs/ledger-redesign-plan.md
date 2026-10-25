@@ -73,7 +73,7 @@ Reference screens: `DashboardPage.tsx` and `SalesPage.tsx`.
 | Tools | Stock prediction | `pages/StockPrediction` | 334 | Done |
 | People | Attendance | `pages/AttendancePage` | 864 | Done |
 | Access | Login | `pages/AdminLogin` | 116 | Done |
-| Customer | Photo upload (magic link) | `pages/UploadPage` | 954 | In progress |
+| Customer | Photo upload (magic link) | `pages/UploadPage` | 954 | Done |
 
 ## Phases
 
