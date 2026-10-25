@@ -6,12 +6,11 @@ import shiprocketService from '../services/shiprocketService';
 import aiService from '../services/aiService';
 import type { AuthenticatedRequest } from '../types';
 import config from '../config';
-import { UploadedImage } from '../models';
+import * as uploads from '../db/uploadsRepo';
 import OrderDeliveryDate from '../models/OrderDeliveryDate';
 import { getMany as getCharges } from '../db/shippingRepo';
 import { GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { getS3Client } from '../services/s3';
-import { Ticket } from '../models';
 import archiver from 'archiver';
 import { backfillShippingStats } from '../services/shippingStatsService';
 import { recomputeDates } from '../services/aggregatesService';
@@ -23,7 +22,7 @@ const router = Router();
  */
 router.get('/tickets', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const tickets = await Ticket.find().sort({ createdAt: -1 });
+    const tickets = await uploads.listTickets();
     res.json({ success: true, tickets });
   } catch (error: any) {
     console.error('Tickets fetch error:', error);
@@ -38,7 +37,7 @@ router.get('/tickets', requireAdmin, async (req: AuthenticatedRequest, res: Resp
 router.get('/tickets/:awb', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { awb } = req.params;
-    const ticket = await Ticket.findOne({ awb }).sort({ createdAt: -1 });
+    const ticket = await uploads.latestTicketForAwb(String(awb));
     res.json({ success: true, ticket });
   } catch (error: any) {
     console.error('Ticket fetch error:', error);
@@ -62,17 +61,13 @@ router.post('/tickets', requireAdmin, async (req: AuthenticatedRequest, res: Res
       generatedMessage 
     } = req.body;
 
-    const ticket = new Ticket({
-      orderNumber,
-      customerName,
-      awb,
-      courierName,
-      currentStatus,
-      activities,
-      generatedMessage
-    });
+    const fields = { orderNumber, customerName, awb, courierName, currentStatus, activities, generatedMessage };
+    const missing = Object.entries(fields).filter(([, v]) => v == null || v === '').map(([k]) => k);
+    if (missing.length > 0) {
+      return res.status(400).json({ success: false, error: `Missing ticket fields: ${missing.join(', ')}` });
+    }
 
-    await ticket.save();
+    const ticket = await uploads.createTicket(fields);
     res.json({ success: true, ticket });
   } catch (error: any) {
     console.error('Ticket creation error:', error);
@@ -89,11 +84,7 @@ router.patch('/tickets/:id', requireAdmin, async (req: AuthenticatedRequest, res
     const { id } = req.params;
     const { status } = req.body;
 
-    const ticket = await Ticket.findByIdAndUpdate(
-      id,
-      { status, updatedAt: new Date() },
-      { new: true }
-    );
+    const ticket = await uploads.updateTicket(String(id), { status });
 
     if (!ticket) {
       return res.status(404).json({ success: false, error: 'Ticket not found' });
@@ -983,7 +974,7 @@ router.get('/:token/download-images', requireAdmin, async (req: AuthenticatedReq
     }
 
     // Get all images for this magic link
-    const images = await UploadedImage.find({ magicLinkId: magicLink._id }).sort({ uploadedAt: 1 });
+    const images = await uploads.imagesForLink(magicLink._id, 'asc');
 
     console.log(`Found ${images.length} images for order ${magicLink.orderNumber}`);
 
@@ -1090,7 +1081,7 @@ router.delete('/:token/delete-images', requireAdmin, async (req: AuthenticatedRe
     }
 
     // Get all images for this magic link
-    const images = await UploadedImage.find({ magicLinkId: magicLink._id });
+    const images = await uploads.imagesForLink(magicLink._id);
 
     console.log(`Deleting ${images.length} images for order ${magicLink.orderNumber}`);
 
@@ -1134,12 +1125,10 @@ router.delete('/:token/delete-images', requireAdmin, async (req: AuthenticatedRe
     }
 
     // All S3 deletions successful - now delete from database
-    await UploadedImage.deleteMany({ magicLinkId: magicLink._id });
+    await uploads.deleteImagesForLink(magicLink._id);
 
     // Update magic link to mark images as deleted
-    magicLink.imagesDeleted = true;
-    magicLink.imagesDeletedAt = new Date();
-    await magicLink.save();
+    await magicLinkService.markImagesDeleted(magicLink._id);
 
     console.log(`✓ Deletion complete: All ${deletedCount} images removed from S3 and database`);
 

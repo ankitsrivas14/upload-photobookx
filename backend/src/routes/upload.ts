@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { v4 as uuidv4 } from 'uuid';
 import magicLinkService from '../services/magicLinkService';
-import { UploadedImage } from '../models';
+import * as uploads from '../db/uploadsRepo';
 import type { PhotoSize, PhotoType } from '../models/UploadedImage';
 import config from '../config';
 import { getS3Client } from '../services/s3';
@@ -138,7 +138,7 @@ router.post('/:token/upload', uploadPhoto, async (req: Request, res: Response) =
     const s3Url = `https://${config.aws.s3Bucket}.s3.${config.aws.region}.amazonaws.com/${s3Key}`;
 
     // Save to database
-    const uploadedImage = new UploadedImage({
+    const uploadedImage = await uploads.createImage({
       magicLinkId: magicLink._id,
       orderNumber: magicLink.orderNumber,
       fileName,
@@ -150,8 +150,6 @@ router.post('/:token/upload', uploadPhoto, async (req: Request, res: Response) =
       photoSize,
       photoType,
     });
-
-    await uploadedImage.save();
 
     // Increment upload count
     await magicLinkService.incrementUploadCount(token);
@@ -186,8 +184,7 @@ router.get('/:token/images', async (req: Request, res: Response) => {
       return;
     }
 
-    const images = await UploadedImage.find({ magicLinkId: result.magicLink._id })
-      .sort({ uploadedAt: -1 });
+    const images = await uploads.imagesForLink(result.magicLink._id, 'desc');
 
     res.json({
       success: true,
@@ -224,10 +221,7 @@ router.get('/:token/images/:imageId/proxy', async (req: Request, res: Response) 
     }
 
     // Find the image
-    const image = await UploadedImage.findOne({
-      _id: imageId,
-      magicLinkId: result.magicLink._id,
-    });
+    const image = await uploads.imageForLink(imageId, result.magicLink._id);
 
     if (!image) {
       res.status(404).json({ success: false, error: 'Image not found' });
@@ -275,10 +269,7 @@ router.delete('/:token/images/:imageId', async (req: Request, res: Response) => 
     }
 
     // Find the image
-    const image = await UploadedImage.findOne({
-      _id: imageId,
-      magicLinkId: result.magicLink._id,
-    });
+    const image = await uploads.imageForLink(imageId, result.magicLink._id);
 
     if (!image) {
       res.status(404).json({ success: false, error: 'Image not found' });
@@ -297,7 +288,7 @@ router.delete('/:token/images/:imageId', async (req: Request, res: Response) => 
     }
 
     // Delete from database
-    await UploadedImage.deleteOne({ _id: imageId });
+    await uploads.deleteImage(imageId);
 
     // Decrement upload count
     await magicLinkService.decrementUploadCount(token);
@@ -332,10 +323,7 @@ router.put('/:token/images/:imageId', uploadPhoto, async (req: Request, res: Res
     }
 
     // Find the existing image
-    const existingImage = await UploadedImage.findOne({
-      _id: imageId,
-      magicLinkId: result.magicLink._id,
-    });
+    const existingImage = await uploads.imageForLink(imageId, result.magicLink._id);
 
     if (!existingImage) {
       res.status(404).json({ success: false, error: 'Image not found' });
@@ -382,12 +370,13 @@ router.put('/:token/images/:imageId', uploadPhoto, async (req: Request, res: Res
     const s3Url = `https://${config.aws.s3Bucket}.s3.${config.aws.region}.amazonaws.com/${s3Key}`;
 
     // Update database record
-    existingImage.fileName = fileName;
-    existingImage.s3Key = s3Key;
-    existingImage.s3Url = s3Url;
-    existingImage.fileSize = req.file.size;
-    existingImage.mimeType = 'image/jpeg';
-    await existingImage.save();
+    await uploads.updateImage(existingImage._id, {
+      fileName,
+      s3Key,
+      s3Url,
+      fileSize: req.file.size,
+      mimeType: 'image/jpeg',
+    });
 
     res.json({
       success: true,
