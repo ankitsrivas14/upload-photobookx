@@ -439,7 +439,16 @@ export function OptionCard(props: OptionCardProps) {
 
 /* --------------------------------------------------------------- Sidebar */
 
-export interface NavItem { id: string; label: string; icon: IconName; href?: string; badge?: React.ReactNode }
+export interface NavItem {
+  id: string;
+  label: string;
+  /** Top-level items show one; sub-pages go without. */
+  icon?: IconName;
+  href?: string;
+  badge?: React.ReactNode;
+  /** Sub-pages, listed under the item while it or one of them is current. */
+  children?: NavItem[];
+}
 export interface NavGroup { label?: string; items: NavItem[] }
 
 export interface SidebarProps {
@@ -482,19 +491,29 @@ export function Sidebar(props: SidebarProps) {
             <ul>
               {g.items.map((it) => {
                 const on = it.id === activeId;
+                // A section is open while it or one of its sub-pages is current; the marker sits on the page itself.
+                const childOn = !!it.children?.some((c) => c.id === activeId);
+                const link = (item: NavItem, current: boolean, extra?: string) => (
+                  <a
+                    href={item.href || '#'}
+                    className={cx('pbx-nav', current && 'is-active', extra)}
+                    aria-current={current ? 'page' : undefined}
+                    title={collapsed ? item.label : undefined}
+                    onClick={onNavigate ? (e) => { e.preventDefault(); onNavigate(item.id); } : undefined}
+                  >
+                    {item.icon ? <Icon name={item.icon} size={18} /> : null}
+                    <span className="pbx-nav__label">{item.label}</span>
+                    {item.badge != null ? <span className="pbx-nav__badge">{item.badge}</span> : null}
+                  </a>
+                );
                 return (
                   <li key={it.id}>
-                    <a
-                      href={it.href || '#'}
-                      className={cx('pbx-nav', on && 'is-active')}
-                      aria-current={on ? 'page' : undefined}
-                      title={collapsed ? it.label : undefined}
-                      onClick={onNavigate ? (e) => { e.preventDefault(); onNavigate(it.id); } : undefined}
-                    >
-                      <Icon name={it.icon} size={18} />
-                      <span className="pbx-nav__label">{it.label}</span>
-                      {it.badge != null ? <span className="pbx-nav__badge">{it.badge}</span> : null}
-                    </a>
+                    {link(it, on, childOn ? 'is-open' : undefined)}
+                    {it.children && (on || childOn) ? (
+                      <ul className="pbx-subnav" aria-label={it.label}>
+                        {it.children.map((c) => <li key={c.id}>{link(c, c.id === activeId)}</li>)}
+                      </ul>
+                    ) : null}
                   </li>
                 );
               })}

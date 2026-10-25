@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect } from 'react';
 import { useNavigate, useLocation, Routes, Route, Navigate } from 'react-router-dom';
-import { PageHeader, Skeleton, Tabs } from '../components/ui/pbx';
+import { PageHeader, Skeleton } from '../components/ui/pbx';
+import { findSection } from '../layouts/adminNav';
 import styles from './AnalysisPage.module.css';
 
 // Each tab loads the first time it is opened (Agency pulls in recharts).
@@ -13,23 +14,13 @@ const ClaudeAnalysis = lazy(() => import('./analysis/ClaudeAnalysis').then((m) =
 const Reels = lazy(() => import('./analysis/Reels').then((m) => ({ default: m.Reels })));
 const Agency = lazy(() => import('./analysis/Agency').then((m) => ({ default: m.Agency })));
 
-const SECTIONS = [
-    { id: 'claude', label: 'Claude analysis', href: '/admin/analysis/claude' },
-    { id: 'failed-orders', label: 'Failed orders', href: '/admin/analysis/failed-orders' },
-    { id: 'pin-codes', label: 'Pin codes', href: '/admin/analysis/pin-codes' },
-    { id: 'stuck-orders', label: 'Stuck orders', href: '/admin/analysis/stuck-orders' },
-    { id: 'tickets', label: 'Tickets', href: '/admin/analysis/tickets' },
-    { id: 'reels', label: 'Reels', href: '/admin/analysis/reels' },
-    { id: 'agency', label: 'Agency', href: '/admin/analysis/agency' },
-];
-
-// The admin shell loads the signed-in user and draws the topbar; this page is the sections.
+// The admin shell loads the signed-in user, draws the topbar and lists the sections in the sidebar.
 export function AnalysisPage() {
     const navigate = useNavigate();
     const location = useLocation();
 
     const currentPath = location.pathname;
-    const active = SECTIONS.find((s) => currentPath.startsWith(s.href))?.id ?? 'claude';
+    const { page } = findSection(currentPath);
 
     useEffect(() => {
         if (currentPath === '/admin/analysis' || currentPath === '/admin/analysis/') {
@@ -39,14 +30,7 @@ export function AnalysisPage() {
 
     return (
         <div className={styles.page}>
-            <PageHeader title="Analysis" description="Ad reviews, delivery failures, pin codes, stuck orders, tickets, reels and agency results.">
-                <Tabs
-                    label="Analysis sections"
-                    items={SECTIONS}
-                    value={active}
-                    onChange={(id) => navigate(SECTIONS.find((s) => s.id === id)!.href)}
-                />
-            </PageHeader>
+            <PageHeader eyebrow="Analysis" title={page?.label ?? 'Analysis'} />
 
             <Suspense fallback={<Skeleton lines={6} />}>
                 <Routes>

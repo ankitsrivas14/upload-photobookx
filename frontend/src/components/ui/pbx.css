@@ -182,6 +182,12 @@ body { margin: 0; background: var(--paper); color: var(--ink); font: 400 13px/18
 .pbx-nav__badge { font: 400 11px/16px var(--font-mono); color: var(--ink-muted); }
 .pbx-sidebar.is-collapsed .pbx-nav { justify-content: center; padding: 0; }
 .pbx-sidebar.is-collapsed .pbx-nav__label, .pbx-sidebar.is-collapsed .pbx-nav__badge, .pbx-sidebar.is-collapsed .pbx-sidebar__label { display: none; }
+/* Sub-pages of the open section: indented under its label, on a hairline guide */
+.pbx-nav.is-open { color: var(--ink); font-weight: 600; }
+.pbx-subnav { position: relative; margin: 0 0 4px; }
+.pbx-subnav::before { content: ''; position: absolute; top: 2px; bottom: 2px; left: calc(var(--space-4) + 7px); width: 1px; background: var(--line); }
+.pbx-subnav .pbx-nav { min-height: 26px; padding-left: calc(var(--space-4) + 25px); font-size: 12px; }
+.pbx-sidebar.is-collapsed .pbx-subnav { display: none; }
 .pbx-sidebar__footer { padding: var(--space-3) var(--space-4); border-top: 1px solid var(--line); }
 
 /* ---------------------------------------------------------------- Topbar */

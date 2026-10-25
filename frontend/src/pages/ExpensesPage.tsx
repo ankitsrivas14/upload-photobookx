@@ -1,6 +1,7 @@
 import { useNavigate, useLocation, Routes, Route } from 'react-router-dom';
 import { lazy, Suspense, useEffect } from 'react';
-import { PageHeader, Skeleton, Tabs } from '../components/ui/pbx';
+import { PageHeader, Skeleton } from '../components/ui/pbx';
+import { findSection } from '../layouts/adminNav';
 import styles from './ExpensesPage.module.css';
 
 // Each section loads the first time it is opened (Bank Account alone pulls in xlsx).
@@ -9,21 +10,14 @@ const COGSPage = lazy(() => import('./COGSPage').then((m) => ({ default: m.COGSP
 const FixedMonthlyPage = lazy(() => import('./FixedMonthlyPage').then((m) => ({ default: m.FixedMonthlyPage })));
 const BankAccountPage = lazy(() => import('./BankAccountPage').then((m) => ({ default: m.BankAccountPage })));
 
-const SECTIONS = [
-  { id: 'meta-ads', label: 'Meta ads', href: '/admin/expenses/meta-ads' },
-  { id: 'cogs', label: 'COGS', href: '/admin/expenses/cogs' },
-  { id: 'fixed-monthly', label: 'Fixed monthly', href: '/admin/expenses/fixed-monthly' },
-  { id: 'bank-account', label: 'Bank account', href: '/admin/expenses/bank-account' },
-];
-
-// The admin shell loads the signed-in user and draws the topbar; this page is the sections.
+// The admin shell loads the signed-in user, draws the topbar and lists the sections in the sidebar.
 export function ExpensesPage() {
   const navigate = useNavigate();
   const location = useLocation();
 
   const currentPath = location.pathname;
   const isOverview = currentPath === '/admin/expenses' || currentPath === '/admin/expenses/';
-  const active = SECTIONS.find((s) => currentPath.startsWith(s.href))?.id ?? 'meta-ads';
+  const { page } = findSection(currentPath);
 
   useEffect(() => {
     if (isOverview) {
@@ -33,14 +27,7 @@ export function ExpensesPage() {
 
   return (
     <div className={styles.page}>
-      <PageHeader title="Expenses" description="Ad spend, cost of goods, fixed monthly costs and the bank account.">
-        <Tabs
-          label="Expenses sections"
-          items={SECTIONS}
-          value={active}
-          onChange={(id) => navigate(SECTIONS.find((s) => s.id === id)!.href)}
-        />
-      </PageHeader>
+      <PageHeader eyebrow="Expenses" title={page?.label ?? 'Expenses'} />
 
       <Suspense fallback={<Skeleton lines={6} />}>
         <Routes>

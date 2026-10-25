@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react';
-import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { PageHeader, Skeleton, Tabs, type TabItem } from '../components/ui/pbx';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { PageHeader, Skeleton } from '../components/ui/pbx';
+import { findSection } from '../layouts/adminNav';
 import styles from './ToolsPage.module.css';
 
 // Each tool loads the first time it is opened (Labels alone pulls in pdf-lib and pdfjs).
@@ -11,26 +12,14 @@ const VariantPerformance = lazy(() => import('./tools/VariantPerformance').then(
 const Labels = lazy(() => import('./tools/Labels').then((m) => ({ default: m.Labels })));
 const GSTMonthlyReports = lazy(() => import('./GSTMonthlyReports').then((m) => ({ default: m.GSTMonthlyReports })));
 
-const TOOLS: TabItem[] = [
-  { id: 'profit-calculator', label: 'Profit calculator', icon: 'calculator', href: '/admin/tools/profit-calculator' },
-  { id: 'stock-prediction', label: 'Stock prediction', icon: 'boxes', href: '/admin/tools/stock-prediction' },
-  { id: 'products', label: 'Products', icon: 'package', href: '/admin/tools/products' },
-  { id: 'gst-reports', label: 'GST reports', icon: 'receipt', href: '/admin/tools/gst-reports' },
-  { id: 'variant-performance', label: 'Variant performance', icon: 'layers', href: '/admin/tools/variant-performance' },
-  { id: 'labels', label: 'Labels', icon: 'printer', href: '/admin/tools/labels' },
-];
-
-/** Tools: one tab per tool under the shell's topbar, which already handles the account and sign-out. */
+/** Tools: one page per tool; the shell lists them in the sidebar and handles the account and sign-out. */
 export function ToolsPage() {
-  const navigate = useNavigate();
   const { pathname } = useLocation();
-  const current = pathname.split('/')[3] || TOOLS[0].id;
+  const { page } = findSection(pathname);
 
   return (
     <div className={styles.page}>
-      <PageHeader title="Tools" description="Calculators, reports and printing for the store.">
-        <Tabs label="Tools" items={TOOLS} value={current} onChange={(id) => navigate(`/admin/tools/${id}`)} />
-      </PageHeader>
+      <PageHeader eyebrow="Tools" title={page?.label ?? 'Tools'} />
 
       <Suspense fallback={<Skeleton lines={4} />}>
         <Routes>

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
 import {
@@ -17,10 +18,10 @@ import {
   Skeleton,
   StatCard,
   StatStrip,
-  Tabs,
   TextField,
 } from '../components/ui/pbx';
 import { cx, formatINR } from '../components/ui/format';
+import { findSection } from '../layouts/adminNav';
 import styles from './AttendancePage.module.css';
 
 interface EmployeeStat {
@@ -73,12 +74,13 @@ interface HourlyLog {
 type Tab = 'attendance' | 'hourly' | 'salary' | 'employees';
 type DayStatus = 'none' | 'present' | 'half-day' | 'absent' | 'holiday';
 
-const TABS = [
-  { id: 'attendance', label: 'Attendance register' },
-  { id: 'hourly', label: 'Hourly workers' },
-  { id: 'salary', label: 'Salary and advances' },
-  { id: 'employees', label: 'Manage employees' },
-];
+// Each section has its own URL (listed in the sidebar): /admin/attendance/<segment>
+const SECTION_BY_SEGMENT: Record<string, Tab> = {
+  register: 'attendance',
+  hourly: 'hourly',
+  salary: 'salary',
+  employees: 'employees',
+};
 
 // Register cells: the letter always shows; the colour only backs it up
 const CELL: Record<DayStatus, { letter: string; label: string; className: string }> = {
@@ -90,7 +92,11 @@ const CELL: Record<DayStatus, { letter: string; label: string; className: string
 };
 
 export function AttendancePage() {
-  const [activeTab, setActiveTab] = useState<Tab>('attendance');
+  const location = useLocation();
+  const navigate = useNavigate();
+  const segment = location.pathname.split('/')[3] ?? '';
+  const activeTab: Tab = SECTION_BY_SEGMENT[segment] ?? 'attendance';
+  const { page } = findSection(location.pathname);
   const [monthStr, setMonthStr] = useState(() => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -183,6 +189,10 @@ export function AttendancePage() {
       toast.error('Failed to load monthly attendance');
     }
   }, [monthStr]);
+
+  useEffect(() => {
+    if (!SECTION_BY_SEGMENT[segment]) navigate('/admin/attendance/register', { replace: true });
+  }, [segment, navigate]);
 
   useEffect(() => {
     loadData();
@@ -354,15 +364,15 @@ export function AttendancePage() {
       icon="users"
       title="No monthly staff for this month"
       description="Add employees in Manage employees."
-      action={<Button size="sm" onClick={() => setActiveTab('employees')}>Manage employees</Button>}
+      action={<Button size="sm" onClick={() => navigate('/admin/attendance/employees')}>Manage employees</Button>}
     />
   );
 
   return (
     <div className={styles.page}>
       <PageHeader
-        title="Staff attendance"
-        description="Attendance register, hourly hours, salaries and advances, and the staff list."
+        eyebrow="Staff attendance"
+        title={page?.label ?? 'Staff attendance'}
         actions={
           <label className={styles.monthField}>
             <span>Month</span>
@@ -371,9 +381,7 @@ export function AttendancePage() {
             </span>
           </label>
         }
-      >
-        <Tabs label="Staff attendance sections" items={TABS} value={activeTab} onChange={(id) => setActiveTab(id as Tab)} />
-      </PageHeader>
+      />
 
       <StatStrip>
         <StatCard label={`Monthly staff · ${monthLabel}`} value={employees.length.toLocaleString('en-IN')} loading={loading && employees.length === 0} />
@@ -530,7 +538,7 @@ export function AttendancePage() {
                 icon="users"
                 title="No hourly workers yet"
                 description="Add one in Manage employees first."
-                action={<Button size="sm" onClick={() => setActiveTab('employees')}>Manage employees</Button>}
+                action={<Button size="sm" onClick={() => navigate('/admin/attendance/employees')}>Manage employees</Button>}
               />
             ) : (
               <form onSubmit={handleLogHours} className={styles.logForm}>
