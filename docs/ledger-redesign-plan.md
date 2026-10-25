@@ -46,6 +46,7 @@ Reference screens: `DashboardPage.tsx` and `SalesPage.tsx`.
 |---|---|---|---|---|
 | Shell | Sidebar, topbar, theme switch | `layouts/AdminLayout` | 137 | Done |
 | System | More breathing room, sections as cards | `styles/tokens.css`, `components/ui/pbx.css`, page `.module.css` layout | — | Done |
+| System | Our own controls everywhere, no browser defaults: select, date and month picker, tooltips, menus, toasts, validation messages | `components/ui/pbx.*`, `scripts/check-design.mjs`, the screens that use them | — | In progress |
 | Dashboard | Dashboard | `pages/DashboardPage`, `pages/dashboard/*` | 1,348 | Done |
 | Sales | Sales management | `pages/SalesManagementPage`, `pages/SalesPage`, `pages/SalesPage/*` | 2,660 | Done (orders as one table per day) |
 | Orders | Backlog | `pages/BacklogPage` | 261 | Done |
