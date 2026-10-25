@@ -2,7 +2,6 @@ import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import compression from 'compression';
 import config from './config';
-import { connectMongo } from './db';
 import adminAuthRoutes, { requireAdmin } from './routes/adminAuth';
 import type { AuthenticatedRequest } from './types';
 import magicLinksRoutes from './routes/magicLinks';
@@ -58,14 +57,13 @@ app.use(express.json());
 // Gzip JSON responses; large order lists shrink by roughly 85-90%.
 app.use(compression());
 
-// Liveness check — deliberately BEFORE the DB-ensure middleware so it stays a pure ping
-// even if Mongo is unreachable.
+// Liveness check — a pure ping that touches no database.
 app.get('/api/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 // Deny by default: every /api/admin route needs an admin token unless it is listed here, so a
-// handler that forgets `requireAdmin` is still protected. Runs before the Mongo middleware so
+// handler that forgets `requireAdmin` is still protected. Runs before every route, so
 // unauthenticated requests never touch the database.
 const PUBLIC_ADMIN_PATHS = new Set(['/auth/login', '/auth/register']);
 app.use('/api/admin', (req: Request, res: Response, next: NextFunction) => {
@@ -73,20 +71,8 @@ app.use('/api/admin', (req: Request, res: Response, next: NextFunction) => {
   requireAdmin(req as AuthenticatedRequest, res, next);
 });
 
-// Admin login and session checks read Firestore only, so they don't wait on Mongo.
-app.use('/api/admin/auth', adminAuthRoutes);
-
-// Ensure Mongo is connected before any route handler below runs. On Cloud Functions this connects
-// once per warm instance and is a no-op thereafter; a cold-start Atlas failure returns 503
-// rather than hanging or crashing the instance.
-app.use((_req: Request, res: Response, next: NextFunction) => {
-  connectMongo().then(() => next()).catch((err) => {
-    console.error('❌ MongoDB connection error:', err);
-    res.status(503).json({ success: false, error: 'Database unavailable' });
-  });
-});
-
 // Routes
+app.use('/api/admin/auth', adminAuthRoutes);
 app.use('/api/admin/magic-links', magicLinksRoutes);
 app.use('/api/admin/expenses', expensesRoutes);
 app.use('/api/admin/sales', salesRoutes);

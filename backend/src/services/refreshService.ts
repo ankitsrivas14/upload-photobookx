@@ -1,7 +1,6 @@
 import shiprocketService from './shiprocketService';
 import { fullRebuildDue, processDirtyDates, rebuildAll } from './aggregatesService';
 import { markDatesDirty, orderDateKey } from '../db/aggregatesDirty';
-import { RTOOrder } from '../models';
 
 /**
  * Server-side equivalent of the SalesPage "Refresh" button, so the data stays fresh

@@ -1,5 +1,4 @@
 import { onSchedule } from 'firebase-functions/v2/scheduler';
-import { connectMongo } from './db';
 import { runScheduledRefresh } from './services/refreshService';
 
 /**
@@ -11,7 +10,7 @@ import { runScheduledRefresh } from './services/refreshService';
  * orders missing a charge are synced. `maxInstances: 1` prevents overlapping runs.
  * The first run after 02:30 IST each night rebuilds every date's aggregates (ROAS
  * included) and the breakeven snapshot; other runs recompute only the changed dates.
- * Needs Shopify + Shiprocket credentials in addition to MongoDB.
+ * Needs Shopify + Shiprocket credentials.
  */
 export const scheduledRefresh = onSchedule(
   {
@@ -21,7 +20,6 @@ export const scheduledRefresh = onSchedule(
     memory: '1GiB',
     maxInstances: 1,
     secrets: [
-      'MONGO_URI',
       'SHOPIFY_STORE_DOMAIN',
       'SHOPIFY_ACCESS_TOKEN',
       'PRINTED_PHOTOS_PRODUCT_ID',
@@ -30,7 +28,6 @@ export const scheduledRefresh = onSchedule(
     ],
   },
   async () => {
-    await connectMongo();
     const result = await runScheduledRefresh();
     console.log(
       `Scheduled refresh done: synced=${result.synced}, toSync=${result.toSync}, ` +
