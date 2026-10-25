@@ -3,7 +3,7 @@ import ShippingCharge from '../models/ShippingCharge';
 import { DailyShipping } from '../models/DailyShipping';
 
 const STORE_TIMEZONE = 'Asia/Kolkata';
-const DATA_START_DATE = '2026-01-01';
+export const DATA_START_DATE = '2026-01-01';
 
 function toDateKey(date: Date): string {
   return date.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
@@ -34,10 +34,12 @@ async function buildShippingChargeMap(): Promise<Map<string, number>> {
   return getAllAsMap();
 }
 
-/** Build a map of dateKey → fulfilled orders (non-cancelled) from Firestore */
-async function buildOrdersByDate(): Promise<Map<string, any[]>> {
-  const { getAll } = await import('../db/ordersRepo');
-  const orders = await getAll();
+/** Build a map of dateKey → fulfilled orders (non-cancelled) from Firestore, or from `orders` when given */
+export async function buildOrdersByDate(orders?: any[]): Promise<Map<string, any[]>> {
+  if (!orders) {
+    const { getAll } = await import('../db/ordersRepo');
+    orders = await getAll();
+  }
 
   const byDate = new Map<string, any[]>();
 
@@ -72,6 +74,12 @@ export async function recomputeShippingForDate(
 
   const charges = chargeMap ?? (await buildShippingChargeMap());
 
+  const { dailyShippingStore } = await import('../db/dailyStores');
+  await dailyShippingStore.set(computeShipping(dateKey, orders, charges));
+}
+
+/** The DailyShipping doc for one date, from that date's fulfilled orders and their charges. */
+export function computeShipping(dateKey: string, orders: any[], charges: Map<string, number>) {
   const allAmounts: number[] = [];
   const smallAmounts: number[] = [];
   const largeAmounts: number[] = [];
@@ -88,8 +96,7 @@ export async function recomputeShippingForDate(
     if (variant === 'large') largeAmounts.push(charge);
   }
 
-  const { dailyShippingStore } = await import('../db/dailyStores');
-  await dailyShippingStore.set({
+  return {
     dateKey,
     avgShipping: avgOf(allAmounts),
     avgShippingSmall: avgOf(smallAmounts),
@@ -97,7 +104,7 @@ export async function recomputeShippingForDate(
     orderCount: allAmounts.length,
     smallCount: smallAmounts.length,
     largeCount: largeAmounts.length,
-  });
+  };
 }
 
 async function getSingleDayOrders(dateKey: string): Promise<any[]> {
@@ -129,11 +136,12 @@ export async function backfillShippingStats(): Promise<{ upserted: number }> {
     buildShippingChargeMap(),
   ]);
 
-  let upserted = 0;
-  for (const dateKey of ordersByDate.keys()) {
-    await recomputeShippingForDate(dateKey, ordersByDate, chargeMap);
-    upserted++;
-  }
+  // One batched write instead of a round trip per date.
+  const docs = [...ordersByDate.keys()].map((dateKey) =>
+    computeShipping(dateKey, ordersByDate.get(dateKey) ?? [], chargeMap)
+  );
+  const { dailyShippingStore } = await import('../db/dailyStores');
+  const upserted = await dailyShippingStore.bulkSet(docs);
 
   return { upserted };
 }

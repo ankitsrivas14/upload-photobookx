@@ -852,16 +852,25 @@ class ShopifyService {
     }
   }
 
+  // Products change rarely, so serve them from memory for a while instead of calling Shopify on
+  // every page open (0.8–1.7 s). Any price update clears it (see updateProductVariants).
+  private productsCache = new Map<number, { products: any[]; at: number }>();
+  private static PRODUCTS_TTL_MS = 10 * 60 * 1000;
+
   /**
    * Get all products with their variants
    */
   async getProducts(limit: number = 50): Promise<any[]> {
+    const cached = this.productsCache.get(limit);
+    if (cached && Date.now() - cached.at < ShopifyService.PRODUCTS_TTL_MS) return cached.products;
     try {
       const data = await this.makeRequest<{ products: any[] }>(
         `/products.json?limit=${limit}`
       );
 
-      return data.products || [];
+      const products = data.products || [];
+      this.productsCache.set(limit, { products, at: Date.now() });
+      return products;
     } catch (error) {
       console.error('Error fetching products:', error);
       throw error;
@@ -892,6 +901,7 @@ class ShopifyService {
     price?: string;
     compareAtPrice?: string | null;
   }>): Promise<any> {
+    this.productsCache.clear();
     try {
       // First get the product to get current variant data
       const product = await this.getProduct(productId);

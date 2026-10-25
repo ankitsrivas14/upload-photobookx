@@ -3,6 +3,7 @@ import { requireAdmin } from './adminAuth';
 import { MetaAdPerformance } from '../models';
 import type { AuthenticatedRequest } from '../types';
 import { recomputeForDate } from '../services/roasService';
+import { markDatesDirty } from '../db/aggregatesDirty';
 import { expenseSourceStore, metaAdsExpenseStore, dailyAdSpendStore } from '../db/featureStores';
 
 const router = Router();
@@ -297,6 +298,8 @@ router.put('/daily-ad-spend', requireAdmin, async (req: AuthenticatedRequest, re
     }
 
     const dateKey = parsedDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+    // Ad spend feeds that day's ROAS and P&L; the scheduled jobs recompute marked days.
+    await markDatesDirty([dateKey]);
     recomputeForDate(dateKey).catch((err) => console.error('ROAS recompute error:', err));
 
     res.json({
@@ -343,6 +346,8 @@ router.post('/daily-ad-spend', requireAdmin, async (req: AuthenticatedRequest, r
 
     // Recompute ROAS for this date asynchronously (don't block the response)
     const dateKey = new Date(entry.date).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+    // Ad spend feeds that day's ROAS and P&L; the scheduled jobs recompute marked days.
+    await markDatesDirty([dateKey]);
     recomputeForDate(dateKey).catch((err) => console.error('ROAS recompute error:', err));
 
     res.status(201).json({
@@ -378,6 +383,8 @@ router.delete('/daily-ad-spend/:entryId', requireAdmin, async (req: Authenticate
 
     // Recompute ROAS for the affected date asynchronously
     const dateKey = new Date((entry as any).date).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+    // Ad spend feeds that day's ROAS and P&L; the scheduled jobs recompute marked days.
+    await markDatesDirty([dateKey]);
     recomputeForDate(dateKey).catch((err) => console.error('ROAS recompute error:', err));
 
     res.json({ success: true });

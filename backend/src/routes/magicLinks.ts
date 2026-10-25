@@ -14,9 +14,10 @@ import { getS3Client } from '../services/s3';
 import { Ticket } from '../models';
 import archiver from 'archiver';
 import { recomputeShippingForDate, getOrderDateKey as getShippingOrderDateKey, backfillShippingStats } from '../services/shippingStatsService';
-import { recomputeOrderStatsForDate, backfillOrderStats } from '../services/orderStatsService';
+import { backfillOrderStats } from '../services/orderStatsService';
+import { recomputeDates } from '../services/aggregatesService';
 import { refreshBreakevenSnapshot } from '../services/breakevenService';
-import { backfillDailyPnl, recomputePnlForDate } from '../services/dailyPnlService';
+import { backfillDailyPnl } from '../services/dailyPnlService';
 
 const router = Router();
 
@@ -803,12 +804,11 @@ router.post('/shopify/update-delivery-status', requireAdmin, async (req: Authent
     // dashboard bars are keyed by) and wait for it, so the response only returns
     // once the dashboards would reflect the new status. Then the client can reload
     // the chart immediately instead of guessing a delay.
-    const dateKey = await shopifyService.getOrderCreationDateKey(orderNumber);
+    // Both the lookup and the recompute read only that day's orders, so this is quick.
+    const { getDateKeyByName } = await import('../db/ordersRepo');
+    const dateKey = await getDateKeyByName(orderNumber);
     if (dateKey) {
-      await Promise.all([
-        recomputeOrderStatsForDate(dateKey).catch((e) => console.error('order-stats recompute:', e)),
-        recomputePnlForDate(dateKey).catch((e) => console.error('pnl recompute:', e)),
-      ]);
+      await recomputeDates([dateKey]).catch((e) => console.error('aggregates recompute:', e));
     }
 
     res.json({

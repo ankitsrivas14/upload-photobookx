@@ -1,37 +1,6 @@
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { connectMongo } from './db';
-import { backfillAllDates } from './services/roasService';
 import { runScheduledRefresh } from './services/refreshService';
-
-/**
- * Durable ROAS recompute for the Cloud Functions runtime.
- *
- * On Render/local the recompute runs in-process on the write path (see
- * `scheduleRoasRecompute`). On Cloud Functions that fire-and-forget path is disabled
- * (it can't reliably finish after the response), so this scheduled function owns freshness:
- * every 15 minutes it re-derives DailyROAS from the current order cache + ad spend. The work
- * is idempotent upserts, so overlapping/rerun is harmless; `maxInstances: 1` avoids parallel
- * runs. Only MongoDB is touched — no external APIs — so only MONGO_URI is needed.
- */
-export const roasRecompute = onSchedule(
-  {
-    schedule: 'every 15 minutes',
-    region: 'asia-south1',
-    timeoutSeconds: 300,
-    // 1 GiB (not 512 MiB): the container loads the whole backend module graph at
-    // cold start (shared entry with `api`), and on Cloud Run memory is coupled to CPU —
-    // 512 MiB starved startup and the health check failed. It also gives the recompute
-    // headroom when it loads the order cache into memory.
-    memory: '1GiB',
-    maxInstances: 1,
-    secrets: ['MONGO_URI'],
-  },
-  async () => {
-    await connectMongo();
-    const { upserted } = await backfillAllDates();
-    console.log(`Scheduled ROAS recompute: ${upserted} dates refreshed`);
-  }
-);
 
 /**
  * Keeps order + shipping data fresh without anyone pressing "Refresh" in the UI.
@@ -40,6 +9,8 @@ export const roasRecompute = onSchedule(
  * orders need a Shiprocket shipping sync → one bulk fetch → recompute the daily
  * aggregates). Steady-state runs do little external work because only terminal
  * orders missing a charge are synced. `maxInstances: 1` prevents overlapping runs.
+ * The first run after 02:30 IST each night rebuilds every date's aggregates (ROAS
+ * included) and the breakeven snapshot; other runs recompute only the changed dates.
  * Needs Shopify + Shiprocket credentials in addition to MongoDB.
  */
 export const scheduledRefresh = onSchedule(
@@ -63,7 +34,7 @@ export const scheduledRefresh = onSchedule(
     const result = await runScheduledRefresh();
     console.log(
       `Scheduled refresh done: synced=${result.synced}, toSync=${result.toSync}, ` +
-        `fetched=${result.fetched}, skipped=${result.skipped}`
+        `fetched=${result.fetched}, skipped=${result.skipped}, aggregates=${result.aggregates}`
     );
   }
 );
@@ -73,6 +44,8 @@ export const scheduledRefresh = onSchedule(
  * last run (Shopify updated_at, any age) straight into Firestore. No Mongo — so it never
  * touches the slow ~15MB cache doc and can't time out on it. This is what keeps the
  * SalesPage (which reads Firestore) current, including late deliveries and RTOs.
+ * It then recomputes the daily aggregates (order stats, shipping, P&L, ROAS) for the
+ * dates whose inputs changed, so the dashboards trail Shopify by at most ~10 minutes.
  */
 export const ordersSync = onSchedule(
   {
@@ -85,7 +58,12 @@ export const ordersSync = onSchedule(
   },
   async () => {
     const { syncChangedOrders } = await import('./services/orderSyncService');
+    const { processDirtyDates } = await import('./services/aggregatesService');
     const { fetched, written, since } = await syncChangedOrders();
-    console.log(`ordersSync: ${fetched} orders changed since ${since}, upserted ${written} to Firestore`);
+    const dates = await processDirtyDates();
+    console.log(
+      `ordersSync: ${fetched} orders changed since ${since}, upserted ${written} to Firestore, ` +
+        `aggregates: ${dates === null ? 'skipped' : `${dates} dates recomputed`}`
+    );
   }
 );

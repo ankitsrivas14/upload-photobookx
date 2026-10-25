@@ -1,8 +1,6 @@
 import shiprocketService from './shiprocketService';
-import { backfillOrderStats } from './orderStatsService';
-import { backfillDailyPnl } from './dailyPnlService';
-import { backfillShippingStats } from './shippingStatsService';
-import { refreshBreakevenSnapshot } from './breakevenService';
+import { fullRebuildDue, processDirtyDates, rebuildAll } from './aggregatesService';
+import { markDatesDirty, orderDateKey } from '../db/aggregatesDirty';
 import { RTOOrder } from '../models';
 
 /**
@@ -15,10 +13,11 @@ import { RTOOrder } from '../models';
  *      frontend applied in handleRefresh — see SalesPage.tsx).
  *   3. Fetch those shipping charges in ONE bulk call (the Shiprocket order-map and
  *      wallet-transaction caches keep it cheap).
- *   4. Recompute the daily aggregates the dashboards read.
+ *   4. Recompute the daily aggregates the dashboards read: only the dates whose inputs
+ *      changed, or every date on the nightly full rebuild (see aggregatesService).
  *
  * Only-terminal orders that already have a charge are skipped, so steady-state runs
- * do very little external work.
+ * do very little external work. Between full rebuilds only recent orders are checked.
  */
 
 // Orders created before this were a one-off backfill and are intentionally ignored.
@@ -26,6 +25,9 @@ const SYNC_CUTOFF_DATE = new Date('2026-01-10T00:00:00');
 // Shipping-charge search fix date: terminal orders with a 0 charge fetched before this
 // get one more attempt with the corrected Shiprocket search; after it we trust the 0.
 const FIX_DATE = new Date('2026-03-21T00:00:00Z');
+// Orders settle (delivered or RTO) within weeks, so the half-hourly runs only check orders
+// created this recently; the nightly full run checks every order.
+const SHIPPING_WINDOW_DAYS = 30;
 
 /** Delivery status from a raw Shopify order — latest fulfillment, else order-level status. */
 function deriveDeliveryStatus(order: any): string | null {
@@ -86,14 +88,18 @@ export async function runScheduledRefresh(): Promise<{
   toSync: number;
   fetched: number;
   skipped: number;
+  aggregates: string;
 }> {
   // 1. Orders changed since the last sync straight into Firestore (fast; no 15MB Mongo path).
+  //    Writing them marks their days for the aggregate recompute in step 4.
   const { syncChangedOrders } = await import('./orderSyncService');
   const { written: synced } = await syncChangedOrders();
-  const { getAll } = await import('../db/ordersRepo');
+  const { getAll, getCreatedBetween } = await import('../db/ordersRepo');
+  const full = await fullRebuildDue();
 
   // 2. Decide which orders need a shipping sync (orders from Firestore).
-  const orders = await getAll();
+  const windowStart = new Date(Date.now() - SHIPPING_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  const orders = full ? await getAll() : await getCreatedBetween(windowStart.toISOString().slice(0, 10));
   const orderNames = orders.map((o: any) => o.name);
   const { rtoStore, idSet } = await import('../db/orderListStores');
   const [rtoSet, chargeMap] = await Promise.all([
@@ -109,19 +115,32 @@ export async function runScheduledRefresh(): Promise<{
     const result = await shiprocketService.bulkFetchShippingCharges(toSync);
     fetched = result.fetched;
     skipped = result.skipped;
+
+    // A changed charge changes that day's shipping and P&L aggregates.
+    const after = await shiprocketService.getShippingCharges(toSync);
+    const byName = new Map(orders.map((o: any) => [o.name, o]));
+    const bare = (n: string) => String(n || '').replace(/^#/, '');
+    const changed = toSync.filter(
+      (name) => (chargeMap.get(bare(name))?.shippingCharge ?? 0) !== (after.get(bare(name))?.shippingCharge ?? 0)
+    );
+    await markDatesDirty(changed.map((name) => orderDateKey(byName.get(name))));
   }
 
-  // 4. Recompute the daily aggregates the dashboards read.
-  await backfillOrderStats();
-  await backfillShippingStats();
-  await backfillDailyPnl();
-  // 5. Refresh the breakeven snapshot the dashboard reads (off the request path).
-  await refreshBreakevenSnapshot();
+  // 4. Recompute the daily aggregates the dashboards read. The full rebuild also refreshes
+  //    the breakeven snapshot.
+  let aggregates: string;
+  if (full) {
+    const rebuilt = await rebuildAll();
+    aggregates = rebuilt ? `full rebuild (${rebuilt.dates} dates)` : 'full rebuild skipped (lease held)';
+  } else {
+    const n = await processDirtyDates();
+    aggregates = n === null ? 'skipped (lease held)' : `${n} dirty dates`;
+  }
 
   console.log(
     `Scheduled refresh: synced ${synced} orders, ${toSync.length} needed shipping sync ` +
-      `(fetched ${fetched}, skipped ${skipped})`
+      `(fetched ${fetched}, skipped ${skipped}), aggregates: ${aggregates}`
   );
 
-  return { synced, toSync: toSync.length, fetched, skipped };
+  return { synced, toSync: toSync.length, fetched, skipped, aggregates };
 }

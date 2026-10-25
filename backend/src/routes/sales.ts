@@ -11,8 +11,19 @@ import { computeBreakevenMetrics, refreshBreakevenSnapshot } from '../services/b
 import { dailyOrderStatsStore, dailyPnlStore, dailyShippingStore, dailyRoasStore, breakevenStore, readDailyRange } from '../db/dailyStores';
 import { rtoStore, discardedStore, ackStore, ticketStore } from '../db/orderListStores';
 import shopifyService from '../services/shopifyService';
+import { recomputeDates } from '../services/aggregatesService';
+import { markDatesDirty, orderDateKey, requestFullRebuild } from '../db/aggregatesDirty';
 
 const router = express.Router();
+
+/** Mark the creation days of these orders for an aggregate recompute; returns those days. */
+async function markOrderDatesDirty(orderIds: Array<string | number>): Promise<string[]> {
+  const { getByIds } = await import('../db/ordersRepo');
+  const orders = await getByIds(orderIds);
+  const dates = [...new Set(orders.map(orderDateKey).filter((d): d is string => !!d))];
+  await markDatesDirty(dates);
+  return dates;
+}
 
 /**
  * GET /api/admin/sales/discarded-orders
@@ -338,15 +349,15 @@ router.post('/mark-rto', requireAdmin, async (req: AuthenticatedRequest, res: Re
     }));
     
     await rtoStore.bulkSet(rtoOrders);
+    const rtoDates = await markOrderDatesDirty(orderIds);
 
     res.json({
       success: true,
       message: `${orderIds.length} order(s) marked as RTO`,
     });
 
-    // RTO changes flip order delivery status — recompute P&L and order stats async
-    backfillDailyPnl().catch(console.error);
-    backfillOrderStats().catch(console.error);
+    // RTO changes flip order delivery status — recompute those days' aggregates async
+    recomputeDates(rtoDates).catch(console.error);
   } catch (error: any) {
     // Handle duplicate key errors gracefully
     if (error.code === 11000) {
@@ -354,8 +365,7 @@ router.post('/mark-rto', requireAdmin, async (req: AuthenticatedRequest, res: Re
         success: true,
         message: 'Orders marked as RTO (some were already marked)',
       });
-      backfillDailyPnl().catch(console.error);
-      backfillOrderStats().catch(console.error);
+      markOrderDatesDirty(req.body?.orderIds ?? []).then(recomputeDates).catch(console.error);
       return;
     }
     
@@ -378,14 +388,14 @@ router.delete('/mark-rto', requireAdmin, async (req: AuthenticatedRequest, res: 
     }
     
     await rtoStore.deleteMany(orderIds.map(String));
+    const rtoDates = await markOrderDatesDirty(orderIds);
 
     res.json({
       success: true,
       message: `${orderIds.length} order(s) unmarked from RTO`,
     });
 
-    backfillDailyPnl().catch(console.error);
-    backfillOrderStats().catch(console.error);
+    recomputeDates(rtoDates).catch(console.error);
   } catch (error) {
     res.status(500).json({ success: false, error: 'Failed to unmark RTO orders' });
   }
@@ -1426,6 +1436,7 @@ router.post('/firestore-backfill-lists', requireAdmin, async (_req: Authenticate
       ticket: await ticketStore.bulkSet(ticket as any[]),
       deliveryDates: await deliveryDateStore.bulkSet(delivery as any[]),
     };
+    await requestFullRebuild('order lists copied from Mongo');
     res.json({ success: true, written: out });
   } catch (error) {
     console.error('Firestore lists backfill failed:', error);
@@ -1456,6 +1467,7 @@ router.post('/firestore-backfill-features', requireAdmin, async (_req: Authentic
       sources: await expenseSourceStore.bulkImport(sources as any[]),
       fixed: await fixedMonthlyExpenseStore.bulkImport(fixed as any[]),
     };
+    await requestFullRebuild('COGS and expenses copied from Mongo');
     res.json({ success: true, written });
   } catch (error) {
     console.error('Firestore features backfill failed:', error);

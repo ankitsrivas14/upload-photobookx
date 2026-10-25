@@ -3,16 +3,18 @@ import { DailyAdSpend } from '../models/DailyAdSpend';
 import { DailyROAS } from '../models/DailyROAS';
 
 const STORE_TIMEZONE = 'Asia/Kolkata';
-const DATA_START_DATE = '2026-01-28';
+export const DATA_START_DATE = '2026-01-28';
 
 function toDateKey(date: Date): string {
   return date.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
 }
 
-/** Aggregate all Firestore orders into a revenue map keyed by dateKey */
-async function buildRevenueByDate(): Promise<Record<string, number>> {
-  const { getAll } = await import('../db/ordersRepo');
-  const orders = await getAll();
+/** Aggregate all Firestore orders (or `orders` when given) into a revenue map keyed by dateKey */
+export async function buildRevenueByDate(orders?: any[]): Promise<Record<string, number>> {
+  if (!orders) {
+    const { getAll } = await import('../db/ordersRepo');
+    orders = await getAll();
+  }
   const revenueByDate: Record<string, number> = {};
   for (const order of orders) {
     if (order.cancelled_at) continue;
@@ -26,7 +28,7 @@ async function buildRevenueByDate(): Promise<Record<string, number>> {
 }
 
 /** Aggregate DailyAdSpend into a map keyed by dateKey */
-async function buildAdSpendByDate(): Promise<Record<string, number>> {
+export async function buildAdSpendByDate(): Promise<Record<string, number>> {
   const { dailyAdSpendStore } = await import('../db/featureStores');
   const entries = await dailyAdSpendStore.all();
   const adSpendByDate: Record<string, number> = {};
@@ -54,10 +56,14 @@ export async function recomputeForDate(
     ? (adSpendByDate[dateKey] || 0)
     : await getSingleDayAdSpend(dateKey);
 
-  const roas = adSpend > 0 ? revenue / adSpend : null;
-
   const { dailyRoasStore } = await import('../db/dailyStores');
-  await dailyRoasStore.set({ dateKey, revenue, adSpend, roas });
+  await dailyRoasStore.set(roasDoc(dateKey, revenue, adSpend));
+}
+
+/** The DailyROAS doc for one date. */
+export function roasDoc(dateKey: string, revenue: number, adSpend: number) {
+  const roas = adSpend > 0 ? revenue / adSpend : null;
+  return { dateKey, revenue, adSpend, roas };
 }
 
 async function getSingleDayRevenue(dateKey: string): Promise<number> {
@@ -85,9 +91,10 @@ let roasRecomputeQueued = false;
  *
  * On Cloud Functions (Cloud Run sets `K_SERVICE`) this is a no-op: background work
  * kicked off after the HTTP response isn't guaranteed to finish, so freshness there is
- * owned by the scheduled `roasRecompute` function (see scheduled.ts), which runs the same
- * `backfillAllDates()` on a fixed interval. On the local/Render server (`K_SERVICE` unset)
- * this in-process fast path still runs and keeps ROAS near-instant.
+ * owned by the scheduled jobs, which recompute ROAS with the other daily aggregates for
+ * every date whose orders or ad spend changed (see aggregatesService). On the
+ * local/Render server (`K_SERVICE` unset) this in-process fast path still runs and keeps
+ * ROAS near-instant.
  */
 export function scheduleRoasRecompute(reason: string): void {
   if (process.env.K_SERVICE) return; // handled by the scheduled function on Cloud Functions
@@ -125,12 +132,12 @@ export async function backfillAllDates(): Promise<{ upserted: number }> {
     ...Object.keys(adSpendByDate),
   ]);
 
-  let upserted = 0;
-  for (const dateKey of allDateKeys) {
-    if (dateKey < DATA_START_DATE) continue;
-    await recomputeForDate(dateKey, revenueByDate, adSpendByDate);
-    upserted++;
-  }
+  // One batched write instead of a round trip per date.
+  const docs = [...allDateKeys]
+    .filter((dateKey) => dateKey >= DATA_START_DATE)
+    .map((dateKey) => roasDoc(dateKey, revenueByDate[dateKey] || 0, adSpendByDate[dateKey] || 0));
+  const { dailyRoasStore } = await import('../db/dailyStores');
+  const upserted = await dailyRoasStore.bulkSet(docs);
 
   return { upserted };
 }

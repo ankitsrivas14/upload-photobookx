@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { requireAdmin } from './adminAuth';
 import { backfillDailyPnl } from '../services/dailyPnlService';
 import { cogsStore } from '../db/featureStores';
+import { requestFullRebuild } from '../db/aggregatesDirty';
 
 const router = Router();
 
@@ -75,6 +76,8 @@ router.post('/configuration', requireAdmin, async (req, res) => {
       updatedAt: new Date(),
     });
 
+    // COGS feeds every day's P&L: the next scheduled refresh rebuilds all dates.
+    await requestFullRebuild('COGS version created');
     res.json({ success: true, message: 'COGS version created', version: config });
 
     // Recompute P&L for all dates on/after effectiveFrom
@@ -108,6 +111,7 @@ router.put('/configuration/:id', requireAdmin, async (req, res) => {
     const existing = await cogsStore.getById(String(req.params.id));
     if (!existing) return res.status(404).json({ error: 'Version not found' });
     const updated = await cogsStore.updateById(String(req.params.id), update);
+    await requestFullRebuild('COGS version updated');
 
     res.json({ success: true, version: updated });
 
@@ -126,6 +130,7 @@ router.delete('/configuration/:id', requireAdmin, async (req, res) => {
       return res.status(400).json({ error: 'Cannot delete the only version' });
     }
     await cogsStore.deleteById(String(req.params.id));
+    await requestFullRebuild('COGS version deleted');
     res.json({ success: true });
     backfillDailyPnl().catch(console.error);
   } catch (error) {

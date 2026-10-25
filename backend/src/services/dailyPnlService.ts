@@ -6,7 +6,7 @@ import { COGSConfiguration } from '../models/COGSConfiguration';
 import { DailyPnl } from '../models/DailyPnl';
 
 const STORE_TIMEZONE = 'Asia/Kolkata';
-const DATA_START_DATE = '2026-01-28';
+export const DATA_START_DATE = '2026-01-28';
 
 function toDateKey(date: Date): string {
   return date.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
@@ -14,9 +14,11 @@ function toDateKey(date: Date): string {
 
 // ─── data loaders ────────────────────────────────────────────────────────────
 
-async function loadOrdersByDate(): Promise<Map<string, any[]>> {
-  const { getAll } = await import('../db/ordersRepo');
-  const orders = await getAll();
+export async function loadOrdersByDate(orders?: any[]): Promise<Map<string, any[]>> {
+  if (!orders) {
+    const { getAll } = await import('../db/ordersRepo');
+    orders = await getAll();
+  }
   const byDate = new Map<string, any[]>();
   for (const order of orders) {
     if (order.cancelled_at) continue;
@@ -28,7 +30,7 @@ async function loadOrdersByDate(): Promise<Map<string, any[]>> {
   return byDate;
 }
 
-async function loadRtoSet(): Promise<Set<number>> {
+export async function loadRtoSet(): Promise<Set<number>> {
   const { rtoStore, idSet } = await import('../db/orderListStores');
   return idSet(rtoStore);
 }
@@ -38,7 +40,7 @@ async function loadShippingMap(): Promise<Map<string, number>> {
   return getAllAsMap();
 }
 
-async function loadAdSpendByDate(): Promise<Map<string, number>> {
+export async function loadAdSpendByDate(): Promise<Map<string, number>> {
   const { dailyAdSpendStore } = await import('../db/featureStores');
   const docs = await dailyAdSpendStore.all();
   const map = new Map<string, number>();
@@ -58,13 +60,13 @@ interface TotalOverrides {
   largeCODValue?: number;
 }
 
-interface CogsVersion {
+export interface CogsVersion {
   effectiveFrom: string; // YYYY-MM-DD
   fields: any[];
   totalOverrides?: { pre?: TotalOverrides; post?: TotalOverrides };
 }
 
-async function loadCogsVersions(): Promise<CogsVersion[]> {
+export async function loadCogsVersions(): Promise<CogsVersion[]> {
   const { cogsStore } = await import('../db/featureStores');
   const docs = (await cogsStore.all()).sort(
     (a, b) => new Date(a.effectiveFrom).getTime() - new Date(b.effectiveFrom).getTime()
@@ -171,7 +173,7 @@ interface OrderPnlBreakdown {
  * Uses only finalized COD orders (delivered or failed/RTO) to avoid bias from pending orders.
  * Falls back to 20% if fewer than 20 finalized COD orders are available.
  */
-function computeHistoricalRtoRate(
+export function computeHistoricalRtoRate(
   ordersByDate: Map<string, any[]>,
   rtoSet: Set<number>
 ): number {
@@ -372,12 +374,33 @@ export async function recomputePnlForDate(
   if (!allOrdersByDate) {
     allOrdersByDate = await loadOrdersByDate();
   }
-  const orders = allOrdersByDate.get(dateKey) ?? [];
-
   const rto = rtoSet ?? (await loadRtoSet());
   const shipMap = shippingMap ?? (await loadShippingMap());
   const adSpendMap = adSpendByDate ?? (await loadAdSpendByDate());
   const versions = cogsVersions ?? (await loadCogsVersions());
+
+  // Effective RTO rate: use pre-supplied value, or compute from full order history
+  const effectiveRtoRate = rtoRate ?? computeHistoricalRtoRate(allOrdersByDate, rto);
+
+  const { dailyPnlStore } = await import('../db/dailyStores');
+  await dailyPnlStore.set(
+    computePnl(dateKey, allOrdersByDate.get(dateKey) ?? [], rto, shipMap, adSpendMap, versions, effectiveRtoRate)
+  );
+}
+
+/**
+ * The DailyPnl doc for one date, from that date's (non-cancelled) orders. `effectiveRtoRate`
+ * is the historical COD RTO rate used to estimate pending orders on incomplete days.
+ */
+export function computePnl(
+  dateKey: string,
+  orders: any[],
+  rto: Set<number>,
+  shipMap: Map<string, number>,
+  adSpendMap: Map<string, number>,
+  versions: CogsVersion[],
+  effectiveRtoRate: number
+) {
   const version = getCogsVersionForDate(dateKey, versions);
   const cogs = version?.fields ?? [];
   const overrides = version?.totalOverrides;
@@ -388,9 +411,6 @@ export async function recomputePnlForDate(
 
   // Bar-chart completion: all orders explicitly delivered/failed (or no orders)
   const isCompleted = orderCount === 0 || orders.every((o) => orderIsFinalStatus(o, rto));
-
-  // Effective RTO rate: use pre-supplied value, or compute from full order history
-  const effectiveRtoRate = rtoRate ?? computeHistoricalRtoRate(allOrdersByDate, rto);
 
   let barChartProfit = 0;
   let heatmapProfit = 0;
@@ -423,8 +443,7 @@ export async function recomputePnlForDate(
     heatmapProfit = -adSpend;
   }
 
-  const { dailyPnlStore } = await import('../db/dailyStores');
-  await dailyPnlStore.set({
+  return {
     dateKey,
     isCompleted,
     barChartProfit,
@@ -433,7 +452,7 @@ export async function recomputePnlForDate(
     adSpend,
     totalRevenue,
     totalCogs,
-  });
+  };
 }
 
 /**
@@ -453,12 +472,14 @@ export async function recomputePnlForDates(dateKeys: string[]): Promise<void> {
     loadCogsVersions(),
   ]);
   const rtoRate = computeHistoricalRtoRate(ordersByDate, rtoSet);
-  for (const dk of dateKeys) {
-    await recomputePnlForDate(dk, ordersByDate, rtoSet, shippingMap, adSpendByDate, cogsVersions, rtoRate);
-  }
+  const docs = dateKeys.map((dk) =>
+    computePnl(dk, ordersByDate.get(dk) ?? [], rtoSet, shippingMap, adSpendByDate, cogsVersions, rtoRate)
+  );
+  const { dailyPnlStore } = await import('../db/dailyStores');
+  await dailyPnlStore.bulkSet(docs);
 }
 
-export async function backfillDailyPnl(): Promise<{ upserted: number }> {
+export async function backfillDailyPnl(): Promise<{ upserted: number; rtoRate: number }> {
   const [ordersByDate, rtoSet, shippingMap, adSpendByDate, cogsVersions] = await Promise.all([
     loadOrdersByDate(),
     loadRtoSet(),
@@ -473,11 +494,12 @@ export async function backfillDailyPnl(): Promise<{ upserted: number }> {
   // Include both order dates and ad-spend dates
   const allDates = new Set([...ordersByDate.keys(), ...adSpendByDate.keys()]);
 
-  let upserted = 0;
-  for (const dateKey of allDates) {
-    await recomputePnlForDate(dateKey, ordersByDate, rtoSet, shippingMap, adSpendByDate, cogsVersions, rtoRate);
-    upserted++;
-  }
+  // One batched write instead of a round trip per date.
+  const docs = [...allDates].map((dateKey) =>
+    computePnl(dateKey, ordersByDate.get(dateKey) ?? [], rtoSet, shippingMap, adSpendByDate, cogsVersions, rtoRate)
+  );
+  const { dailyPnlStore } = await import('../db/dailyStores');
+  const upserted = await dailyPnlStore.bulkSet(docs);
 
-  return { upserted };
+  return { upserted, rtoRate };
 }

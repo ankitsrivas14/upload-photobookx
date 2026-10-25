@@ -3,7 +3,7 @@ import RTOOrder from '../models/RTOOrder';
 import { DailyOrderStats } from '../models/DailyOrderStats';
 
 const STORE_TIMEZONE = 'Asia/Kolkata';
-const DATA_START_DATE = '2026-01-28';
+export const DATA_START_DATE = '2026-01-28';
 
 function toDateKey(date: Date): string {
   return date.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
@@ -15,10 +15,12 @@ async function buildRtoSet(): Promise<Set<number>> {
   return idSet(rtoStore);
 }
 
-/** Build a map of dateKey → orders (non-cancelled) from Firestore */
-async function buildOrdersByDate(): Promise<Map<string, any[]>> {
-  const { getAll } = await import('../db/ordersRepo');
-  const orders = await getAll();
+/** Build a map of dateKey → orders (non-cancelled) from Firestore, or from `orders` when given */
+export async function buildOrdersByDate(orders?: any[]): Promise<Map<string, any[]>> {
+  if (!orders) {
+    const { getAll } = await import('../db/ordersRepo');
+    orders = await getAll();
+  }
   const byDate = new Map<string, any[]>();
   for (const order of orders) {
     if (order.cancelled_at) continue;
@@ -77,6 +79,12 @@ export async function recomputeOrderStatsForDate(
 
   const rto = rtoSet ?? (await buildRtoSet());
 
+  const { dailyOrderStatsStore } = await import('../db/dailyStores');
+  await dailyOrderStatsStore.set(computeOrderStats(dateKey, orders, rto));
+}
+
+/** The DailyOrderStats doc for one date, from that date's (non-cancelled) orders. */
+export function computeOrderStats(dateKey: string, orders: any[], rto: Set<number>) {
   let prepaidCount = 0;
   let codCount = 0;
   let deliveredCount = 0;
@@ -129,8 +137,7 @@ export async function recomputeOrderStatsForDate(
 
   const isCompleted = orders.length > 0 && nonFinalCount === 0;
 
-  const { dailyOrderStatsStore } = await import('../db/dailyStores');
-  await dailyOrderStatsStore.set({
+  return {
     dateKey,
     prepaidCount,
     codCount,
@@ -144,17 +151,18 @@ export async function recomputeOrderStatsForDate(
     codFailedCount,
     grossRevenue,
     isCompleted,
-  });
+  };
 }
 
 export async function backfillOrderStats(): Promise<{ upserted: number }> {
   const [ordersByDate, rtoSet] = await Promise.all([buildOrdersByDate(), buildRtoSet()]);
 
-  let upserted = 0;
-  for (const dateKey of ordersByDate.keys()) {
-    await recomputeOrderStatsForDate(dateKey, ordersByDate, rtoSet);
-    upserted++;
-  }
+  // One batched write instead of a round trip per date.
+  const docs = [...ordersByDate.keys()].map((dateKey) =>
+    computeOrderStats(dateKey, ordersByDate.get(dateKey) ?? [], rtoSet)
+  );
+  const { dailyOrderStatsStore } = await import('../db/dailyStores');
+  const upserted = await dailyOrderStatsStore.bulkSet(docs);
 
   return { upserted };
 }

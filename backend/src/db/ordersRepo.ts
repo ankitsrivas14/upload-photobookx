@@ -1,4 +1,5 @@
 import { getFirestore } from './firestore';
+import { markDatesDirty, orderDateKey } from './aggregatesDirty';
 
 /**
  * Firestore-backed store for Shopify orders — one document per order in `orders`,
@@ -40,7 +41,8 @@ function toDoc(order: any) {
   };
 }
 
-/** Upsert many orders (chunked into Firestore's 500-write batches). */
+/** Upsert many orders (chunked into Firestore's 500-write batches) and mark their days'
+ *  aggregates for recompute. */
 export async function upsertMany(orders: any[]): Promise<number> {
   const db = getFirestore();
   let written = 0;
@@ -54,6 +56,7 @@ export async function upsertMany(orders: any[]): Promise<number> {
     }
     await batch.commit();
   }
+  await markDatesDirty(orders.map(orderDateKey));
   return written;
 }
 
@@ -69,6 +72,31 @@ export async function getMonth(monthKey: string): Promise<any[]> {
   const db = getFirestore();
   const snap = await db.collection(COLLECTION).where('monthKey', '==', monthKey).get();
   return sortNewestFirst(snap.docs.map((d) => d.data()));
+}
+
+/**
+ * Orders whose `created_at` string falls in [start, end). Bounds are compared as strings, so
+ * pass 'YYYY-MM-DD' (or longer ISO prefixes). Shopify stamps created_at with the store's
+ * +05:30 offset, so callers that need exact IST days should pad a day and filter.
+ */
+export async function getCreatedBetween(start: string, end?: string): Promise<any[]> {
+  let q = getFirestore().collection(COLLECTION).where('created_at', '>=', start);
+  if (end) q = q.where('created_at', '<', end);
+  const snap = await q.get();
+  return sortNewestFirst(snap.docs.map((d) => d.data()));
+}
+
+/** Orders by Shopify id (missing ids are skipped). */
+export async function getByIds(ids: Array<string | number>): Promise<any[]> {
+  const db = getFirestore();
+  const unique = [...new Set(ids.map(String).filter(Boolean))];
+  const out: any[] = [];
+  for (let i = 0; i < unique.length; i += 300) {
+    const refs = unique.slice(i, i + 300).map((id) => db.collection(COLLECTION).doc(id));
+    const snaps = await db.getAll(...refs);
+    for (const s of snaps) if (s.exists) out.push(s.data());
+  }
+  return out;
 }
 
 /** Every order (used by the 'all'/'last30' views and the backfills), newest first. */
@@ -118,14 +146,22 @@ export async function search(query: string, limit = 50): Promise<any[]> {
   return Array.from(map.values()).slice(0, limit);
 }
 
+/** IST creation day of the order with this name ('#1234' or '1234'), or null if unknown. */
+export async function getDateKeyByName(orderName: string): Promise<string | null> {
+  const snap = await getFirestore().collection(COLLECTION).where('nameBare', '==', bare(orderName)).limit(1).get();
+  return snap.empty ? null : orderDateKey(snap.docs[0].data());
+}
+
 /** Update an order's latest fulfillment shipment_status (Delivered/Failed mark). */
 export async function patchStatusByName(orderName: string, shipmentStatus: string): Promise<void> {
   invalidateAll();
   const db = getFirestore();
   const snap = await db.collection(COLLECTION).where('nameBare', '==', bare(orderName)).limit(5).get();
   const now = new Date().toISOString();
+  const dates: Array<string | null> = [];
   for (const d of snap.docs) {
     const o: any = d.data();
+    dates.push(orderDateKey(o));
     const fulfillments = Array.isArray(o.fulfillments) && o.fulfillments.length > 0
       ? o.fulfillments
       : [{}];
@@ -136,6 +172,7 @@ export async function patchStatusByName(orderName: string, shipmentStatus: strin
     };
     await d.ref.set({ fulfillments }, { merge: true });
   }
+  await markDatesDirty(dates);
 }
 
 /** Convenience used by the dual-write path: upsert + keep the month index fresh. */
