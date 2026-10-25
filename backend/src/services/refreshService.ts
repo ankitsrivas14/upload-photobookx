@@ -112,18 +112,24 @@ export async function runScheduledRefresh(): Promise<{
   let fetched = 0;
   let skipped = 0;
   if (toSync.length > 0) {
-    const result = await shiprocketService.bulkFetchShippingCharges(toSync);
-    fetched = result.fetched;
-    skipped = result.skipped;
+    try {
+      const result = await shiprocketService.bulkFetchShippingCharges(toSync);
+      fetched = result.fetched;
+      skipped = result.skipped;
 
-    // A changed charge changes that day's shipping and P&L aggregates.
-    const after = await shiprocketService.getShippingCharges(toSync);
-    const byName = new Map(orders.map((o: any) => [o.name, o]));
-    const bare = (n: string) => String(n || '').replace(/^#/, '');
-    const changed = toSync.filter(
-      (name) => (chargeMap.get(bare(name))?.shippingCharge ?? 0) !== (after.get(bare(name))?.shippingCharge ?? 0)
-    );
-    await markDatesDirty(changed.map((name) => orderDateKey(byName.get(name))));
+      // A changed charge changes that day's shipping and P&L aggregates.
+      const after = await shiprocketService.getShippingCharges(toSync);
+      const byName = new Map(orders.map((o: any) => [o.name, o]));
+      const bare = (n: string) => String(n || '').replace(/^#/, '');
+      const changed = toSync.filter(
+        (name) => (chargeMap.get(bare(name))?.shippingCharge ?? 0) !== (after.get(bare(name))?.shippingCharge ?? 0)
+      );
+      await markDatesDirty(changed.map((name) => orderDateKey(byName.get(name))));
+    } catch (err) {
+      // Shiprocket unreachable or rejecting us: skip charges this run; the aggregates below
+      // still run, and the next run retries.
+      console.error('Scheduled refresh: shipping charge sync failed:', err);
+    }
   }
 
   // 4. Recompute the daily aggregates the dashboards read. The full rebuild also refreshes

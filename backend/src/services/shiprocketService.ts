@@ -1,5 +1,5 @@
 import config from '../config';
-import ShippingCharge from '../models/ShippingCharge';
+import { getMany as getCharges, upsertMany as saveCharges } from '../db/shippingRepo';
 
 interface ShiprocketAuthResponse {
   token: string;
@@ -392,13 +392,14 @@ class ShiprocketService {
   }
 
   /**
-   * Fetch and store shipping charge for an order
+   * Fetch and store shipping charge for an order. With `force`, refetch even when a charge
+   * is already stored (the stored one stays if the fetch fails).
    */
-  async fetchShippingChargeForOrder(orderNumber: string): Promise<number | null> {
+  async fetchShippingChargeForOrder(orderNumber: string, opts: { force?: boolean } = {}): Promise<number | null> {
     try {
       // Check if we already have shipping charge for this order
-      const existing = await ShippingCharge.findOne({ orderNumber });
-      if (existing && existing.pickupDate) {
+      const existing = (await getCharges([orderNumber])).get(orderNumber.replace(/^#/, ''));
+      if (!opts.force && existing && existing.pickupDate) {
         return existing.shippingCharge;
       }
 
@@ -470,10 +471,10 @@ class ShiprocketService {
       //   return null;
       // }
 
-      // Update or store in database with full breakdown
-      await ShippingCharge.findOneAndUpdate(
-        { orderNumber },
+      // Update or store with full breakdown
+      await saveCharges([
         {
+          orderNumber,
           shippingCharge: totalShippingCost,
           freightForward,
           freightCOD,
@@ -502,8 +503,7 @@ class ShiprocketService {
           customerPhone: shiprocketOrder.customer_phone || (shiprocketOrder as any).customer_mobile,
           fetchedAt: new Date(),
         },
-        { upsert: true }
-      );
+      ]);
 
       return totalShippingCost;
     } catch (error) {
@@ -513,30 +513,16 @@ class ShiprocketService {
   }
 
   /**
-   * Fetch shipping charges for multiple orders
-   * Only fetches for orders that don't have shipping charges yet
-   */
-  async fetchShippingChargesForOrders(orderNumbers: string[]): Promise<Map<string, number>> {
-    const shippingCharges = new Map<string, number>();
-
-    // Get existing shipping charges from DB
-    const existingCharges = await ShippingCharge.find({
-      orderNumber: { $in: orderNumbers }
-    });
-
-    existingCharges.forEach(charge => {
-      shippingCharges.set(charge.orderNumber, charge.shippingCharge);
-    });
-
-    return shippingCharges;
-  }
-
-  /**
    * Bulk fetch shipping charges for multiple orders (FAST with parallel wallet transactions)
    * Fetches all Shiprocket orders once, then fetches wallet transactions in parallel
    */
   async bulkFetchShippingCharges(orderNumbers: string[]): Promise<{ fetched: number; skipped: number }> {
     console.log(`[Shiprocket] Starting bulk fetch for ${orderNumbers.length} orders`);
+
+    // Fail before writing anything if Shiprocket rejects us: the lookups below swallow
+    // errors and report "not found", which would otherwise replace real charges.
+    await this.getToken();
+    const stored = await getCharges(orderNumbers);
 
     // Step 1: Fetch all recent Shiprocket orders in bulk
     const shiprocketOrdersMap = await this.getAllRecentOrdersMap(1000);
@@ -568,6 +554,9 @@ class ShiprocketService {
       'rto initiated', 'rto in transit', 'failure', 'failed', 'rto'
     ];
 
+    // Charge docs from the current batch, written to Firestore together after it.
+    const pending: any[] = [];
+
     for (let i = 0; i < orderNumbers.length; i += batchSize) {
       const batch = orderNumbers.slice(i, i + batchSize);
 
@@ -576,7 +565,6 @@ class ShiprocketService {
           const normalizedOrderNumber = orderNumber.replace(/^#/, '');
           
           // Remove premature skipping - frontend explicitly requested this order to be synced.
-          const existing = await ShippingCharge.findOne({ orderNumber });
 
           // Get from pre-fetched map or fetch individually if older
           let shiprocketOrder = shiprocketOrdersMap.get(orderNumber) || shiprocketOrdersMap.get(normalizedOrderNumber);
@@ -585,12 +573,11 @@ class ShiprocketService {
           }
           
           if (!shiprocketOrder || !shiprocketOrder.shipments || shiprocketOrder.shipments.length === 0) {
-            // Create a placeholder record so we don't keep retrying orders not on Shiprocket
-            await ShippingCharge.findOneAndUpdate(
-              { orderNumber },
-              { shippingCharge: 0, fetchedAt: new Date(), status: 'not found' },
-              { upsert: true }
-            );
+            // Create a placeholder record so we don't keep retrying orders not on Shiprocket,
+            // but never put one over a charge we already have.
+            if (!stored.has(normalizedOrderNumber)) {
+              pending.push({ orderNumber, shippingCharge: 0, fetchedAt: new Date(), status: 'not found' });
+            }
             return;
           }
 
@@ -666,53 +653,41 @@ class ShiprocketService {
                 ? shipment.pickup_date
                 : undefined));
 
-          await ShippingCharge.findOneAndUpdate(
-            { orderNumber },
-            {
-              shippingCharge: totalShippingCost,
-              freightForward,
-              freightCOD,
-              freightRTO,
-              whatsappCharges,
-              otherCharges,
-              shiprocketOrderId: shiprocketOrder.id,
-              shopifyOrderId: (shiprocketOrder as any).api_order_id || (shiprocketOrder as any).others?.api_order_id,
-              awbCode,
-              courierName: shipment.courier_name || shipment.courier,
-              weight: parseFloat(shipment.weight) || undefined,
-              status: shipment.status?.toString(),
-              pickupDate: detectedPickupDate,
-              deliveredDate: this.parseShiprocketDate(shiprocketOrder.delivered_date),
-              firstAttemptDate: this.parseShiprocketDate(shiprocketOrder.first_out_for_delivery_date),
-              customerName: shiprocketOrder.customer_name,
-              customerCity: shiprocketOrder.customer_city,
-              customerState: shiprocketOrder.customer_state,
-              customerPincode: shiprocketOrder.customer_pincode,
-              customerPhone: shiprocketOrder.customer_phone || (shiprocketOrder as any).customer_mobile,
-              fetchedAt: new Date(),
-            },
-            { upsert: true }
-          );
+          pending.push({
+            orderNumber,
+            shippingCharge: totalShippingCost,
+            freightForward,
+            freightCOD,
+            freightRTO,
+            whatsappCharges,
+            otherCharges,
+            shiprocketOrderId: shiprocketOrder.id,
+            shopifyOrderId: (shiprocketOrder as any).api_order_id || (shiprocketOrder as any).others?.api_order_id,
+            awbCode,
+            courierName: shipment.courier_name || shipment.courier,
+            weight: parseFloat(shipment.weight) || undefined,
+            status: shipment.status?.toString(),
+            pickupDate: detectedPickupDate,
+            deliveredDate: this.parseShiprocketDate(shiprocketOrder.delivered_date),
+            firstAttemptDate: this.parseShiprocketDate(shiprocketOrder.first_out_for_delivery_date),
+            customerName: shiprocketOrder.customer_name,
+            customerCity: shiprocketOrder.customer_city,
+            customerState: shiprocketOrder.customer_state,
+            customerPincode: shiprocketOrder.customer_pincode,
+            customerPhone: shiprocketOrder.customer_phone || (shiprocketOrder as any).customer_mobile,
+            fetchedAt: new Date(),
+          });
           fetched++;
         } catch (error) {
           console.error(`[Shiprocket] Error processing ${orderNumber}:`, error);
         }
       }));
+      if (pending.length > 0) await saveCharges(pending.splice(0));
 
       console.log(`[Shiprocket] Progress: ${Math.min(i + batchSize, orderNumbers.length)}/${orderNumbers.length} orders processed`);
     }
 
     console.log(`[Shiprocket] Bulk fetch complete: ${fetched} fetched, ${skipped} skipped`);
-
-    // Mirror the freshly-written charges into Firestore (which the orders endpoint reads).
-    try {
-      const variants = [...new Set(orderNumbers.flatMap((n) => [n, n.replace(/^#/, '')]))];
-      const rows = await ShippingCharge.find({ orderNumber: { $in: variants } }).lean();
-      const { upsertMany } = await import('../db/shippingRepo');
-      await upsertMany(rows as any[]);
-    } catch (e) {
-      console.error('[Firestore] shipping-charge sync failed (non-fatal):', e);
-    }
 
     return { fetched, skipped };
   }

@@ -8,12 +8,12 @@ import type { AuthenticatedRequest } from '../types';
 import config from '../config';
 import { UploadedImage } from '../models';
 import OrderDeliveryDate from '../models/OrderDeliveryDate';
-import ShippingCharge from '../models/ShippingCharge';
+import { getMany as getCharges } from '../db/shippingRepo';
 import { GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { getS3Client } from '../services/s3';
 import { Ticket } from '../models';
 import archiver from 'archiver';
-import { recomputeShippingForDate, getOrderDateKey as getShippingOrderDateKey, backfillShippingStats } from '../services/shippingStatsService';
+import { backfillShippingStats } from '../services/shippingStatsService';
 import { recomputeDates } from '../services/aggregatesService';
 
 const router = Router();
@@ -711,12 +711,8 @@ router.get('/shopify/orders/:orderNumber', requireAdmin, async (req: Authenticat
 
     if (!customerPhone) {
       // Check database or fetch from Shiprocket if missing
-      const dbCharge = await ShippingCharge.findOne({
-        $or: [
-          { orderNumber: order.name },
-          { orderNumber: order.name.replace(/^#/, '') }
-        ]
-      });
+      const chargeId = order.name.replace(/^#/, '');
+      const dbCharge = (await getCharges([chargeId])).get(chargeId);
 
       if (dbCharge && dbCharge.customerPhone) {
         customerPhone = dbCharge.customerPhone;
@@ -725,12 +721,7 @@ router.get('/shopify/orders/:orderNumber', requireAdmin, async (req: Authenticat
         // Fallback: Try to fetch and save from Shiprocket
         try {
           await shiprocketService.fetchShippingChargeForOrder(order.name);
-          const updatedCharge = await ShippingCharge.findOne({
-            $or: [
-              { orderNumber: order.name },
-              { orderNumber: order.name.replace(/^#/, '') }
-            ]
-          });
+          const updatedCharge = (await getCharges([chargeId])).get(chargeId);
           if (updatedCharge && updatedCharge.customerPhone) {
             customerPhone = updatedCharge.customerPhone;
             if (customerName === 'N/A') customerName = updatedCharge.customerName || 'N/A';
@@ -1178,13 +1169,8 @@ router.post('/shiprocket/fetch-shipping-charge', requireAdmin, async (req: Authe
       });
     }
 
-    // If refetch is true, delete existing cache first
-    if (refetch) {
-      const ShippingCharge = (await import('../models/ShippingCharge')).default;
-      await ShippingCharge.deleteOne({ orderNumber });
-    }
-
-    const shippingCharge = await shiprocketService.fetchShippingChargeForOrder(orderNumber);
+    // With refetch, ask Shiprocket even if a charge is stored (kept if the fetch fails).
+    const shippingCharge = await shiprocketService.fetchShippingChargeForOrder(orderNumber, { force: !!refetch });
 
     if (shippingCharge === null) {
       return res.json({
@@ -1196,13 +1182,12 @@ router.post('/shiprocket/fetch-shipping-charge', requireAdmin, async (req: Authe
     }
 
     // Get the saved record to return breakdown
-    const ShippingCharge = (await import('../models/ShippingCharge')).default;
-    const saved = await ShippingCharge.findOne({ orderNumber });
+    const saved = (await getCharges([orderNumber])).get(String(orderNumber).replace(/^#/, ''));
 
-    // Recompute DailyShipping for the affected date asynchronously
-    getShippingOrderDateKey(orderNumber)
-      .then((dateKey) => { if (dateKey) recomputeShippingForDate(dateKey); })
-      .catch((err) => console.error('DailyShipping recompute error:', err));
+    // The charge feeds that day's shipping and P&L aggregates; recompute just that day.
+    const { getDateKeyByName } = await import('../db/ordersRepo');
+    const dateKey = await getDateKeyByName(orderNumber);
+    if (dateKey) await recomputeDates([dateKey]).catch((err) => console.error('aggregates recompute:', err));
 
     res.json({
       success: true,
@@ -1227,41 +1212,12 @@ router.post('/shiprocket/fetch-shipping-charge', requireAdmin, async (req: Authe
 
 /**
  * POST /api/admin/magic-links/shiprocket/clear-cache
- * Clear non-terminal shipping charges from database to force a refetch
+ * Kept for the Sales page Refresh, which calls it first. It used to delete in-transit
+ * charges from Mongo to force a refetch, but the refresh refetches every in-transit order
+ * anyway, and deleting the Firestore copies would only lose them if Shiprocket is down.
  */
 router.post('/shiprocket/clear-cache', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
-  try {
-    const terminalStatuses = [
-      '7', '12', '13', '15', '16', '17', '18', '19', '20', '42', '46', 
-      'delivered', 'canceled', 'cancelled', 'rto delivered', 'rto acknowledged', 
-      'rto initiated', 'rto in transit', 'failure', 'failed', 'rto', 'not found'
-    ];
-
-    // Only delete shipping charges that are explicitly in an ACTIVE (non-terminal) state.
-    // We want to preserve RTO, Failure, and other states that are unlikely to change
-    // or where we already have the final charge.
-    const activeStatuses = ['1', '2', '3', '4', '5', '6', '11', '14', '21', '38', '44', 'shipped', 'picked up', 'ready to ship', 'out for delivery', 'in transit'];
-
-    const result = await ShippingCharge.deleteMany({
-      $and: [
-        { status: { $in: activeStatuses } },
-        { status: { $nin: terminalStatuses } },
-        { deliveredDate: { $in: [null, undefined, ''] } },
-        { status: { $ne: 'not found' } }
-      ]
-    });
-
-    res.json({
-      success: true,
-      message: `Cleared ${result.deletedCount} non-terminal shipping charges from cache`,
-    });
-  } catch (error) {
-    console.error('[API] Error clearing non-terminal shipping charges cache:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to clear non-terminal shipping charges cache'
-    });
-  }
+  res.json({ success: true, message: 'Nothing to clear: in-transit orders are refetched on every refresh' });
 });
 
 /**

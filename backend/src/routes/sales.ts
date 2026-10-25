@@ -1,5 +1,5 @@
 import express, { Response } from 'express';
-import { DiscardedOrder, RTOOrder, ProfitPrediction, ShippingCharge, OrderDeliveryDate, ShopifyOrderCache, MetaAdPerformance, MetaAdAnalysis, AcknowledgedOrder, TicketRaisedOrder, DailyROAS, DailyShipping, DailyOrderStats, DailyPnl, BreakevenSnapshot, Reel, ReelStrategy } from '../models';
+import { ProfitPrediction, MetaAdPerformance, MetaAdAnalysis, Reel, ReelStrategy } from '../models';
 import { requireAdmin } from './adminAuth';
 import { AuthenticatedRequest } from '../types';
 import aiService from '../services/aiService';
@@ -12,7 +12,7 @@ import { dailyOrderStatsStore, dailyPnlStore, dailyShippingStore, dailyRoasStore
 import { rtoStore, discardedStore, ackStore, ticketStore } from '../db/orderListStores';
 import shopifyService from '../services/shopifyService';
 import { recomputeDates } from '../services/aggregatesService';
-import { markDatesDirty, orderDateKey, requestFullRebuild } from '../db/aggregatesDirty';
+import { markDatesDirty, orderDateKey } from '../db/aggregatesDirty';
 
 const router = express.Router();
 
@@ -513,13 +513,9 @@ router.post('/predict', requireAdmin, async (req: AuthenticatedRequest, res: Res
       const lowerQuery = query.toLowerCase();
       const cleanNumQuery = lowerQuery.replace(/^#/, '');
 
-      // 1. Search in ShippingCharge collection (contains fulfilled orders with shiprocket data)
-      const shippingMatches = await ShippingCharge.find({
-        $or: [
-          { orderNumber: { $regex: query.replace(/^#/, ''), $options: 'i' } },
-          { customerName: { $regex: query, $options: 'i' } }
-        ]
-      }).limit(30);
+      // 1. Search the shipping charges (fulfilled orders with Shiprocket customer data)
+      const { searchByOrderOrCustomer, getMany: getCharges } = await import('../db/shippingRepo');
+      const shippingMatches = await searchByOrderOrCustomer(query, 30);
 
       shippingMatches.forEach(m => {
         const name = m.orderNumber.startsWith('#') ? m.orderNumber : `#${m.orderNumber}`;
@@ -551,17 +547,14 @@ router.post('/predict', requireAdmin, async (req: AuthenticatedRequest, res: Res
         }
       }
 
-      // 3. For orders found in cache that are missing phone, check if we have them in ShippingCharge 
+      // 3. For orders found above that are missing a phone, take it from their shipping charge
       const currentOrders = Array.from(ordersMap.values());
       const namesMissingPhone = currentOrders
         .filter(o => !o.customerPhone)
         .map(o => o.name);
 
       if (namesMissingPhone.length > 0) {
-        const cleanNames = namesMissingPhone.map(n => n.replace(/^#/, ''));
-        const extraShippingInfo = await ShippingCharge.find({
-          orderNumber: { $in: [...namesMissingPhone, ...cleanNames] }
-        });
+        const extraShippingInfo = [...(await getCharges(namesMissingPhone)).values()];
 
         extraShippingInfo.forEach(si => {
           const nameWithHash = si.orderNumber.startsWith('#') ? si.orderNumber : `#${si.orderNumber}`;
@@ -1525,66 +1518,6 @@ router.post('/daily-order-stats/backfill', requireAdmin, async (_req: Authentica
 });
 
 /**
- * POST /api/admin/sales/firestore-backfill-lists
- * One-time copy of the order membership lists + delivery dates from Mongo to Firestore.
- */
-router.post('/firestore-backfill-lists', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
-  try {
-    const [rto, discarded, ack, ticket, delivery] = await Promise.all([
-      RTOOrder.find({}).lean(),
-      DiscardedOrder.find({}).lean(),
-      AcknowledgedOrder.find({}).lean(),
-      TicketRaisedOrder.find({}).lean(),
-      OrderDeliveryDate.find({}).lean(),
-    ]);
-    const { deliveryDateStore } = await import('../db/orderListStores');
-    const out = {
-      rto: await rtoStore.bulkSet(rto as any[]),
-      discarded: await discardedStore.bulkSet(discarded as any[]),
-      acknowledged: await ackStore.bulkSet(ack as any[]),
-      ticket: await ticketStore.bulkSet(ticket as any[]),
-      deliveryDates: await deliveryDateStore.bulkSet(delivery as any[]),
-    };
-    await requestFullRebuild('order lists copied from Mongo');
-    res.json({ success: true, written: out });
-  } catch (error) {
-    console.error('Firestore lists backfill failed:', error);
-    res.status(500).json({ success: false, error: String((error as any)?.message || error) });
-  }
-});
-
-/**
- * POST /api/admin/sales/firestore-backfill-features
- * One-time copy of COGS + expenses collections from Mongo to Firestore (preserving _id).
- */
-router.post('/firestore-backfill-features', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
-  try {
-    const { COGSConfiguration, DailyAdSpend, MetaAdsExpense, ExpenseSource } = await import('../models');
-    const { FixedMonthlyExpense } = await import('../models/FixedMonthlyExpense');
-    const { cogsStore, dailyAdSpendStore, metaAdsExpenseStore, expenseSourceStore, fixedMonthlyExpenseStore } = await import('../db/featureStores');
-    const [cogs, ads, meta, sources, fixed] = await Promise.all([
-      COGSConfiguration.find({}).lean(),
-      DailyAdSpend.find({}).lean(),
-      MetaAdsExpense.find({}).lean(),
-      ExpenseSource.find({}).lean(),
-      FixedMonthlyExpense.find({}).lean(),
-    ]);
-    const written = {
-      cogs: await cogsStore.bulkImport(cogs as any[]),
-      dailyAdSpend: await dailyAdSpendStore.bulkImport(ads as any[]),
-      metaAds: await metaAdsExpenseStore.bulkImport(meta as any[]),
-      sources: await expenseSourceStore.bulkImport(sources as any[]),
-      fixed: await fixedMonthlyExpenseStore.bulkImport(fixed as any[]),
-    };
-    await requestFullRebuild('COGS and expenses copied from Mongo');
-    res.json({ success: true, written });
-  } catch (error) {
-    console.error('Firestore features backfill failed:', error);
-    res.status(500).json({ success: false, error: String((error as any)?.message || error) });
-  }
-});
-
-/**
  * POST /api/admin/sales/refresh-aggregates
  * Recompute every dashboard aggregate from the current Firestore data (order stats,
  * shipping stats, daily P&L, ROAS, breakeven). Fast now that reads are on Firestore.
@@ -1600,22 +1533,6 @@ router.post('/refresh-aggregates', requireAdmin, async (_req: AuthenticatedReque
     res.json({ success: true });
   } catch (error) {
     console.error('refresh-aggregates failed:', error);
-    res.status(500).json({ success: false, error: String((error as any)?.message || error) });
-  }
-});
-
-/**
- * POST /api/admin/sales/firestore-backfill-shipping
- * Copy all Mongo ShippingCharge docs into Firestore (one-time seed). Idempotent.
- */
-router.post('/firestore-backfill-shipping', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
-  try {
-    const rows = await ShippingCharge.find({}).lean();
-    const { upsertMany } = await import('../db/shippingRepo');
-    const written = await upsertMany(rows as any[]);
-    res.json({ success: true, written, total: rows.length });
-  } catch (error) {
-    console.error('Firestore shipping backfill failed:', error);
     res.status(500).json({ success: false, error: String((error as any)?.message || error) });
   }
 });
