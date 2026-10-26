@@ -242,15 +242,12 @@ span.track {
   }
 }
 
-/* "This week so far": the colour of the running period's bar */
-.soFar {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font: 400 11px/16px var(--font-sans);
-  color: var(--ink-muted);
+/* Meta chart keys wrap between items, never inside one */
+.metaKey {
+  white-space: nowrap;
 }
 
+/* Key for the running period: the colour of its bar */
 .barSwatch {
   width: 10px;
   height: 10px;

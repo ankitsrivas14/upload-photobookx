@@ -40,6 +40,7 @@ import {
 import { formatINR } from '../components/ui/format';
 import type { HeatmapDay } from '../components/ui/pbx';
 import { MetaAccountSection } from './dashboard/MetaAccountSection';
+import { LineSwatch } from './dashboard/LineSwatch';
 import { AXIS_TICK, CURSOR_FILL, REF_LABEL, TOOLTIP_ITEM, TOOLTIP_LABEL, TOOLTIP_STYLE } from './dashboard/chartStyles';
 import { ShippingChart } from './dashboard/ShippingChart';
 import styles from './DashboardPage.module.css';
@@ -79,15 +80,6 @@ const SHARE_COLORS: Record<string, string> = {
   Failed: 'var(--negative-solid)',
 };
 
-
-/** A short dashed line that keys a footer figure to its reference line in the chart. */
-function LineSwatch({ color }: { color: string }) {
-  return (
-    <svg width="14" height="6" aria-hidden="true">
-      <line x1="0" y1="3" x2="14" y2="3" stroke={color} strokeWidth={1.5} strokeDasharray="4 3" />
-    </svg>
-  );
-}
 
 export function DashboardPage() {
   const navigate = useNavigate();

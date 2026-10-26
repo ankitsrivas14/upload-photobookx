@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Bar, BarChart, CartesianGrid, Cell, LabelList, ResponsiveContainer, Tooltip as ChartTooltip, XAxis, YAxis } from 'recharts';
+import { Bar, CartesianGrid, Cell, ComposedChart, LabelList, Line, ReferenceLine, ResponsiveContainer, Tooltip as ChartTooltip, XAxis, YAxis } from 'recharts';
 import { Alert, Card, EmptyState, Skeleton } from '../../components/ui/pbx';
-import { formatINR } from '../../components/ui/format';
+import { cx, formatINR } from '../../components/ui/format';
 import { api, type MetaCpaPeriod } from '../../services/api';
 import { AXIS_TICK, CURSOR_FILL, REF_LABEL } from './chartStyles';
+import { LineSwatch } from './LineSwatch';
 import styles from '../DashboardPage.module.css';
 
 /** The weekly chart shows about six months. */
@@ -54,6 +55,24 @@ function monthRows(months: MetaCpaPeriod[]): Row[] {
   });
 }
 
+/**
+ * Five evenly spaced ticks from 0 that cover `max`, on a round step (1, 2, 2.5 or 5 × 10ⁿ). Both
+ * scales use five, so the grid lines meet the CPA and the spend labels alike.
+ */
+function niceTicks(max: number): number[] {
+  const raw = max > 0 ? max / 4 : 1;
+  const magnitude = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * magnitude).find((s) => s >= raw) ?? raw;
+  return [0, 1, 2, 3, 4].map((i) => i * step);
+}
+
+/** Average CPA over the periods shown: their spend divided by their purchases. */
+function averageCpa(rows: Row[]): number | null {
+  const spend = rows.reduce((s, r) => s + r.spend, 0);
+  const purchases = rows.reduce((s, r) => s + r.purchases, 0);
+  return spend > 0 && purchases > 0 ? Math.round(spend / purchases) : null;
+}
+
 function CpaTooltip({ active, payload }: { active?: boolean; payload?: ReadonlyArray<{ payload?: unknown }> }) {
   const row = active ? (payload?.[0]?.payload as Row | undefined) : undefined;
   if (!row) return null;
@@ -66,41 +85,66 @@ function CpaTooltip({ active, payload }: { active?: boolean; payload?: ReadonlyA
   );
 }
 
-/** CPA per period as bars; the running period in the highlight colour. `labels` prints each bar's value. */
-function CpaChart({ rows, labels }: { rows: Row[]; labels?: boolean }) {
+/**
+ * CPA per period as bars on the left scale, ad spend as a line on the right scale, and the average
+ * CPA as a dashed line. The running period's bar is in the highlight colour; `labels` prints each
+ * bar's CPA.
+ */
+function CpaChart({ rows, average, labels }: { rows: Row[]; average: number | null; labels?: boolean }) {
+  const cpaTicks = niceTicks(Math.max(average ?? 0, ...rows.map((r) => r.cpa ?? 0)));
+  const spendTicks = niceTicks(Math.max(...rows.map((r) => r.spend)));
   return (
-    <ResponsiveContainer width="100%" height={220}>
-      <BarChart data={rows} margin={{ top: labels ? 18 : 8, right: 4, left: 0, bottom: 0 }}>
+    <ResponsiveContainer width="100%" height={240}>
+      <ComposedChart data={rows} margin={{ top: labels ? 18 : 8, right: 0, left: 0, bottom: 0 }}>
         <CartesianGrid vertical={false} stroke="var(--chart-grid)" />
         <XAxis dataKey="label" tick={AXIS_TICK} tickLine={false} axisLine={{ stroke: 'var(--rule)' }} interval="preserveStartEnd" minTickGap={12} />
-        <YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} width={56} tickFormatter={(v: number) => formatINR(v)} />
+        <YAxis yAxisId="cpa" ticks={cpaTicks} domain={[0, cpaTicks[4]]} tick={AXIS_TICK} tickLine={false} axisLine={false} width={52} tickFormatter={(v: number) => formatINR(v)} />
+        <YAxis yAxisId="spend" orientation="right" ticks={spendTicks} domain={[0, spendTicks[4]]} tick={AXIS_TICK} tickLine={false} axisLine={false} width={48} tickFormatter={(v: number) => formatINR(v, { compact: true })} />
         <ChartTooltip cursor={CURSOR_FILL} content={({ active, payload }) => <CpaTooltip active={active} payload={payload} />} />
-        <Bar dataKey="cpa" isAnimationActive={false}>
+        <Bar yAxisId="cpa" dataKey="cpa" isAnimationActive={false}>
           {rows.map((r) => (
             <Cell key={r.start} fill={r.current ? 'var(--chart-highlight)' : 'var(--chart-bar)'} />
           ))}
           {labels ? <LabelList dataKey="cpa" position="top" {...REF_LABEL} formatter={(v) => (typeof v === 'number' ? formatINR(v) : '')} /> : null}
         </Bar>
-      </BarChart>
+        {average != null ? <ReferenceLine yAxisId="cpa" y={average} stroke="var(--ink-subtle)" strokeDasharray="4 3" /> : null}
+        <Line yAxisId="spend" dataKey="spend" type="monotone" stroke="var(--chart-line)" strokeWidth={2} dot={false} activeDot={{ r: 3 }} isAnimationActive={false} />
+      </ComposedChart>
     </ResponsiveContainer>
   );
 }
 
-function SoFar({ what }: { what: string }) {
+/** The chart's key, in the card footer: the spend line, the average, and the running period. */
+function ChartKey({ rows, average, running }: { rows: Row[]; average: number | null; running: string }) {
   return (
-    <span className={styles.soFar}>
-      <span className={styles.barSwatch} aria-hidden="true" />
-      {`${what} so far`}
-    </span>
+    <>
+      <span className={cx(styles.key, styles.metaKey)}>
+        <LineSwatch color="var(--chart-line)" solid />
+        ad spend (right)
+      </span>
+      {average != null ? (
+        <span className={cx(styles.key, styles.metaKey)}>
+          <LineSwatch color="var(--ink-subtle)" />
+          {`avg CPA ${formatINR(average)}`}
+        </span>
+      ) : null}
+      {rows.some((r) => r.current) ? (
+        <span className={cx(styles.key, styles.metaKey)}>
+          <span className={styles.barSwatch} aria-hidden="true" />
+          {running}
+        </span>
+      ) : null}
+    </>
   );
 }
 
 /**
  * The Dashboard's Meta account area: numbers straight from the Meta ad account, which the backend
- * syncs every hour. For now, cost per purchase (CPA) by week and by month across all campaigns.
+ * syncs every hour. For now, cost per purchase (CPA) and ad spend by week and by month across all
+ * campaigns.
  */
 export function MetaAccountSection() {
-  const [data, setData] = useState<{ weeks: Row[]; months: Row[]; firstDate: string | null } | null>(null);
+  const [data, setData] = useState<{ weeks: Row[]; months: Row[] } | null>(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -113,7 +157,7 @@ export function MetaAccountSection() {
           setError(res.error || 'Could not load the Meta figures.');
           return;
         }
-        setData({ weeks: weekRows(res.weeks ?? []), months: monthRows(res.months ?? []), firstDate: res.firstDate ?? null });
+        setData({ weeks: weekRows(res.weeks ?? []), months: monthRows(res.months ?? []) });
       })
       .catch(() => {
         if (live) setError('Could not load the Meta figures.');
@@ -123,7 +167,9 @@ export function MetaAccountSection() {
     };
   }, []);
 
-  const since = data?.firstDate ? fromKey(data.firstDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : null;
+  const weekAverage = data ? averageCpa(data.weeks) : null;
+  const monthAverage = data ? averageCpa(data.months) : null;
+  const firstMonth = data?.months[0] ? fromKey(data.months[0].start).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' }) : null;
 
   return (
     <section className={styles.metaArea} aria-labelledby="meta-account-title">
@@ -139,11 +185,19 @@ export function MetaAccountSection() {
         <EmptyState icon="chart-column" title="No Meta data yet" description="The hourly sync hasn't stored any ad spend." />
       ) : (
         <div className={styles.metaRow}>
-          <Card title="Weekly CPA" eyebrow={`Monday to Sunday · last ${WEEKS_SHOWN} weeks`} actions={<SoFar what="This week" />}>
-            {data ? <CpaChart rows={data.weeks} /> : <Skeleton height={220} />}
+          <Card
+            title="Weekly CPA and ad spend"
+            eyebrow={`Monday to Sunday · last ${WEEKS_SHOWN} weeks`}
+            footer={data ? <ChartKey rows={data.weeks} average={weekAverage} running="this week" /> : undefined}
+          >
+            {data ? <CpaChart rows={data.weeks} average={weekAverage} /> : <Skeleton height={240} />}
           </Card>
-          <Card title="Monthly CPA" eyebrow={since ? `by calendar month · from ${since}` : 'by calendar month'} actions={<SoFar what="This month" />}>
-            {data ? <CpaChart rows={data.months} labels /> : <Skeleton height={220} />}
+          <Card
+            title="Monthly CPA and ad spend"
+            eyebrow={firstMonth ? `by calendar month · from ${firstMonth}` : 'by calendar month'}
+            footer={data ? <ChartKey rows={data.months} average={monthAverage} running="this month" /> : undefined}
+          >
+            {data ? <CpaChart rows={data.months} average={monthAverage} labels /> : <Skeleton height={240} />}
           </Card>
         </div>
       )}

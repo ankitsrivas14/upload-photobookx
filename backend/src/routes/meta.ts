@@ -29,8 +29,10 @@ const nextMonth = (start: string) => {
 };
 
 /**
- * Spend, purchases and CPA per period from the first day with data to the last. Periods without
- * spend stay in (a paused stretch shows as a gap), so a chart's time axis runs evenly.
+ * Spend, purchases and CPA per period from the first full period with data to the last. A first
+ * period the data only partly covers is left out (the data starts on 10 Jan 2026, so January and
+ * the week of 5 Jan would undercount). Periods without spend stay in (a paused stretch shows as a
+ * gap), so a chart's time axis runs evenly.
  */
 export function cpaByPeriod(
   days: Array<{ date: string; spend: number; purchases: number }>,
@@ -51,7 +53,8 @@ export function cpaByPeriod(
     if (d.date > last) last = d.date;
   }
   const out: CpaPeriod[] = [];
-  for (let p = periodOf(first); p <= periodOf(last); p = next(p)) {
+  const from = periodOf(first) < first ? next(periodOf(first)) : periodOf(first);
+  for (let p = from; p <= periodOf(last); p = next(p)) {
     const t = totals.get(p) ?? { spend: 0, purchases: 0 };
     const spend = Math.round(t.spend);
     out.push({
