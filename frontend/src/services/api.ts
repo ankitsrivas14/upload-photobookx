@@ -139,6 +139,15 @@ export interface ClaudeCall {
   applied?: { at: string; confirmed: boolean; change: string } | null;
 }
 
+/** The whole Meta ad account over one week (from a Monday) or one calendar month. */
+export interface MetaCpaPeriod {
+  start: string;
+  spend: number;
+  purchases: number;
+  /** Spend per purchase; null when the period has no purchases. */
+  cpa: number | null;
+}
+
 export interface ClaudeReview {
   date: string;
   dataAsOf?: string;
@@ -1201,6 +1210,13 @@ class ApiService {
 
   async getClaudeAnalysis(date: string): Promise<{ success: boolean; review?: ClaudeReview; error?: string }> {
     return this.request(`/api/admin/claude-analysis/${date}`);
+  }
+
+  async getMetaCpa(): Promise<{
+    success: boolean; weeks?: MetaCpaPeriod[]; months?: MetaCpaPeriod[];
+    firstDate?: string | null; latestDate?: string | null; error?: string;
+  }> {
+    return this.request('/api/admin/meta/cpa');
   }
 
   async getTickets(): Promise<{ success: boolean; tickets?: any[]; error?: string }> {
