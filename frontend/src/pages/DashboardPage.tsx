@@ -130,7 +130,7 @@ export function DashboardPage() {
   const [breakevenDbMetrics, setBreakevenDbMetrics] = useState<{
     aov: number; avgCOGS: number; avgShipping: number; avgTotalCost: number;
     contributionMargin: number; breakevenROAS: number;
-    deliveredCount: number; failedCount: number; totalOrders: number; completedDaysCount: number;
+    breakevenMetaROAS: number; deliveredCount: number; failedCount: number; totalOrders: number; since: string | null;
   } | null>(null);
 
   // Sales Modal State
@@ -200,7 +200,8 @@ export function DashboardPage() {
         deliveredCount: res.deliveredCount ?? 0,
         failedCount: res.failedCount ?? 0,
         totalOrders: res.totalOrders ?? 0,
-        completedDaysCount: res.completedDaysCount ?? 0,
+        breakevenMetaROAS: res.breakevenMetaROAS ?? 0,
+        since: res.since ?? null,
       });
     }
   }, []);
@@ -543,7 +544,7 @@ export function DashboardPage() {
   const breakevenMetrics = breakevenDbMetrics ?? {
     aov: 0, avgCOGS: 0, avgShipping: 0, avgTotalCost: 0,
     contributionMargin: 0, breakevenROAS: 0,
-    deliveredCount: 0, failedCount: 0, totalOrders: 0, completedDaysCount: 0,
+    breakevenMetaROAS: 0, deliveredCount: 0, failedCount: 0, totalOrders: 0, since: null,
   };
 
   // Pie Charts data — sourced from DB (pre-computed daily stats)
@@ -849,15 +850,24 @@ export function DashboardPage() {
 
         <Card
           title="Breakeven"
-          eyebrow={`${breakevenMetrics.completedDaysCount} completed days in view`}
-          footer="Breakeven ROAS = avg revenue ÷ contribution margin, from completed days only"
+          eyebrow={
+            breakevenMetrics.since
+              ? `${breakevenMetrics.totalOrders.toLocaleString('en-IN')} settled orders since ${new Date(breakevenMetrics.since + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`
+              : undefined
+          }
+          footer="Breakeven ROAS is on delivered revenue, like the ROAS on this page. Ads Manager's ROAS also counts the purchases that later fail, so hold it to the Meta breakeven."
         >
           <DataList
             items={[
-              { label: 'Avg revenue per order', sub: 'includes ₹0 from failed orders', value: formatINR(breakevenMetrics.aov, { decimals: 2 }) },
-              { label: 'Avg COGS per order', sub: 'delivered: COGS · failed: NDR', value: formatINR(-breakevenMetrics.avgCOGS, { decimals: 2 }) },
-              { label: 'Avg shipping per order', value: formatINR(-breakevenMetrics.avgShipping, { decimals: 2 }) },
+              { label: 'Avg revenue per order', sub: 'delivered revenue; a failed order counts ₹0', value: formatINR(breakevenMetrics.aov, { decimals: 2 }) },
+              { label: 'Avg COGS per order', sub: 'delivered: COGS · failed: NDR (returned books are resold)', value: formatINR(-breakevenMetrics.avgCOGS, { decimals: 2 }) },
+              { label: 'Avg shipping per order', sub: 'forward, COD and RTO freight', value: formatINR(-breakevenMetrics.avgShipping, { decimals: 2 }) },
               { label: 'Contribution margin', sub: 'revenue − COGS − shipping', value: formatINR(breakevenMetrics.contributionMargin, { decimals: 2 }) },
+              {
+                label: 'Meta breakeven ROAS',
+                sub: "for Ads Manager's ROAS: every order at its value ÷ margin",
+                value: breakevenMetrics.breakevenMetaROAS > 0 ? `${breakevenMetrics.breakevenMetaROAS.toFixed(2)}×` : '—',
+              },
             ]}
             total={{ label: 'Breakeven ROAS', value: breakevenMetrics.breakevenROAS > 0 ? `${breakevenMetrics.breakevenROAS.toFixed(2)}×` : '—' }}
           />

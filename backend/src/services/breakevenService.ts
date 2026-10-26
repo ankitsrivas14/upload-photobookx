@@ -1,174 +1,155 @@
+import {
+  detectVariant,
+  getCogsVersionForDate,
+  isPaymentPrepaid,
+  loadCogsVersions,
+  orderIsDelivered,
+  orderIsFailed,
+  sumCategoryFields,
+  type CogsVersion,
+  type ValueKey,
+} from './dailyPnlService';
+
 const STORE_TIMEZONE = 'Asia/Kolkata';
 const DATA_START_DATE = '2026-01-28';
+/**
+ * Settled orders from this many days back set the breakeven: a long enough run of orders that an
+ * ad pause or a quiet month doesn't swing it (30 days once left it on 24 orders).
+ */
+const WINDOW_DAYS = 90;
 
 function toDateKey(date: Date): string {
   return date.toLocaleDateString('en-CA', { timeZone: STORE_TIMEZONE });
 }
 
-function getDeliveryStatus(order: any): string {
-  let status = '';
-  if (order.fulfillments?.length > 0) {
-    status = (order.fulfillments[order.fulfillments.length - 1].shipment_status ?? '').toLowerCase();
-  }
-  if (!status && order.fulfillment_status) status = order.fulfillment_status.toLowerCase();
-  return status;
-}
-
-function isPaymentPrepaid(order: any): boolean {
-  const gateway: string = (order.payment_gateway ?? order.gateway ?? '').toLowerCase();
-  const tags: string = (order.tags ?? '').toLowerCase();
-  const gateways: string[] = (order.payment_gateway_names ?? []).map((g: string) => g.toLowerCase());
-  if (
-    gateway.includes('cash on delivery') ||
-    gateway.includes('cod') ||
-    gateways.some((g) => g.includes('cod')) ||
-    tags.includes('cod')
-  ) return false;
-  return true;
-}
-
-function detectVariant(order: any): 'small' | 'large' {
-  const items: any[] = order.line_items ?? [];
-  const hasLarge = items.some(
-    (i) => i.title?.toLowerCase().includes('large') || i.variant_title?.toLowerCase().includes('large')
-  );
-  return hasLarge ? 'large' : 'small';
-}
-
 export interface BreakevenMetrics {
+  /** Delivered revenue per settled order: a failed order counts ₹0. */
   aov: number;
+  /** Every settled order at its own price, per settled order, as Meta's ROAS counts revenue. */
+  orderValue: number;
   avgCOGS: number;
   avgShipping: number;
   avgTotalCost: number;
   contributionMargin: number;
+  /** ROAS on delivered revenue at which ads break even: the basis of the Dashboard's ROAS. */
   breakevenROAS: number;
+  /** ROAS on every order's value at which ads break even: the basis of Ads Manager's ROAS. */
+  breakevenMetaROAS: number;
   deliveredCount: number;
   failedCount: number;
   totalOrders: number;
-  completedDaysCount: number;
+  windowDays: number;
+  /** First order date in the window (YYYY-MM-DD). */
+  since: string;
 }
 
-export async function computeBreakevenMetrics(): Promise<BreakevenMetrics> {
-  const now = new Date();
+const price = (order: any) => parseFloat(order.current_total_price ?? order.total_price ?? '0') || 0;
+
+/**
+ * What a settled order costs before ads, as the daily P&L costs it. A delivered order takes its
+ * COGS fields, or the COGS page's total override for a category, from the version in force on its
+ * date. A failed order takes its NDR fields only, without any override: a returned book is resold,
+ * so its production cost isn't lost. Shipping (forward, COD and RTO freight) is counted apart.
+ */
+function orderCost(
+  order: any,
+  dateKey: string,
+  delivered: boolean,
+  versions: CogsVersion[],
+  shippingMap: Map<string, number>
+): { cogs: number; shipping: number } {
+  const version = getCogsVersionForDate(dateKey, versions);
+  const fields: any[] = version?.fields ?? [];
+  const key = `${detectVariant(order)}${isPaymentPrepaid(order) ? 'Prepaid' : 'COD'}Value` as ValueKey;
+  let cogs = 0;
+  if (delivered) {
+    const cogsFields = fields.filter((f) => f.type === 'cogs' || f.type === 'both');
+    for (const cat of ['pre', 'post'] as const) {
+      cogs += version?.totalOverrides?.[cat]?.[key] ?? sumCategoryFields(cogsFields, cat, key, price(order));
+    }
+  } else {
+    const ndrFields = fields.filter((f) => f.type === 'ndr' || f.type === 'both');
+    for (const cat of ['pre', 'post'] as const) cogs += sumCategoryFields(ndrFields, cat, key, 0);
+  }
+  const name: string = (order.name ?? '').replace(/^#/, '');
+  return { cogs, shipping: shippingMap.get(name) ?? shippingMap.get(`#${name}`) ?? 0 };
+}
+
+/**
+ * The ad-free economics of an order and the ROAS at which ads break even, from the settled orders
+ * (delivered or failed) of the last WINDOW_DAYS. Two breakevens, one per way of counting revenue:
+ * breakevenROAS on delivered revenue (the Dashboard's ROAS), breakevenMetaROAS on every order's
+ * value (Ads Manager's ROAS, which also counts the purchases that later fail).
+ */
+export async function computeBreakevenMetrics(now = new Date()): Promise<BreakevenMetrics> {
   const endKey = toDateKey(now);
   const start = new Date(now);
-  start.setDate(start.getDate() - 30);
-  const startKey = toDateKey(start) < DATA_START_DATE ? DATA_START_DATE : toDateKey(start);
+  start.setDate(start.getDate() - WINDOW_DAYS);
+  const since = toDateKey(start) < DATA_START_DATE ? DATA_START_DATE : toDateKey(start);
 
-  // Get completed date keys from DailyOrderStats (liberal completion: prepaid assumed final)
-  const { dailyOrderStatsStore } = await import('../db/dailyStores');
-  const completedStats = await dailyOrderStatsStore.rangeByField('dateKey', startKey, endKey);
-
-  const completedDateKeys = new Set(
-    (completedStats as any[]).filter((d) => d.isCompleted).map((d) => d.dateKey as string)
-  );
-  const completedDaysCount = completedDateKeys.size;
-
-  if (completedDaysCount === 0) {
-    return { aov: 0, avgCOGS: 0, avgShipping: 0, avgTotalCost: 0, contributionMargin: 0, breakevenROAS: 0, deliveredCount: 0, failedCount: 0, totalOrders: 0, completedDaysCount: 0 };
-  }
-
-  // Load data needed to compute per-order metrics (orders + shipping from Firestore)
   const { getAll } = await import('../db/ordersRepo');
   const { getAllAsMap } = await import('../db/shippingRepo');
   const { rtoStore, idSet } = await import('../db/orderListStores');
-  const { cogsStore } = await import('../db/featureStores');
-  const [rtoSet, shippingMap, cogsVersions, allOrders] = await Promise.all([
+  const [rtoSet, shippingMap, versions, allOrders] = await Promise.all([
     idSet(rtoStore),
     getAllAsMap(),
-    cogsStore.all(),
+    loadCogsVersions(),
     getAll(),
   ]);
-  const nowMs = now.getTime();
-  const cogsConfig = (cogsVersions as any[])
-    .filter((v) => new Date(v.effectiveFrom).getTime() <= nowMs)
-    .sort((a, b) => new Date(b.effectiveFrom).getTime() - new Date(a.effectiveFrom).getTime())[0]?.fields ?? [];
 
-  // Collect orders belonging to completed date keys
-  const ordersByDate = new Map<string, any[]>();
-  for (const order of allOrders) {
-    if (order.cancelled_at) continue;
-    const dateKey = toDateKey(new Date(order.created_at));
-    if (!completedDateKeys.has(dateKey)) continue;
-    if (!ordersByDate.has(dateKey)) ordersByDate.set(dateKey, []);
-    ordersByDate.get(dateKey)!.push(order);
-  }
-
-  let totalRevenue = 0;
+  let revenue = 0;
+  let value = 0;
   let totalCOGS = 0;
   let totalShipping = 0;
   let deliveredCount = 0;
   let failedCount = 0;
 
-  for (const [, orders] of ordersByDate) {
-    for (const order of orders) {
-      const isPrepaid = isPaymentPrepaid(order);
-      const isRTO = rtoSet.has(order.id as number);
-      const status = getDeliveryStatus(order);
-      const isFailed =
-        isRTO ||
-        status === 'failure' ||
-        status.includes('failed') ||
-        status.includes('rto');
-      // Liberal: prepaid assumed delivered unless RTO or explicitly failed
-      const isDelivered = !isFailed && (status === 'delivered' || isPrepaid);
+  for (const order of allOrders) {
+    if (order.cancelled_at) continue;
+    const dateKey = toDateKey(new Date(order.created_at));
+    if (dateKey < since || dateKey > endKey) continue;
+    const delivered = orderIsDelivered(order, rtoSet);
+    // Orders still on their way aren't settled yet; they join once delivered or failed.
+    if (!delivered && !orderIsFailed(order, rtoSet)) continue;
 
-      const variant = detectVariant(order);
-      const pm = isPrepaid ? 'Prepaid' : 'COD';
-      const key = `${variant}${pm}Value`;
-
-      if (isDelivered) {
-        deliveredCount++;
-        const revenue = parseFloat(order.current_total_price ?? order.total_price ?? '0') || 0;
-        totalRevenue += revenue;
-
-        let orderCOGS = 0;
-        for (const field of (cogsConfig as any[]).filter((f: any) => f.type === 'cogs' || f.type === 'both')) {
-          const value: number = field[key] ?? 0;
-          if (field.calculationType === 'fixed') {
-            orderCOGS += value;
-          } else {
-            const pct = field.percentageType || 'excluded';
-            orderCOGS += pct === 'included'
-              ? (value / (100 + value)) * revenue
-              : (value / 100) * revenue;
-          }
-        }
-        totalCOGS += orderCOGS;
-      } else if (isFailed) {
-        failedCount++;
-        let orderNDR = 0;
-        for (const field of (cogsConfig as any[]).filter((f: any) => f.type === 'ndr' || f.type === 'both')) {
-          const value: number = field[key] ?? 0;
-          if (field.calculationType === 'fixed') {
-            orderNDR += value;
-          } else {
-            const salePrice = parseFloat(order.current_total_price ?? order.total_price ?? '0') || 0;
-            const pct = field.percentageType || 'excluded';
-            orderNDR += pct === 'included'
-              ? (value / (100 + value)) * salePrice
-              : (value / 100) * salePrice;
-          }
-        }
-        totalCOGS += orderNDR;
-      }
-
-      // Shipping (from Shiprocket)
-      const orderName: string = (order.name ?? '').replace(/^#/, '');
-      const shipCost = shippingMap.get(orderName) ?? shippingMap.get(`#${orderName}`) ?? 0;
-      if (isDelivered || isFailed) totalShipping += shipCost;
+    if (delivered) {
+      deliveredCount++;
+      revenue += price(order);
+    } else {
+      failedCount++;
     }
+    value += price(order);
+    const cost = orderCost(order, dateKey, delivered, versions, shippingMap);
+    totalCOGS += cost.cogs;
+    totalShipping += cost.shipping;
   }
 
   const totalOrders = deliveredCount + failedCount;
-  const aov = totalOrders > 0 ? totalRevenue / totalOrders : 0;
-  const avgCOGS = totalOrders > 0 ? totalCOGS / totalOrders : 0;
-  const avgShipping = totalOrders > 0 ? totalShipping / totalOrders : 0;
+  const per = (n: number) => (totalOrders > 0 ? n / totalOrders : 0);
+  const aov = per(revenue);
+  const orderValue = per(value);
+  const avgCOGS = per(totalCOGS);
+  const avgShipping = per(totalShipping);
   const avgTotalCost = avgCOGS + avgShipping;
   const contributionMargin = aov - avgTotalCost;
   const breakevenROAS = contributionMargin > 0 ? aov / contributionMargin : 0;
+  const breakevenMetaROAS = contributionMargin > 0 ? orderValue / contributionMargin : 0;
 
-  return { aov, avgCOGS, avgShipping, avgTotalCost, contributionMargin, breakevenROAS, deliveredCount, failedCount, totalOrders, completedDaysCount };
+  return {
+    aov,
+    orderValue,
+    avgCOGS,
+    avgShipping,
+    avgTotalCost,
+    contributionMargin,
+    breakevenROAS,
+    breakevenMetaROAS,
+    deliveredCount,
+    failedCount,
+    totalOrders,
+    windowDays: WINDOW_DAYS,
+    since,
+  };
 }
 
 /**

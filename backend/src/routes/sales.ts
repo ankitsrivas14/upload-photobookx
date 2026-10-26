@@ -655,9 +655,9 @@ async function breakevenMetrics(): Promise<Record<string, any>> {
   if (snap && (snap as any).metrics) return (snap as any).metrics;
   refreshBreakevenSnapshot().catch((e) => console.error('breakeven snapshot seed:', e));
   return {
-    aov: 0, avgCOGS: 0, avgShipping: 0, avgTotalCost: 0,
-    contributionMargin: 0, breakevenROAS: 0, deliveredCount: 0, failedCount: 0,
-    totalOrders: 0, completedDaysCount: 0, computing: true,
+    aov: 0, orderValue: 0, avgCOGS: 0, avgShipping: 0, avgTotalCost: 0,
+    contributionMargin: 0, breakevenROAS: 0, breakevenMetaROAS: 0, deliveredCount: 0, failedCount: 0,
+    totalOrders: 0, windowDays: 0, since: null, computing: true,
   };
 }
 

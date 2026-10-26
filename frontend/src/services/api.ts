@@ -1593,7 +1593,13 @@ async getVariantPerformance(days = 30): Promise<{
     deliveredCount?: number;
     failedCount?: number;
     totalOrders?: number;
-    completedDaysCount?: number;
+    /** Every settled order at its own price, per settled order. */
+    orderValue?: number;
+    /** Breakeven on every order's value: the basis of Ads Manager's ROAS. */
+    breakevenMetaROAS?: number;
+    windowDays?: number;
+    /** First order date of the settled orders behind the figures. */
+    since?: string | null;
     error?: string;
   }> {
     return this.request('/api/admin/sales/breakeven-metrics');

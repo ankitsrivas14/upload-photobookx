@@ -44,7 +44,7 @@ export async function loadAdSpendByDate(): Promise<Map<string, number>> {
   return map;
 }
 
-type ValueKey = 'smallPrepaidValue' | 'smallCODValue' | 'largePrepaidValue' | 'largeCODValue';
+export type ValueKey = 'smallPrepaidValue' | 'smallCODValue' | 'largePrepaidValue' | 'largeCODValue';
 
 interface TotalOverrides {
   smallPrepaidValue?: number;
@@ -71,7 +71,7 @@ export async function loadCogsVersions(): Promise<CogsVersion[]> {
   }));
 }
 
-function getCogsVersionForDate(dateKey: string, versions: CogsVersion[]): CogsVersion | null {
+export function getCogsVersionForDate(dateKey: string, versions: CogsVersion[]): CogsVersion | null {
   let version: CogsVersion | null = null;
   for (const v of versions) {
     if (v.effectiveFrom <= dateKey) version = v;
@@ -91,7 +91,7 @@ function getDeliveryStatus(order: any): string {
   return status;
 }
 
-function isPaymentPrepaid(order: any): boolean {
+export function isPaymentPrepaid(order: any): boolean {
   const gateway: string = (order.payment_gateway ?? order.gateway ?? '').toLowerCase();
   const tags: string = (order.tags ?? '').toLowerCase();
   const gateways: string[] = (order.payment_gateway_names ?? []).map((g: string) => g.toLowerCase());
@@ -109,13 +109,19 @@ function isRto(order: any, rtoSet: Set<number>): boolean {
 }
 
 // Mirrors frontend isOrderDelivered (prepaid assumed delivered if not failed)
-function orderIsDelivered(order: any, rtoSet: Set<number>): boolean {
+export function orderIsDelivered(order: any, rtoSet: Set<number>): boolean {
   if (isRto(order, rtoSet)) return false;
   const status = getDeliveryStatus(order);
   if (status.includes('failed') || status.includes('rto') || status.includes('return') || status === 'failure') return false;
   if (status === 'delivered') return true;
   if (isPaymentPrepaid(order)) return true;
   return false;
+}
+
+/** Failed delivery: on the RTO list, or a failed/RTO shipment status. */
+export function orderIsFailed(order: any, rtoSet: Set<number>): boolean {
+  const status = getDeliveryStatus(order);
+  return isRto(order, rtoSet) || status === 'failure' || status.includes('failed') || status.includes('rto');
 }
 
 // Mirrors frontend isOrderFinalStatus (explicit delivered/failed only — no prepaid assumption)
@@ -126,7 +132,7 @@ function orderIsFinalStatus(order: any, rtoSet: Set<number>): boolean {
   return status === 'delivered' || isFailed;
 }
 
-function detectVariant(order: any): 'small' | 'large' {
+export function detectVariant(order: any): 'small' | 'large' {
   const items: any[] = order.line_items ?? [];
   const hasLarge = items.some(
     (i) => i.title?.toLowerCase().includes('large') || i.variant_title?.toLowerCase().includes('large')
@@ -134,7 +140,7 @@ function detectVariant(order: any): 'small' | 'large' {
   return hasLarge ? 'large' : 'small';
 }
 
-function sumCategoryFields(
+export function sumCategoryFields(
   fields: any[],
   category: 'pre' | 'post',
   key: ValueKey,
@@ -199,12 +205,7 @@ function calcOrderPnl(
 
   const variant = detectVariant(order);
   const delivered = orderIsDelivered(order, rtoSet);
-  const status = getDeliveryStatus(order);
-  const failed =
-    isRto(order, rtoSet) ||
-    status === 'failure' ||
-    status.includes('failed') ||
-    status.includes('rto');
+  const failed = orderIsFailed(order, rtoSet);
   const pm = isPaymentPrepaid(order) ? 'Prepaid' : 'COD';
 
   let revenue = 0;
