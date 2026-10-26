@@ -35,6 +35,24 @@
   min-width: 0;
 }
 
+/* Low-stock warning above the page, on the page's own width and side padding */
+.stockAlert {
+  max-width: var(--content-max);
+  padding: var(--page-pad-y) var(--page-pad-x) 0;
+  box-sizing: border-box;
+}
+
+.stockList {
+  margin: 0;
+  padding-left: 18px;
+}
+
+@media (max-width: 640px) {
+  .stockAlert {
+    padding: var(--space-4) var(--space-4) 0;
+  }
+}
+
 .scrim {
   display: none;
 }

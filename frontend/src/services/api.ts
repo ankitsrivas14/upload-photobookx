@@ -139,6 +139,24 @@ export interface ClaudeCall {
   applied?: { at: string; confirmed: boolean; change: string } | null;
 }
 
+/** A stocked book's level: its latest shelf count, what has sold since, its pace and days left. */
+export interface StockLevel {
+  sku: string;
+  label: string;
+  counted: number;
+  countedAt: string;
+  /** Books in orders still waiting to ship when counted. */
+  committed: number;
+  soldSince: number;
+  /** Books left to sell: counted − committed − soldSince. */
+  available: number;
+  /** Books a day: the busiest daily average of the last 3, 7 and 30 days. */
+  pace: number;
+  daysLeft: number | null;
+  /** Down to the alert threshold (alertDays) or out. */
+  low: boolean;
+}
+
 /** The whole Meta ad account over one week (from a Monday) or one calendar month. */
 export interface MetaCpaPeriod {
   start: string;
@@ -1210,6 +1228,10 @@ class ApiService {
 
   async getClaudeAnalysis(date: string): Promise<{ success: boolean; review?: ClaudeReview; error?: string }> {
     return this.request(`/api/admin/claude-analysis/${date}`);
+  }
+
+  async getStock(): Promise<{ success: boolean; alertDays?: number; items?: StockLevel[]; error?: string }> {
+    return this.request('/api/admin/stock');
   }
 
   async getMetaCpa(): Promise<{

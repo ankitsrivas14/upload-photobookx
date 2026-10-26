@@ -19,6 +19,7 @@ import reelsRoutes from './routes/reels';
 import agencyRoutes from './routes/agency';
 import claudeAnalysisRoutes from './routes/claudeAnalysis';
 import metaRoutes from './routes/meta';
+import stockRoutes from './routes/stock';
 
 /**
  * The configured Express app — no `listen`, no DB connect at import time. Used by both the
@@ -88,6 +89,7 @@ app.use('/api/admin/reels', reelsRoutes);
 app.use('/api/admin/agency', agencyRoutes);
 app.use('/api/admin/claude-analysis', claudeAnalysisRoutes);
 app.use('/api/admin/meta', metaRoutes);
+app.use('/api/admin/stock', stockRoutes);
 app.use('/api/upload', uploadRoutes);
 
 // 404 handler

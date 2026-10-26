@@ -4,6 +4,7 @@ import { Sidebar, Topbar, ThemeSwitch, type Crumb, type NavGroup } from '../comp
 import { ADMIN_NAV, ALL_NAV_ITEMS, findSection } from './adminNav';
 import { api } from '../services/api';
 import type { AdminUser } from '../services/api';
+import { StockAlert } from './StockAlert';
 import styles from './AdminLayout.module.css';
 
 const SIDEBAR_COLLAPSED_KEY = 'admin-sidebar-collapsed';
@@ -99,6 +100,7 @@ export function AdminLayout() {
           actions={<ThemeSwitch size="sm" />}
         />
         <main className={styles.content}>
+          <StockAlert />
           <Outlet />
         </main>
       </div>
