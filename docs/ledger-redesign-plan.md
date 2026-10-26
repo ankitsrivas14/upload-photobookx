@@ -62,7 +62,7 @@ Reference screens: `DashboardPage.tsx` and `SalesPage.tsx`.
 | Analysis | Failed orders | `pages/analysis/FailedOrdersAnalysis` | 238 | Done |
 | Analysis | Pincodes | `pages/analysis/PinCodesAnalysis` | 516 | Done |
 | Analysis | Reels | `pages/analysis/Reels` | 287 | Done |
-| Meta | Meta account: weekly and monthly CPA (new) | `pages/MetaAccountPage`, `layouts/adminNav`, backend `routes/meta` | — | Done |
+| Dashboard | Meta account area: weekly and monthly CPA | `pages/dashboard/MetaAccountSection`, backend `routes/meta` | — | Done |
 | Expenses | Section tabs | `pages/ExpensesPage` | 146 | Done |
 | Expenses | Overview | `pages/ExpensesOverview` (was not routed or imported) | 106 | Deleted |
 | Expenses | Meta ads | `pages/MetaAdsPage` | 290 | Done |

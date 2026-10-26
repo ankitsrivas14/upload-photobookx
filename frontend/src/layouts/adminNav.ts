@@ -51,7 +51,6 @@ export const ADMIN_NAV: NavItem[] = [
       ['agency', 'Agency'],
     ]),
   },
-  { id: '/admin/meta', label: 'Meta account', icon: 'eye', href: '/admin/meta' },
   {
     id: '/admin/tools',
     label: 'Tools',

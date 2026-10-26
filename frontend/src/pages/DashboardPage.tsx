@@ -39,6 +39,7 @@ import {
 } from '../components/ui/pbx';
 import { formatINR } from '../components/ui/format';
 import type { HeatmapDay } from '../components/ui/pbx';
+import { MetaAccountSection } from './dashboard/MetaAccountSection';
 import { AXIS_TICK, CURSOR_FILL, REF_LABEL, TOOLTIP_ITEM, TOOLTIP_LABEL, TOOLTIP_STYLE } from './dashboard/chartStyles';
 import { ShippingChart } from './dashboard/ShippingChart';
 import styles from './DashboardPage.module.css';
@@ -1084,6 +1085,8 @@ export function DashboardPage() {
           onToggle={(key) => setActiveShippingLines((prev) => ({ ...prev, [key]: !prev[key] }))}
         />
       </div>
+
+      <MetaAccountSection />
 
       <Drawer
         open={pnlDrawer.open}

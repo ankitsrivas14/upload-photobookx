@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Cell, LabelList, ResponsiveContainer, Tooltip as ChartTooltip, XAxis, YAxis } from 'recharts';
-import { Alert, Card, EmptyState, PageHeader, Skeleton } from '../components/ui/pbx';
-import { formatINR } from '../components/ui/format';
-import { api, type MetaCpaPeriod } from '../services/api';
-import { AXIS_TICK, CURSOR_FILL, REF_LABEL } from './dashboard/chartStyles';
-import styles from './MetaAccountPage.module.css';
+import { Alert, Card, EmptyState, Skeleton } from '../../components/ui/pbx';
+import { formatINR } from '../../components/ui/format';
+import { api, type MetaCpaPeriod } from '../../services/api';
+import { AXIS_TICK, CURSOR_FILL, REF_LABEL } from './chartStyles';
+import styles from '../DashboardPage.module.css';
 
 /** The weekly chart shows about six months. */
 const WEEKS_SHOWN = 26;
@@ -58,10 +58,10 @@ function CpaTooltip({ active, payload }: { active?: boolean; payload?: ReadonlyA
   const row = active ? (payload?.[0]?.payload as Row | undefined) : undefined;
   if (!row) return null;
   return (
-    <div className={styles.tip}>
-      <div className={styles.tipTitle}>{row.title}</div>
-      <div className={styles.tipValue}>{row.cpa != null ? `CPA ${formatINR(row.cpa)}` : row.spend > 0 ? 'No purchases' : 'No spend'}</div>
-      <div className={styles.tipSub}>{`${formatINR(row.spend)} spent · ${row.purchases.toLocaleString('en-IN')} purchase${row.purchases === 1 ? '' : 's'}`}</div>
+    <div className={styles.cpaTip}>
+      <div className={styles.cpaTipTitle}>{row.title}</div>
+      <div className={styles.cpaTipValue}>{row.cpa != null ? `CPA ${formatINR(row.cpa)}` : row.spend > 0 ? 'No purchases' : 'No spend'}</div>
+      <div className={styles.cpaTipSub}>{`${formatINR(row.spend)} spent · ${row.purchases.toLocaleString('en-IN')} purchase${row.purchases === 1 ? '' : 's'}`}</div>
     </div>
   );
 }
@@ -88,18 +88,18 @@ function CpaChart({ rows, labels }: { rows: Row[]; labels?: boolean }) {
 
 function SoFar({ what }: { what: string }) {
   return (
-    <span className={styles.key}>
-      <span className={styles.swatch} aria-hidden="true" />
+    <span className={styles.soFar}>
+      <span className={styles.barSwatch} aria-hidden="true" />
       {`${what} so far`}
     </span>
   );
 }
 
 /**
- * Meta account: numbers straight from the Meta ad account, which the backend syncs every hour.
- * For now, cost per purchase (CPA) by week and by month across all campaigns.
+ * The Dashboard's Meta account area: numbers straight from the Meta ad account, which the backend
+ * syncs every hour. For now, cost per purchase (CPA) by week and by month across all campaigns.
  */
-export function MetaAccountPage() {
+export function MetaAccountSection() {
   const [data, setData] = useState<{ weeks: Row[]; months: Row[]; firstDate: string | null } | null>(null);
   const [error, setError] = useState('');
 
@@ -126,26 +126,27 @@ export function MetaAccountPage() {
   const since = data?.firstDate ? fromKey(data.firstDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : null;
 
   return (
-    <div className={styles.page}>
-      <PageHeader
-        eyebrow="Meta ad account"
-        title="Meta account"
-        description="Cost per purchase (CPA): ad spend divided by purchases, as Ads Manager counts them, across every campaign. Synced from Meta every hour."
-      />
+    <section className={styles.metaArea} aria-labelledby="meta-account-title">
+      <div className={styles.metaHead}>
+        <h2 id="meta-account-title" className={styles.metaTitle}>Meta account</h2>
+        <p className={styles.metaNote}>
+          Straight from the Meta ad account, synced every hour. CPA is ad spend divided by purchases, as Ads Manager counts them, across every campaign.
+        </p>
+      </div>
       {error ? (
         <Alert tone="negative" title={error} />
       ) : data && data.weeks.length === 0 ? (
         <EmptyState icon="chart-column" title="No Meta data yet" description="The hourly sync hasn't stored any ad spend." />
       ) : (
-        <>
+        <div className={styles.metaRow}>
           <Card title="Weekly CPA" eyebrow={`Monday to Sunday · last ${WEEKS_SHOWN} weeks`} actions={<SoFar what="This week" />}>
             {data ? <CpaChart rows={data.weeks} /> : <Skeleton height={220} />}
           </Card>
-          <Card title="Monthly CPA" eyebrow={since ? `by calendar month · data from ${since}` : 'by calendar month'} actions={<SoFar what="This month" />}>
+          <Card title="Monthly CPA" eyebrow={since ? `by calendar month · from ${since}` : 'by calendar month'} actions={<SoFar what="This month" />}>
             {data ? <CpaChart rows={data.months} labels /> : <Skeleton height={220} />}
           </Card>
-        </>
+        </div>
       )}
-    </div>
+    </section>
   );
 }

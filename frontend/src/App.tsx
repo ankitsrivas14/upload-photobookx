@@ -13,7 +13,6 @@ const UploadPage = lazy(() => import('./pages/UploadPage').then((m) => ({ defaul
 const SalesManagementPage = lazy(() => import('./pages/SalesManagementPage').then((m) => ({ default: m.SalesManagementPage })));
 const ToolsPage = lazy(() => import('./pages/ToolsPage').then((m) => ({ default: m.ToolsPage })));
 const AnalysisPage = lazy(() => import('./pages/AnalysisPage').then((m) => ({ default: m.AnalysisPage })));
-const MetaAccountPage = lazy(() => import('./pages/MetaAccountPage').then((m) => ({ default: m.MetaAccountPage })));
 const AttendancePage = lazy(() => import('./pages/AttendancePage').then((m) => ({ default: m.AttendancePage })));
 const BacklogPage = lazy(() => import('./pages/BacklogPage'));
 const AbandonedCheckoutsPage = lazy(() => import('./pages/AbandonedCheckoutsPage'));
@@ -72,7 +71,6 @@ function App() {
             <Route path="abandoned-checkouts" element={<Page><AbandonedCheckoutsPage /></Page>} />
             <Route path="expenses/*" element={<Page><ExpensesPage /></Page>} />
             <Route path="analysis/*" element={<Page><AnalysisPage /></Page>} />
-            <Route path="meta" element={<Page><MetaAccountPage /></Page>} />
             <Route path="attendance/*" element={<Page><AttendancePage /></Page>} />
             <Route path="tools/*" element={<Page><ToolsPage /></Page>} />
 

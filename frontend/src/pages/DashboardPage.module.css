@@ -201,3 +201,83 @@ span.track {
   color: var(--ink-subtle);
   text-decoration: none;
 }
+
+/* Meta account: a separate area at the foot of the page for numbers from the Meta ad account,
+   two charts to a row on wide screens */
+.metaArea {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--line);
+}
+
+.metaHead {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.metaTitle {
+  margin: 0;
+  font: 600 16px/24px var(--font-sans);
+  color: var(--ink);
+}
+
+.metaNote {
+  margin: 0;
+  font: 400 12px/18px var(--font-sans);
+  color: var(--ink-muted);
+}
+
+.metaRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--grid-gap);
+}
+
+@media (min-width: 960px) {
+  .metaRow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* "This week so far": the colour of the running period's bar */
+.soFar {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: 400 11px/16px var(--font-sans);
+  color: var(--ink-muted);
+}
+
+.barSwatch {
+  width: 10px;
+  height: 10px;
+  background: var(--chart-highlight);
+}
+
+/* CPA bar tooltip, matching the chart tooltips above */
+.cpaTip {
+  padding: 4px 8px;
+  background: var(--surface);
+  border: 1px solid var(--ink);
+  font: 400 12px/16px var(--font-sans);
+  color: var(--ink);
+}
+
+.cpaTipTitle {
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+
+.cpaTipValue {
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+.cpaTipSub {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-muted);
+}
