@@ -157,6 +157,41 @@ export interface StockLevel {
   low: boolean;
 }
 
+/** One day of shipping files: the labels and manifest rows of everything booked while it was open. */
+export interface ShippingDay {
+  id: string;
+  openedAt: string | null;
+  closedAt: string | null;
+  /** Which download closed it. */
+  closedBy: 'labels' | 'manifest' | null;
+  open: boolean;
+  labels: number;
+  couriers: Array<{ name: string; count: number }>;
+}
+
+/** What the 2-hourly booking job did on its last run. */
+export interface ShippingRun {
+  at: string;
+  booked: number;
+  cost: number;
+  byCourier: Record<string, number>;
+  aside: Array<{ order: string; reason: string }>;
+  waiting: Array<{ order: string; rate: number }>;
+  failed: Array<{ order: string; reason: string }>;
+  wallet: number;
+  /** Rupees to add to the Shiprocket wallet before the waiting orders can be booked. */
+  recharge: number;
+  notes: string[];
+}
+
+/** A COD order the job keeps waiting because its address looks too thin or bogus to deliver. */
+export interface SetAsideOrder {
+  order: string;
+  reason: string;
+  amount: number | null;
+  since: string | null;
+}
+
 /** The whole Meta ad account over one week (from a Monday) or one calendar month. */
 export interface MetaCpaPeriod {
   start: string;
@@ -1232,6 +1267,42 @@ class ApiService {
 
   async getStock(): Promise<{ success: boolean; alertDays?: number; items?: StockLevel[]; error?: string }> {
     return this.request('/api/admin/stock');
+  }
+
+  async getShipping(): Promise<{
+    success: boolean;
+    auto?: { enabled: boolean; lastRunAt: string | null; lastRun: ShippingRun | null };
+    days?: ShippingDay[];
+    aside?: SetAsideOrder[];
+    error?: string;
+  }> {
+    return this.request('/api/admin/shipping');
+  }
+
+  async setShippingAuto(enabled: boolean): Promise<{ success: boolean; enabled?: boolean; error?: string }> {
+    return this.request('/api/admin/shipping/auto', { method: 'PUT', body: JSON.stringify({ enabled }) });
+  }
+
+  /** Saves a day's labels or manifest PDF. The first download of an open day closes it on the server. */
+  async downloadShippingFile(dayId: string, kind: 'labels' | 'manifest'): Promise<void> {
+    const response = await fetch(`${this.baseUrl}/api/admin/shipping/days/${dayId}/${kind}`, {
+      headers: { 'Authorization': `Bearer ${this.getToken()}` },
+    });
+    // The day may have closed even if building the file failed, so the cached list is stale either way.
+    this.invalidateCache();
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      throw new Error(body?.error || `The ${kind} PDF could not be downloaded`);
+    }
+    const name = response.headers.get('Content-Disposition')?.match(/filename="?([^";]+)"?/)?.[1] ?? `${kind}.pdf`;
+    const url = window.URL.createObjectURL(await response.blob());
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
   }
 
   async getMetaCpa(): Promise<{

@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import * as pdfjsLib from 'pdfjs-dist';
-import { PDFDocument, StandardFonts, grayscale } from 'pdf-lib';
+import { PDFDocument } from 'pdf-lib';
 import { Alert, Card, DataTable, Dropzone, StatCard, StatStrip, type Column } from '../../components/ui/pbx';
+import { ShippingDays } from './ShippingDays';
 import styles from './Labels.module.css';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -11,25 +12,23 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
 ).href;
 
 interface Rect { x: number; y: number; w: number; h: number; }
-interface LabelResult { orderNumber: string | null; code: string | null; }
-interface ProcessResult { pageCount: number; labelCount: number; fileName: string; labels: LabelResult[]; }
+interface Box { x0: number; x1: number; y0: number; y1: number; }
+interface LabelResult { orderNumber: string | null; }
+interface ProcessResult { pageCount: number; labelCount: number; skipped: number; fileName: string; labels: LabelResult[]; }
 interface LabelRow extends LabelResult { index: number; }
+
+/** A box with less dark ink than this inside its edges is an empty label frame, which an odd label count leaves. */
+const BLANK_INK = 0.01;
 
 function isDark(r: number, g: number, b: number): boolean {
     return (r + g + b) / 3 < 140;
 }
 
-function parseOrderCodes(text: string): Array<{ orderNumber: string; code: string }> {
-    const results: Array<{ orderNumber: string; code: string }> = [];
-    const re = /PB(\d+)S/g;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(text)) !== null) {
-        results.push({ orderNumber: m[0], code: m[1].slice(-3).padStart(3, '0') });
-    }
-    return results;
+function parseOrderNumbers(text: string): string[] {
+    return text.match(/PB\d+S/g) ?? [];
 }
 
-async function detectLabelRects(jsPage: any, pageH: number): Promise<Rect[]> {
+async function detectLabelRects(jsPage: any, pageH: number): Promise<{ rects: Rect[]; skipped: number }> {
     const scale = 1.5;
     const vp    = jsPage.getViewport({ scale });
     const canvas = document.createElement('canvas');
@@ -59,9 +58,7 @@ async function detectLabelRects(jsPage: any, pageH: number): Promise<Rect[]> {
     let top   = 0;        while (top  < height   && rowDark[top]    < ROW_MIN) top++;
     let bottom = height-1; while (bottom > top   && rowDark[bottom] < ROW_MIN) bottom--;
 
-    if (left >= right || top >= bottom) return [];
-
-    const toPdfY = (cy: number) => pageH - cy / scale;
+    if (left >= right || top >= bottom) return { rects: [], skipped: 0 };
 
     // Look for a vertical centre divider in the middle 40% of the content band
     const bandStart = Math.round(left + (right - left) * 0.3);
@@ -72,24 +69,40 @@ async function detectLabelRects(jsPage: any, pageH: number): Promise<Rect[]> {
     }
 
     // A real divider line spans most of the content height → density > 25%
-    if (maxDensity > 0.25) {
-        return [
-            { x: left / scale,          y: toPdfY(bottom + 1), w: (centerX - left) / scale,  h: (bottom - top + 1) / scale },
-            { x: (centerX + 1) / scale, y: toPdfY(bottom + 1), w: (right - centerX) / scale, h: (bottom - top + 1) / scale },
-        ];
-    }
+    const boxes: Box[] = maxDensity > 0.25
+        ? [{ x0: left, x1: centerX - 1, y0: top, y1: bottom }, { x0: centerX + 1, x1: right, y0: top, y1: bottom }]
+        : [{ x0: left, x1: right, y0: top, y1: bottom }];
 
-    return [{ x: left / scale, y: toPdfY(bottom + 1), w: (right - left + 1) / scale, h: (bottom - top + 1) / scale }];
+    // Share of dark pixels inside a box, 6 px in from its edges so a bare frame counts as empty.
+    const ink = (b: Box) => {
+        let dark = 0, all = 0;
+        for (let y = b.y0 + 6; y <= b.y1 - 6; y++) {
+            for (let x = b.x0 + 6; x <= b.x1 - 6; x++) {
+                const i = (y * width + x) * 4;
+                all++;
+                if (isDark(data[i], data[i + 1], data[i + 2])) dark++;
+            }
+        }
+        return all ? dark / all : 0;
+    };
+    const kept = boxes.filter((b) => ink(b) >= BLANK_INK);
+    const rects = kept.map((b) => ({
+        x: b.x0 / scale,
+        y: pageH - (b.y1 + 1) / scale,
+        w: (b.x1 - b.x0 + 1) / scale,
+        h: (b.y1 - b.y0 + 1) / scale,
+    }));
+    return { rects, skipped: boxes.length - kept.length };
 }
 
-async function cropLabels(buffer: ArrayBuffer): Promise<{ blob: Blob; pageCount: number; labelCount: number; labels: LabelResult[] }> {
+async function cropLabels(buffer: ArrayBuffer): Promise<{ blob: Blob; pageCount: number; labelCount: number; skipped: number; labels: LabelResult[] }> {
     const jsDoc  = await pdfjsLib.getDocument({ data: new Uint8Array(buffer.slice(0)) }).promise;
     const libDoc = await PDFDocument.load(buffer);
     const outDoc = await PDFDocument.create();
-    const font   = await outDoc.embedFont(StandardFonts.HelveticaBold);
 
     const pageCount = libDoc.getPageCount();
     let labelCount  = 0;
+    let skipped     = 0;
     const labels: LabelResult[] = [];
 
     for (let i = 0; i < pageCount; i++) {
@@ -97,54 +110,35 @@ async function cropLabels(buffer: ArrayBuffer): Promise<{ blob: Blob; pageCount:
         const libPage = libDoc.getPage(i);
         const { height: pageH } = libPage.getSize();
 
-        const rects       = await detectLabelRects(jsPage, pageH);
+        const found       = await detectLabelRects(jsPage, pageH);
         const textContent = await jsPage.getTextContent();
-        const pageText    = textContent.items.map((item: any) => item.str).join(' ');
-        const codes       = parseOrderCodes(pageText);
+        const orders      = parseOrderNumbers(textContent.items.map((item: any) => item.str).join(' '));
         const [embedded]  = await outDoc.embedPages([libPage]);
+        skipped += found.skipped;
 
-        for (let j = 0; j < rects.length; j++) {
-            const rect    = rects[j];
-            const info    = codes[j] ?? null;
+        found.rects.forEach((rect, j) => {
             const outPage = outDoc.addPage([rect.w, rect.h]);
-
             outPage.drawPage(embedded, { x: -rect.x, y: -rect.y });
-
-            if (info) {
-                const fontSize  = 20;
-                const textWidth = font.widthOfTextAtSize(info.code, fontSize);
-                // Printed in black ink on the label itself, not a screen colour.
-                outPage.drawText(info.code, {
-                    x: (rect.w - textWidth) / 2,
-                    y: rect.h * 0.12 + 50,
-                    size: fontSize,
-                    font,
-                    color: grayscale(0),
-                });
-            }
-
-            labels.push({ orderNumber: info?.orderNumber ?? null, code: info?.code ?? null });
+            labels.push({ orderNumber: orders[j] ?? null });
             labelCount++;
-        }
+        });
     }
 
     const outBytes = await outDoc.save();
-    return { blob: new Blob([outBytes.buffer as ArrayBuffer], { type: 'application/pdf' }), pageCount, labelCount, labels };
+    return { blob: new Blob([outBytes.buffer as ArrayBuffer], { type: 'application/pdf' }), pageCount, labelCount, skipped, labels };
 }
 
 const COLUMNS: Column<LabelRow>[] = [
     { key: 'index', header: '#', numeric: true, width: 40, render: (l) => l.index + 1 },
     { key: 'orderNumber', header: 'Order', mono: true, render: (l) => l.orderNumber ?? '—' },
-    {
-        key: 'code',
-        header: 'Stamp',
-        render: (l) => (l.code ? <span className={styles.code}>{l.code}</span> : <span className={styles.missing}>No order number found</span>),
-    },
 ];
 
 const isPdf = (file: File) => file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
 
-/** Labels: crops each shipping label in a PDF to its border and stamps the last 3 digits of its order number. */
+/**
+ * Labels: the booking job's daily label and manifest files, and a cropper for any Shiprocket labels PDF that cuts
+ * each label to its border, one label a page.
+ */
 export function Labels() {
     const [processing, setProcessing] = useState(false);
     const [result, setResult]         = useState<ProcessResult | null>(null);
@@ -156,14 +150,14 @@ export function Labels() {
         setProcessing(true);
         try {
             const buffer = await file.arrayBuffer();
-            const { blob, pageCount, labelCount, labels } = await cropLabels(buffer);
+            const { blob, pageCount, labelCount, skipped, labels } = await cropLabels(buffer);
             const url = URL.createObjectURL(blob);
             const a   = document.createElement('a');
             a.href     = url;
             a.download = 'cropped_' + file.name.replace(/\.pdf$/i, '') + '.pdf';
             a.click();
             URL.revokeObjectURL(url);
-            setResult({ pageCount, labelCount, fileName: file.name, labels });
+            setResult({ pageCount, labelCount, skipped, fileName: file.name, labels });
         } catch (err: any) {
             setError(err?.message || 'Failed to process PDF');
         } finally {
@@ -181,26 +175,25 @@ export function Labels() {
         handleFile(file);
     };
 
-    const stamped   = result?.labels.filter(l => l.code).length  ?? 0;
-    const unstamped = result?.labels.filter(l => !l.code).length ?? 0;
-
     return (
         <div className={styles.labels}>
-            <p className={styles.note}>
-                Each label in the PDF is cropped to its border and stamped with the last 3 digits of its order number. The cropped
-                PDF downloads as soon as it is ready; nothing is uploaded.
-            </p>
+            <ShippingDays />
 
-            <Dropzone
-                onFiles={onFiles}
-                accept=".pdf,application/pdf"
-                multiple={false}
-                icon="printer"
-                disabled={processing}
-                title={processing ? 'Cropping and stamping labels…' : result ? 'Drop another labels PDF' : 'Drop a shipping labels PDF'}
-                hint="One PDF of shipping labels"
-                buttonLabel={processing ? 'Working…' : 'Choose PDF'}
-            />
+            <Card
+                title="Crop a labels PDF"
+                description="Each label in a Shiprocket labels PDF is cropped to its border, one label a page, and an empty frame left by an odd label count is dropped. The cropped PDF downloads as soon as it is ready; nothing is uploaded."
+            >
+                <Dropzone
+                    onFiles={onFiles}
+                    accept=".pdf,application/pdf"
+                    multiple={false}
+                    icon="printer"
+                    disabled={processing}
+                    title={processing ? 'Cropping labels…' : result ? 'Drop another labels PDF' : 'Drop a shipping labels PDF'}
+                    hint="One PDF of shipping labels"
+                    buttonLabel={processing ? 'Working…' : 'Choose PDF'}
+                />
+            </Card>
 
             {error && (
                 <Alert tone="negative" title="The PDF could not be processed">
@@ -212,13 +205,8 @@ export function Labels() {
                 <>
                     <StatStrip label={`Labels from ${result.fileName}`} minWidth={140}>
                         <StatCard label="Pages" value={result.pageCount.toLocaleString('en-IN')} />
-                        <StatCard label="Labels stamped" value={stamped.toLocaleString('en-IN')} tone="positive" />
-                        <StatCard
-                            label="No order number"
-                            value={unstamped.toLocaleString('en-IN')}
-                            tone={unstamped > 0 ? 'negative' : 'neutral'}
-                            sub={unstamped > 0 ? 'cropped but not stamped' : undefined}
-                        />
+                        <StatCard label="Labels cropped" value={result.labelCount.toLocaleString('en-IN')} tone="positive" />
+                        <StatCard label="Empty frames dropped" value={result.skipped.toLocaleString('en-IN')} />
                     </StatStrip>
 
                     <Card title="Labels" eyebrow={result.fileName} padding="none">
