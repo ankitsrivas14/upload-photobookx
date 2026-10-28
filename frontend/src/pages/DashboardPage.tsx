@@ -14,7 +14,7 @@ import {
   ReferenceLine,
 } from 'recharts';
 import toast from 'react-hot-toast';
-import { api } from '../services/api';
+import { api, errorMessage } from '../services/api';
 import type { AdminUser } from '../services/api';
 import type { SalesPageProps } from './SalesPage';
 import {
@@ -434,7 +434,7 @@ export function DashboardPage() {
       }
     } catch (err) {
       console.error('Failed to mark order status:', err);
-      toast.error('Failed to update status', { id: toastId });
+      toast.error(errorMessage(err, 'Failed to update status'), { id: toastId });
     } finally {
       setMarkingOrder(null);
     }

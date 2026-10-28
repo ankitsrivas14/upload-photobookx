@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { api } from '../services/api';
+import { api, errorMessage } from '../services/api';
 import {
   Avatar,
   Badge,
@@ -222,8 +222,9 @@ export function AttendancePage() {
       }));
       await api.markAttendance(empId, dateStr, nextStatus);
       loadData(); // refresh salary stats
-    } catch {
-      toast.error('Failed to update attendance');
+    } catch (err) {
+      toast.error(errorMessage(err, 'Failed to update attendance'));
+      loadMonthlyData(); // undo the optimistic mark
     }
   };
 
@@ -243,8 +244,8 @@ export function AttendancePage() {
       loadData();
       loadHourlyData();
       loadAllEmployees();
-    } catch {
-      toast.error('Failed to add employee');
+    } catch (err) {
+      toast.error(errorMessage(err, 'Failed to add employee'));
     }
   };
 
@@ -257,8 +258,8 @@ export function AttendancePage() {
       toast.success(`${logForm.hoursWorked}h logged successfully`);
       setLogForm(f => ({ ...f, hoursWorked: '', notes: '' }));
       loadHourlyData();
-    } catch {
-      toast.error('Failed to log hours');
+    } catch (err) {
+      toast.error(errorMessage(err, 'Failed to log hours'));
     } finally {
       setSubmittingLog(false);
     }
@@ -269,8 +270,8 @@ export function AttendancePage() {
       await api.deleteHourlyLog(empId, dateStr);
       toast.success('Log deleted');
       loadHourlyData();
-    } catch {
-      toast.error('Failed to delete log');
+    } catch (err) {
+      toast.error(errorMessage(err, 'Failed to delete log'));
     }
   };
 
@@ -284,8 +285,8 @@ export function AttendancePage() {
       setShowAdvanceModal(false);
       setAdvForm({ amount: '', reason: '' });
       loadData();
-    } catch {
-      toast.error('Failed to record advance');
+    } catch (err) {
+      toast.error(errorMessage(err, 'Failed to record advance'));
     }
   };
 
@@ -302,8 +303,8 @@ export function AttendancePage() {
       setShowStatusModal(false);
       loadAllEmployees();
       loadData();
-    } catch {
-      toast.error('Failed to update employee status');
+    } catch (err) {
+      toast.error(errorMessage(err, 'Failed to update employee status'));
     }
   };
 
@@ -314,7 +315,7 @@ export function AttendancePage() {
       loadData();
       loadHourlyData();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to mark as paid');
+      toast.error(errorMessage(error, 'Failed to mark as paid'));
     }
   };
 

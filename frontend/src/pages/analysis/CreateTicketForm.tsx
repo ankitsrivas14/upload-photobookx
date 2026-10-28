@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
-import { api } from '../../services/api';
+import { api, errorMessage } from '../../services/api';
 import { Badge, Button, Card, Icon, OptionCard, TextField } from '../../components/ui/pbx';
 import styles from '../AnalysisPage.module.css';
 
@@ -180,8 +180,8 @@ export function CreateTicketForm() {
             } else {
                 toast.error('Failed to generate AI message');
             }
-        } catch {
-            toast.error('Failed to generate AI message');
+        } catch (err) {
+            toast.error(errorMessage(err, 'Failed to generate AI message'));
         } finally {
             setIsGenerating(false);
         }
@@ -222,8 +222,8 @@ export function CreateTicketForm() {
             } else {
                 toast.error(res.error || 'Failed to create ticket');
             }
-        } catch {
-            toast.error('Error creating ticket');
+        } catch (err) {
+            toast.error(errorMessage(err, 'Error creating ticket'));
         } finally {
             setIsSubmitting(false);
         }

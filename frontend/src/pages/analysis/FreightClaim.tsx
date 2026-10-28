@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import toast from 'react-hot-toast';
 import { Alert, Badge, Button, Card, DataList, DateField, Dialog, EmptyState, Skeleton, TextField } from '../../components/ui/pbx';
 import { cx, formatINR } from '../../components/ui/format';
-import { api, type ClaimMessage, type FreightClaimDetail } from '../../services/api';
+import { api, errorMessage, type ClaimMessage, type FreightClaimDetail } from '../../services/api';
 import { istWhen } from './failureReasonsFormat';
 import { CLAIM_HINT, CLAIM_LABEL, CLAIM_TONE, dayIst } from './freightClaimsFormat';
 import shared from '../AnalysisPage.module.css';
@@ -31,12 +31,11 @@ function MarkRefunded({ claim, onClose, onSaved }: { claim: FreightClaimDetail; 
         if (!(value > 0) || !date) return;
         setSaving(true);
         try {
-            const res = await api.markClaimRefunded(claim.order, { amount: value, date, note: note.trim() || undefined });
-            if (!res.success) throw new Error(res.error || 'The refund could not be saved');
+            await api.markClaimRefunded(claim.order, { amount: value, date, note: note.trim() || undefined });
             toast.success(`${claim.order} marked refunded`);
             onSaved();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : 'The refund could not be saved');
+            toast.error(errorMessage(err, 'The refund could not be saved'));
         } finally {
             setSaving(false);
         }

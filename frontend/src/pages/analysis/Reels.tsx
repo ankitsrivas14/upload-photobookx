@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { api } from '../../services/api';
+import { api, errorMessage } from '../../services/api';
 import { toast } from 'react-hot-toast';
 import { Button, Card, Checkbox, DateField, Dialog, EmptyState, Icon, Skeleton, TextField } from '../../components/ui/pbx';
 import styles from '../AnalysisPage.module.css';
@@ -71,8 +71,8 @@ export function Reels() {
       } else {
         toast.error(res.error || 'Failed to add reel');
       }
-    } catch {
-      toast.error('Failed to add reel');
+    } catch (err) {
+      toast.error(errorMessage(err, 'Failed to add reel'));
     } finally {
       setSavingReel(false);
     }
@@ -93,8 +93,8 @@ export function Reels() {
       } else {
         toast.error(res.error || 'Failed to add strategy');
       }
-    } catch {
-      toast.error('Failed to add strategy');
+    } catch (err) {
+      toast.error(errorMessage(err, 'Failed to add strategy'));
     } finally {
       setSavingStrategy(false);
     }
@@ -103,10 +103,11 @@ export function Reels() {
   const handleDeleteReel = async (id: string) => {
     const prev = reels;
     setReels((r) => r.filter((x) => x._id !== id));
-    const res = await api.deleteReel(id);
-    if (!res.success) {
+    try {
+      await api.deleteReel(id);
+    } catch (err) {
       setReels(prev);
-      toast.error('Failed to delete reel');
+      toast.error(errorMessage(err, 'Failed to delete reel'));
     }
   };
 
@@ -115,11 +116,12 @@ export function Reels() {
     const prevReels = reels;
     setStrategies((s) => s.filter((x) => x._id !== id));
     setReels((rs) => rs.map((r) => ({ ...r, strategyIds: r.strategyIds.filter((sid) => sid !== id) })));
-    const res = await api.deleteReelStrategy(id);
-    if (!res.success) {
+    try {
+      await api.deleteReelStrategy(id);
+    } catch (err) {
       setStrategies(prevStrategies);
       setReels(prevReels);
-      toast.error('Failed to delete strategy');
+      toast.error(errorMessage(err, 'Failed to delete strategy'));
     }
   };
 
@@ -133,8 +135,9 @@ export function Reels() {
           : r
       )
     );
-    const res = await api.toggleReelStrategy(reel._id, strategyId, marked);
-    if (!res.success) {
+    try {
+      await api.toggleReelStrategy(reel._id, strategyId, marked);
+    } catch (err) {
       // Revert
       setReels((rs) =>
         rs.map((r) =>
@@ -143,7 +146,7 @@ export function Reels() {
             : r
         )
       );
-      toast.error('Failed to update');
+      toast.error(errorMessage(err, 'Failed to update'));
     }
   };
 

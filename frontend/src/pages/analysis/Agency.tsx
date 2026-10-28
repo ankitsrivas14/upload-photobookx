@@ -3,7 +3,7 @@ import {
   ComposedChart, Bar, Line, XAxis, YAxis, Tooltip as ChartTooltip, ResponsiveContainer,
   CartesianGrid, Legend,
 } from 'recharts';
-import { api } from '../../services/api';
+import { api, errorMessage } from '../../services/api';
 import { toast } from 'react-hot-toast';
 import { Alert, Badge, Button, Card, EmptyState, Icon, Select, Skeleton, StatCard, StatStrip, TextField, Tooltip } from '../../components/ui/pbx';
 import { cx } from '../../components/ui/format';
@@ -319,14 +319,15 @@ export function Agency() {
   const savePrefixes = async (next: string[]) => {
     const prev = prefixes;
     setPrefixes(next); // optimistic
-    const res = await api.saveAgencyPrefixes(next);
-    if (res.success) {
+    try {
+      const res = await api.saveAgencyPrefixes(next);
       setPrefixes(res.namePrefixes || next);
-      await loadData(month); // re-filters which campaigns count as the agency's
-    } else {
+    } catch (err) {
       setPrefixes(prev);
-      toast.error(res.error || 'Failed to save prefixes');
+      toast.error(errorMessage(err, 'Failed to save prefixes'));
+      return;
     }
+    await loadData(month); // re-filters which campaigns count as the agency's
   };
 
   const handleAddPrefix = () => {

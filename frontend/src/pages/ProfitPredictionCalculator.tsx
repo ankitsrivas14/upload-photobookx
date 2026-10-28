@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import toast from 'react-hot-toast';
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { api } from '../services/api';
+import { api, errorMessage } from '../services/api';
 import { Alert, Button, Card, DataList, EmptyState, SegmentedControl, Skeleton, StatCard, StatStrip, TextField } from '../components/ui/pbx';
 import { formatINR } from '../components/ui/format';
 import { AXIS_TICK, TOOLTIP_ITEM, TOOLTIP_LABEL, TOOLTIP_STYLE } from './dashboard/chartStyles';
@@ -123,7 +123,7 @@ export function ProfitPredictionCalculator() {
       await load(days);
     } catch (err) {
       console.error('Failed to sync PnL data:', err);
-      toast.error('Could not sync profit and loss');
+      toast.error(errorMessage(err, 'Could not sync profit and loss'));
     } finally {
       setIsSyncing(false);
     }

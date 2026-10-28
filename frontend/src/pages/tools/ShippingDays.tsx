@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import { Alert, Badge, Button, Card, DataTable, EmptyState, Switch, type Column } from '../../components/ui/pbx';
 import { formatINR } from '../../components/ui/format';
-import { api, type SetAsideOrder, type ShippingDay, type ShippingRun } from '../../services/api';
+import { api, errorMessage, type SetAsideOrder, type ShippingDay, type ShippingRun } from '../../services/api';
 import styles from './Labels.module.css';
 
 type Kind = 'labels' | 'manifest';
@@ -67,13 +67,14 @@ export function ShippingDays() {
 
     const toggle = async (enabled: boolean) => {
         setBusy('switch');
-        const res = await api.setShippingAuto(enabled).catch(() => null);
-        setBusy(null);
-        if (!res?.success) {
-            toast.error(res?.error || 'The switch could not be changed');
-            return;
+        try {
+            await api.setShippingAuto(enabled);
+            setAuto((a) => (a ? { ...a, enabled } : a));
+        } catch (err) {
+            toast.error(errorMessage(err, 'The switch could not be changed'));
+        } finally {
+            setBusy(null);
         }
-        setAuto((a) => (a ? { ...a, enabled } : a));
     };
 
     const columns: Column<ShippingDay>[] = [

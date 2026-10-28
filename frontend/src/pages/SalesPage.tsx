@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import toast from 'react-hot-toast';
-import { api } from '../services/api';
+import { api, errorMessage } from '../services/api';
 import styles from './SalesPage.module.css';
 import {
   Amount,
@@ -448,7 +448,7 @@ export function SalesPage({ initialFilter, embedded = false }: SalesPageProps = 
       await loadOrders(selectedMonthFilter, true);
     } catch (err) {
       console.error('Failed to refresh data:', err);
-      toast.error('Failed to refresh data. Please try again.');
+      toast.error(errorMessage(err, 'Failed to refresh data. Please try again.'));
     } finally {
       setIsRefreshing(false);
       setRefreshStatus(null);
@@ -1144,7 +1144,7 @@ export function SalesPage({ initialFilter, embedded = false }: SalesPageProps = 
       }
     } catch (err) {
       console.error('Failed to discard orders:', err);
-      toast.error('Failed to discard orders');
+      toast.error(errorMessage(err, 'Failed to discard orders'));
     } finally {
       setIsProcessing(false);
     }
@@ -1170,7 +1170,7 @@ export function SalesPage({ initialFilter, embedded = false }: SalesPageProps = 
       }
     } catch (err) {
       console.error('Failed to mark orders as RTO:', err);
-      toast.error('Failed to mark orders as RTO');
+      toast.error(errorMessage(err, 'Failed to mark orders as RTO'));
     } finally {
       setIsProcessing(false);
     }
@@ -1193,7 +1193,7 @@ export function SalesPage({ initialFilter, embedded = false }: SalesPageProps = 
       }
     } catch (err) {
       console.error('Failed to unmark RTO orders:', err);
-      toast.error('Failed to unmark RTO orders');
+      toast.error(errorMessage(err, 'Failed to unmark RTO orders'));
     } finally {
       setIsProcessing(false);
     }
@@ -1454,7 +1454,7 @@ export function SalesPage({ initialFilter, embedded = false }: SalesPageProps = 
       }
     } catch (error) {
       console.error('Error updating delivery status:', error);
-      toast.error('An error occurred while updating delivery status');
+      toast.error(errorMessage(error, 'An error occurred while updating delivery status'));
     } finally {
       setUpdatingStatus(false);
     }
@@ -1477,7 +1477,7 @@ export function SalesPage({ initialFilter, embedded = false }: SalesPageProps = 
           }
         } catch (error) {
           console.error('Error adding customer tag:', error);
-          toast.error('Failed to add tag');
+          toast.error(errorMessage(error, 'Failed to add tag'));
         }
       },
     });
@@ -1494,7 +1494,7 @@ export function SalesPage({ initialFilter, embedded = false }: SalesPageProps = 
       }
     } catch (error) {
       console.error('Error acknowledging order:', error);
-      toast.error('Failed to acknowledge order');
+      toast.error(errorMessage(error, 'Failed to acknowledge order'));
     }
   };
 
@@ -1509,7 +1509,7 @@ export function SalesPage({ initialFilter, embedded = false }: SalesPageProps = 
       }
     } catch (error) {
       console.error('Error marking order as ticket raised:', error);
-      toast.error('Failed to mark ticket raised');
+      toast.error(errorMessage(error, 'Failed to mark ticket raised'));
     }
   };
 
@@ -1552,7 +1552,7 @@ export function SalesPage({ initialFilter, embedded = false }: SalesPageProps = 
           }
         } catch (err) {
           console.error('Failed to add bulk customer tags:', err);
-          toast.error('An error occurred during bulk operation');
+          toast.error(errorMessage(err, 'An error occurred during bulk operation'));
         } finally {
           setIsProcessing(false);
         }
@@ -1588,7 +1588,7 @@ export function SalesPage({ initialFilter, embedded = false }: SalesPageProps = 
           }
         } catch (err) {
           console.error('Failed to acknowledge orders:', err);
-          toast.error('An error occurred during bulk operation');
+          toast.error(errorMessage(err, 'An error occurred during bulk operation'));
         } finally {
           setIsProcessing(false);
         }

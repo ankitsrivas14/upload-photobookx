@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { api } from '../../services/api';
+import toast from 'react-hot-toast';
+import { api, errorMessage } from '../../services/api';
 import { Alert, Button, Card, Dialog, EmptyState, Skeleton, StatCard, StatStrip, TextField, Tooltip } from '../../components/ui/pbx';
 import { cx } from '../../components/ui/format';
 import styles from '../AnalysisPage.module.css';
@@ -87,6 +88,7 @@ export function PinCodesAnalysis() {
             }
         } catch (err) {
             console.error('Failed to add pin code:', err);
+            toast.error(errorMessage(err, 'Failed to add pin code'));
         } finally {
             setIsSaving(false);
         }
@@ -100,6 +102,7 @@ export function PinCodesAnalysis() {
             }
         } catch (err) {
             console.error('Failed to delete pin code:', err);
+            toast.error(errorMessage(err, 'Failed to delete pin code'));
         }
     };
 

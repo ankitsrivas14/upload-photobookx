@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
-import { api } from '../services/api';
+import { api, errorMessage } from '../services/api';
 import { Button, Card, DateField, Dialog, EmptyState, Skeleton, TextField } from '../components/ui/pbx';
 import { cx, formatINR } from '../components/ui/format';
 import styles from './MetaAdsPage.module.css';
@@ -77,7 +77,7 @@ export function MetaAdsPage() {
       }
     } catch (err) {
       console.error('Failed to add daily ad spend:', err);
-      toast.error('Failed to add daily ad spend');
+      toast.error(errorMessage(err, 'Failed to add daily ad spend'));
     } finally {
       setIsSubmittingAdSpend(false);
     }
@@ -93,7 +93,7 @@ export function MetaAdsPage() {
       }
     } catch (err) {
       console.error('Failed to delete entry:', err);
-      toast.error('Failed to delete entry');
+      toast.error(errorMessage(err, 'Failed to delete entry'));
     }
   };
 

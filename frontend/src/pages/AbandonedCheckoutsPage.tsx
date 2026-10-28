@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { api } from '../services/api';
+import { api, errorMessage } from '../services/api';
 import { Badge, Button, Card, Dialog, EmptyState, Icon, PageHeader, Skeleton, StatCard, StatStrip, TextField } from '../components/ui/pbx';
 import styles from './AbandonedCheckoutsPage.module.css';
 import toast from 'react-hot-toast';
@@ -58,8 +58,8 @@ export default function AbandonedCheckoutsPage() {
       } else {
         toast.error(response.error || 'Failed to save template');
       }
-    } catch {
-      toast.error('An error occurred while saving the template');
+    } catch (err) {
+      toast.error(errorMessage(err, 'An error occurred while saving the template'));
     } finally {
       setSavingTemplate(false);
     }
@@ -99,8 +99,8 @@ export default function AbandonedCheckoutsPage() {
           setActiveRowId(null);
         }
       }
-    } catch {
-      toast.error('Failed to update status');
+    } catch (err) {
+      toast.error(errorMessage(err, 'Failed to update status'));
     }
   };
 
@@ -122,7 +122,7 @@ export default function AbandonedCheckoutsPage() {
       }
     } catch (err) {
       console.error(err);
-      toast.error('An error occurred');
+      toast.error(errorMessage(err, 'An error occurred'));
     } finally {
       setLoading(false);
     }

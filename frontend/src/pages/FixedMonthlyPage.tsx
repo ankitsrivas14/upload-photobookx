@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { api } from '../services/api';
+import { api, errorMessage } from '../services/api';
 import toast from 'react-hot-toast';
 import { Button, Card, DateField, EmptyState, Skeleton, TextField } from '../components/ui/pbx';
 import { cx, formatINR } from '../components/ui/format';
@@ -60,8 +60,8 @@ export function FixedMonthlyPage() {
         setNewAmount('');
         toast.success('Expense added');
       }
-    } catch {
-      toast.error('Failed to add expense');
+    } catch (err) {
+      toast.error(errorMessage(err, 'Failed to add expense'));
     } finally {
       setIsAdding(false);
     }
@@ -85,8 +85,8 @@ export function FixedMonthlyPage() {
         setEditingId(null);
         toast.success('Updated');
       }
-    } catch {
-      toast.error('Failed to update');
+    } catch (err) {
+      toast.error(errorMessage(err, 'Failed to update'));
     }
   };
 
@@ -95,8 +95,8 @@ export function FixedMonthlyPage() {
       await api.deleteFixedMonthlyExpense(id);
       setExpenses(prev => prev.filter(e => e._id !== id));
       toast.success('Deleted');
-    } catch {
-      toast.error('Failed to delete');
+    } catch (err) {
+      toast.error(errorMessage(err, 'Failed to delete'));
     }
   };
 

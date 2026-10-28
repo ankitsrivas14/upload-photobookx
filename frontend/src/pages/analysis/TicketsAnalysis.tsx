@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
-import { api } from '../../services/api';
+import { api, errorMessage } from '../../services/api';
 import { Alert, Badge, Button, Card, DataList, Drawer, EmptyState, Skeleton } from '../../components/ui/pbx';
 import { cx } from '../../components/ui/format';
 import styles from '../AnalysisPage.module.css';
@@ -75,8 +75,8 @@ export function TicketsAnalysis() {
             } else {
                 toast.error(res.error || 'Failed to update status');
             }
-        } catch {
-            toast.error('Error updating ticket status');
+        } catch (err) {
+            toast.error(errorMessage(err, 'Error updating ticket status'));
         } finally {
             setIsUpdating(false);
         }

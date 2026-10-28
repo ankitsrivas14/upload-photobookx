@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import * as XLSX from 'xlsx';
 import toast from 'react-hot-toast';
 import styles from './BankAccountPage.module.css';
-import { api } from '../services/api';
+import { api, errorMessage } from '../services/api';
 import { Badge, Button, Card, Checkbox, Dialog, Dropzone, EmptyState, Menu, Select, Skeleton, StatCard, StatStrip, Switch, TextField, Tooltip } from '../components/ui/pbx';
 import { cx, formatINR } from '../components/ui/format';
 
@@ -121,6 +121,7 @@ export function BankAccountPage() {
             }
         } catch (err) {
             console.error('Error adding rule:', err);
+            toast.error(errorMessage(err, 'Failed to add rule'));
         }
     };
 
@@ -132,6 +133,7 @@ export function BankAccountPage() {
             }
         } catch (err) {
             console.error('Error deleting rule:', err);
+            toast.error(errorMessage(err, 'Failed to delete rule'));
         }
     };
 
@@ -316,7 +318,7 @@ export function BankAccountPage() {
             }
         } catch (err) {
             console.error('Error categorizing:', err);
-            toast.error('Failed to save to backend');
+            toast.error(errorMessage(err, 'Failed to save to backend'));
         }
     };
 
@@ -334,6 +336,7 @@ export function BankAccountPage() {
                 }
             } catch (err) {
                 console.error('Error adding category:', err);
+                toast.error(errorMessage(err, 'Failed to add category'));
             }
         }
     };
@@ -348,7 +351,7 @@ export function BankAccountPage() {
             }
         } catch (err) {
             console.error('Error removing transaction:', err);
-            toast.error('Failed to remove from backend');
+            toast.error(errorMessage(err, 'Failed to remove from backend'));
         }
     };
 
@@ -372,6 +375,7 @@ export function BankAccountPage() {
             }
         } catch (err) {
             console.error('Error updating category:', err);
+            toast.error(errorMessage(err, 'Failed to update category'));
         }
     };
 
@@ -392,6 +396,7 @@ export function BankAccountPage() {
             }
         } catch (err) {
             console.error('Error deleting category:', err);
+            toast.error(errorMessage(err, 'Failed to delete category'));
         }
     };
 
@@ -405,6 +410,7 @@ export function BankAccountPage() {
             }
         } catch (err) {
             console.error('Error updating tags:', err);
+            toast.error(errorMessage(err, 'Failed to update tags'));
         }
     };
 
@@ -425,6 +431,7 @@ export function BankAccountPage() {
             }
         } catch (err) {
             console.error('Error tagging transactions:', err);
+            toast.error(errorMessage(err, 'Failed to update transaction tags'));
         }
     };
 
@@ -440,6 +447,7 @@ export function BankAccountPage() {
             }
         } catch (err) {
             console.error('Error moving transaction:', err);
+            toast.error(errorMessage(err, 'Failed to move transaction'));
         }
     };
 

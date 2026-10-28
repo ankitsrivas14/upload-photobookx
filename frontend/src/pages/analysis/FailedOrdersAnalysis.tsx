@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
-import { api } from '../../services/api';
+import toast from 'react-hot-toast';
+import { api, errorMessage } from '../../services/api';
 import { Alert, Badge, Button, Card, EmptyState, Skeleton, StatCard, StatStrip } from '../../components/ui/pbx';
 import { cx } from '../../components/ui/format';
 import styles from '../AnalysisPage.module.css';
@@ -32,12 +33,13 @@ export function FailedOrdersAnalysis() {
         });
         try {
             isAdded ? await api.removeCodAddedCity(city) : await api.addCodAddedCity(city);
-        } catch {
+        } catch (err) {
             setAddedCities(prev => {
                 const next = new Set(prev);
                 isAdded ? next.add(city) : next.delete(city);
                 return next;
             });
+            toast.error(errorMessage(err, `Failed to update ${city}`));
         }
     };
 

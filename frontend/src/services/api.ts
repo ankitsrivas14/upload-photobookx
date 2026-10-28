@@ -375,6 +375,27 @@ interface UploadInfo {
   error?: string;
 }
 
+/**
+ * A write the server refused: an error status, or `success: false` in the body. `serverMessage`
+ * is the server's `error` text, when it sent one.
+ */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly serverMessage: string | undefined;
+
+  constructor(status: number, serverMessage?: string) {
+    super(serverMessage || `Request failed with status ${status}`);
+    this.name = 'ApiError';
+    this.status = status;
+    this.serverMessage = serverMessage;
+  }
+}
+
+/** The text to show for a failed call: the server's reason for a refused write, else `fallback`. */
+export function errorMessage(err: unknown, fallback: string): string {
+  return err instanceof ApiError && err.serverMessage ? err.serverMessage : fallback;
+}
+
 class ApiService {
   private baseUrl: string;
 
@@ -421,12 +442,33 @@ class ApiService {
       }
       return data;
     }
-    const data = await this.send<T>(endpoint, options);
-    if (method !== 'GET') this.invalidateCache();
-    return data;
+    if (method === 'GET') return this.send<T>(endpoint, options);
+    // A write resolves only when the server accepted it, so a caller's success path can't run
+    // for a refused one. The cache is cleared either way, in case a failed write changed data.
+    try {
+      return await this.sendWrite<T>(endpoint, options);
+    } finally {
+      this.invalidateCache();
+    }
   }
 
   private async send<T>(endpoint: string, options: RequestInit): Promise<T> {
+    const response = await this.fetchWithToken(endpoint, options);
+    return response.json();
+  }
+
+  /** `send` for a write: rejects with an ApiError when the server refuses it. */
+  private async sendWrite<T>(endpoint: string, options: RequestInit): Promise<T> {
+    const response = await this.fetchWithToken(endpoint, options);
+    // An error page that isn't JSON still counts as a refusal, just without a reason.
+    const data = response.ok ? await response.json() : await response.json().catch(() => null);
+    if (!response.ok || data?.success === false) {
+      throw new ApiError(response.status, typeof data?.error === 'string' ? data.error : undefined);
+    }
+    return data;
+  }
+
+  private fetchWithToken(endpoint: string, options: RequestInit): Promise<Response> {
     const token = this.getToken();
 
     const headers: HeadersInit = {
@@ -438,17 +480,16 @@ class ApiService {
       (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
     }
 
-    const response = await fetch(`${this.baseUrl}${endpoint}`, {
+    return fetch(`${this.baseUrl}${endpoint}`, {
       ...options,
       headers,
     });
-
-    return response.json();
   }
 
-  // Admin Auth
+  // Admin Auth. Sign-in reads `success` and `error` itself (a wrong password is a 401), so it
+  // goes through `send`, not `request`, which rejects refused writes.
   async login(email: string, password: string): Promise<LoginResponse> {
-    const response = await this.request<LoginResponse>('/api/admin/auth/login', {
+    const response = await this.send<LoginResponse>('/api/admin/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     });
@@ -461,7 +502,7 @@ class ApiService {
   }
 
   async register(email: string, password: string, name: string): Promise<LoginResponse> {
-    const response = await this.request<LoginResponse>('/api/admin/auth/register', {
+    const response = await this.send<LoginResponse>('/api/admin/auth/register', {
       method: 'POST',
       body: JSON.stringify({ email, password, name }),
     });

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
-import { api } from '../../services/api';
+import { api, errorMessage } from '../../services/api';
 import type { ShopifyOrder } from '../../services/api';
 import { Alert, Badge, Button, Card, DataList, Dialog, Drawer, EmptyState, Icon, Skeleton, StatCard, StatStrip, Tooltip } from '../../components/ui/pbx';
 import { cx } from '../../components/ui/format';
@@ -70,8 +70,8 @@ const TicketDrawer = ({ ticket, onClose, onUpdate }: { ticket: Ticket | null, on
             } else {
                 toast.error(res.error || 'Failed to close ticket');
             }
-        } catch {
-            toast.error('Error closing ticket');
+        } catch (err) {
+            toast.error(errorMessage(err, 'Error closing ticket'));
         } finally {
             setIsUpdating(false);
         }
@@ -181,8 +181,8 @@ const TrackingDialog = ({ order, onClose }: { order: ShopifyOrder, onClose: () =
             } else {
                 toast.error(res.error || 'Failed to generate complaint message');
             }
-        } catch {
-            toast.error('Error connecting to AI service');
+        } catch (err) {
+            toast.error(errorMessage(err, 'Error connecting to AI service'));
         } finally {
             setIsGenerating(false);
         }
@@ -210,8 +210,8 @@ const TrackingDialog = ({ order, onClose }: { order: ShopifyOrder, onClose: () =
             } else {
                 toast.error(res.error || 'Failed to create ticket');
             }
-        } catch {
-            toast.error('Error creating ticket');
+        } catch (err) {
+            toast.error(errorMessage(err, 'Error creating ticket'));
         } finally {
             setIsCreatingTicket(false);
         }

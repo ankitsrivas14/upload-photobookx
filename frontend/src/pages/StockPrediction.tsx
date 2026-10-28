@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
-import { api } from '../services/api';
+import { api, errorMessage } from '../services/api';
 import type { ShopifyOrder } from '../services/api';
 import { Alert, Button, Card, DataTable, EmptyState, StatCard, StatStrip, TextField, type Column } from '../components/ui/pbx';
 import styles from './StockPrediction.module.css';
@@ -162,8 +162,8 @@ export function StockPrediction() {
       } else {
         toast.error(res.error || 'AI prediction failed');
       }
-    } catch {
-      toast.error('Could not run the AI stock prediction');
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not run the AI stock prediction'));
     } finally {
       setIsPredicting(false);
     }

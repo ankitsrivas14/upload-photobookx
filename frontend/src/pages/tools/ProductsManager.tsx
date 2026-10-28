@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
-import { api } from '../../services/api';
+import { api, errorMessage } from '../../services/api';
 import { Alert, Amount, Badge, Button, Card, DataTable, Dialog, EmptyState, SegmentedControl, TextField, type Column } from '../../components/ui/pbx';
 import styles from './ProductsManager.module.css';
 
@@ -214,7 +214,7 @@ export function ProductsManager() {
             }
         } catch (error) {
             console.error('Error updating prices:', error);
-            toast.error('Could not update prices. Try again.');
+            toast.error(errorMessage(error, 'Could not update prices. Try again.'));
         } finally {
             setIsUpdatingPrices(false);
         }
