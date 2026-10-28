@@ -784,6 +784,17 @@ class ShiprocketService {
     return isNaN(date.getTime()) ? undefined : dateStr;
   }
   /**
+   * One page of GET /orders and the number of orders its filter matches. Without `from`/`to`
+   * (YYYY-MM-DD) Shiprocket only looks at the last 30 days. Throws on an API error.
+   */
+  async listOrders(query: Record<string, string | number>): Promise<{ data: any[]; total: number }> {
+    const params = new URLSearchParams(Object.entries(query).map(([k, v]) => [k, String(v)]));
+    const response = await this.makeRequest<any>(`/orders?${params}`);
+    const data = response?.data ?? [];
+    return { data, total: Number(response?.meta?.pagination?.total ?? data.length) };
+  }
+
+  /**
    * Fetch tracking activities for a specific AWB
    */
   async getAWBTrackingActivities(awbCode: string) {

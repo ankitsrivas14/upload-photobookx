@@ -99,3 +99,27 @@ export const adSpendSync = onSchedule(
     );
   }
 );
+
+/**
+ * Nightly at 03:30 IST: the last three months of failed Shiprocket orders and why each failed, for
+ * Analysis › Failure reasons. Returns keep landing for weeks after a month ends, so older months stay
+ * as stored. Reads Shiprocket only.
+ */
+export const failureReasonsSync = onSchedule(
+  {
+    schedule: '30 3 * * *',
+    timeZone: 'Asia/Kolkata',
+    region: 'asia-south1',
+    timeoutSeconds: 540,
+    memory: '512MiB',
+    maxInstances: 1,
+    secrets: ['SHIPROCKET_API_EMAIL', 'SHIPROCKET_API_PASSWORD'],
+  },
+  async () => {
+    const { refreshFailureReasons } = await import('./services/failureReasonsService');
+    const { months, failed, tracked, removed } = await refreshFailureReasons();
+    console.log(
+      `failureReasonsSync: ${months.join(', ')}: ${failed} failed orders, ${tracked} reasons read, ${removed} removed`
+    );
+  }
+);

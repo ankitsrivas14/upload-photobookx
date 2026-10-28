@@ -192,6 +192,46 @@ export interface SetAsideOrder {
   since: string | null;
 }
 
+/** One month of Shiprocket orders (YYYY-MM) and how many failed: returned to us, lost, destroyed or disposed of. */
+export interface FailureMonth {
+  month: string;
+  orders: number;
+  delivered: number;
+  cancelled: number;
+  failed: number;
+  /** Neither delivered, failed nor cancelled yet: in transit, or not shipped. */
+  open: number;
+  /** Returns may still come in: the month is current, or over a tenth of its orders are still open. */
+  settling: boolean;
+  cod: number;
+  prepaid: number;
+  /** Order value of the failed orders, in rupees. */
+  value: number;
+  /** Failed orders per reason group. */
+  groups: Record<string, number>;
+}
+
+/** A reason group across all months, with the couriers' own wordings in it. */
+export interface FailureReasonGroup {
+  group: string;
+  count: number;
+  wordings: Array<{ reason: string; count: number }>;
+}
+
+/** One failed order with why it failed (the last failed delivery attempt before it came back). */
+export interface FailedOrderReason {
+  order: string;
+  placedAt: string | null;
+  payment: 'COD' | 'Prepaid';
+  value: number;
+  courier: string | null;
+  status: string;
+  group: string;
+  /** The courier's wording; null while tracking couldn't be read. */
+  reason: string | null;
+  attempts: number | null;
+}
+
 /** The whole Meta ad account over one week (from a Monday) or one calendar month. */
 export interface MetaCpaPeriod {
   start: string;
@@ -1267,6 +1307,29 @@ class ApiService {
 
   async getStock(): Promise<{ success: boolean; alertDays?: number; items?: StockLevel[]; error?: string }> {
     return this.request('/api/admin/stock');
+  }
+
+  async getFailureReasons(): Promise<{
+    success: boolean;
+    refreshedAt?: string | null;
+    groups?: string[];
+    months?: FailureMonth[];
+    reasons?: FailureReasonGroup[];
+    error?: string;
+  }> {
+    return this.request('/api/admin/failure-reasons');
+  }
+
+  /** One month (YYYY-MM) of failed Shiprocket orders, oldest first. */
+  async getFailureReasonsMonth(month: string): Promise<{
+    success: boolean;
+    refreshedAt?: string | null;
+    groups?: string[];
+    summary?: FailureMonth;
+    orders?: FailedOrderReason[];
+    error?: string;
+  }> {
+    return this.request(`/api/admin/failure-reasons/${month}`);
   }
 
   async getShipping(): Promise<{

@@ -6,6 +6,8 @@ import styles from './AnalysisPage.module.css';
 
 // Each tab loads the first time it is opened (Agency pulls in recharts).
 const FailedOrdersAnalysis = lazy(() => import('./analysis/FailedOrdersAnalysis').then((m) => ({ default: m.FailedOrdersAnalysis })));
+const FailureReasons = lazy(() => import('./analysis/FailureReasons').then((m) => ({ default: m.FailureReasons })));
+const FailureReasonsMonth = lazy(() => import('./analysis/FailureReasonsMonth').then((m) => ({ default: m.FailureReasonsMonth })));
 const PinCodesAnalysis = lazy(() => import('./analysis/PinCodesAnalysis').then((m) => ({ default: m.PinCodesAnalysis })));
 const StuckOrdersAnalysis = lazy(() => import('./analysis/StuckOrdersAnalysis').then((m) => ({ default: m.StuckOrdersAnalysis })));
 const TicketsAnalysis = lazy(() => import('./analysis/TicketsAnalysis').then((m) => ({ default: m.TicketsAnalysis })));
@@ -38,6 +40,8 @@ export function AnalysisPage() {
                     <Route path="ads" element={<Navigate to="/admin/analysis/claude" replace />} />
                     <Route path="claude" element={<ClaudeAnalysis />} />
                     <Route path="failed-orders" element={<FailedOrdersAnalysis />} />
+                    <Route path="failure-reasons" element={<FailureReasons />} />
+                    <Route path="failure-reasons/:month" element={<FailureReasonsMonth />} />
                     <Route path="pin-codes" element={<PinCodesAnalysis />} />
                     <Route path="stuck-orders" element={<StuckOrdersAnalysis />} />
                     <Route path="tickets" element={<TicketsAnalysis />} />

@@ -44,6 +44,7 @@ export const ADMIN_NAV: NavItem[] = [
     children: sub('/admin/analysis', [
       ['claude', 'Claude analysis'],
       ['failed-orders', 'Failed orders'],
+      ['failure-reasons', 'Failure reasons'],
       ['pin-codes', 'Pin codes'],
       ['stuck-orders', 'Stuck orders'],
       ['tickets', 'Tickets'],
