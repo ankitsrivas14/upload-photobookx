@@ -62,12 +62,13 @@
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
 
+  /* No overscroll containment: at the top of the page the pane starts below the stat strip, so its last lines sit
+     below the window until the page scrolls. Scrolling on past the pane's end has to move the page to reach them. */
   .detailPane {
     position: sticky;
     top: calc(var(--topbar) + var(--space-4));
     max-height: calc(100vh - var(--topbar) - var(--space-8));
     overflow-y: auto;
-    overscroll-behavior: contain;
   }
 }
 
