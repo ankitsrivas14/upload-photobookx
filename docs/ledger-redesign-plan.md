@@ -4,8 +4,8 @@ Every admin screen, the login page and the customer upload page move to Ledger, 
 PhotoBookX design system: white paper, black ink, 1px rules instead of cards, IBM Plex Sans with
 Plex Mono figures, one deep green accent, light and dark themes.
 
-The work lives on branch `redesign/ledger-shell` (worktree `.claude/worktrees/ledger-redesign`).
-`main` keeps the old screens until the redesign ships (see Shipping).
+The redesign shipped to `main` on 2026-10-25. Since 2026-10-28 all work is committed on `main` in
+the main checkout; the old branch `redesign/ledger-shell` is no longer extended.
 
 ## The design system
 
@@ -121,12 +121,12 @@ The new shell makes old-style screens look out of place, so `main` takes the red
 once phases 2–6 are done (the upload page can follow on its own). Merge `main` into the branch,
 check every route, then fast-forward `main` so Vercel ships it.
 
-Shipped on 2026-10-25: every route checked, then `main` fast-forwarded to the branch. Later changes
-still go on the branch first, then fast-forward `main` again.
+Shipped on 2026-10-25: every route checked, then `main` fast-forwarded to the branch. Since
+2026-10-28 changes are committed on `main` directly and pushed from there.
 
 ## Working in parallel
 
-More than one session works in this worktree. Before starting a screen, set its Status to "In
+More than one session may work in the same checkout. Before starting a screen, set its Status to "In
 progress" here. Stage only your own files (`git add <paths>`, never `git add -A`), and don't edit
 a screen that another session has in progress.
 
