@@ -45,6 +45,7 @@ export const ADMIN_NAV: NavItem[] = [
       ['claude', 'Claude analysis'],
       ['failed-orders', 'Failed orders'],
       ['failure-reasons', 'Failure reasons'],
+      ['freight-claims', 'Freight claims'],
       ['pin-codes', 'Pin codes'],
       ['stuck-orders', 'Stuck orders'],
       ['tickets', 'Tickets'],

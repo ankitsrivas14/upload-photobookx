@@ -63,6 +63,7 @@ Reference screens: `DashboardPage.tsx` and `SalesPage.tsx`.
 | Analysis | Pincodes | `pages/analysis/PinCodesAnalysis` | 516 | Done |
 | Analysis | Reels | `pages/analysis/Reels` | 287 | Done |
 | Analysis | Failure reasons: failed Shiprocket orders by month, with a page per month | `pages/analysis/FailureReasons`, `pages/analysis/FailureReasonsMonth`, backend `routes/failureReasons` | — | Done |
+| Analysis | Freight claims: failed orders in the claims pipeline, with a page per order showing the Shiprocket thread | `pages/analysis/FreightClaims`, `pages/analysis/FreightClaim`, backend `routes/freightClaims` | — | Done |
 | Dashboard | Meta account area: weekly and monthly CPA | `pages/dashboard/MetaAccountSection`, backend `routes/meta` | — | Done |
 | Expenses | Section tabs | `pages/ExpensesPage` | 146 | Done |
 | Expenses | Overview | `pages/ExpensesOverview` (was not routed or imported) | 106 | Deleted |

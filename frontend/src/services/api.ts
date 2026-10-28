@@ -218,6 +218,52 @@ export interface FailureReasonGroup {
   wordings: Array<{ reason: string; count: number }>;
 }
 
+/** Where a freight claim stands; an order without a ticket yet is not_started. */
+export type ClaimStatus =
+  | 'not_started'
+  | 'asked_reason'
+  | 'needs_you'
+  | 'refund_requested'
+  | 'refund_promised'
+  | 'refund_received'
+  | 'customer_fault';
+
+/** A failed order in the claims pipeline: why it failed, the freight at stake and how far the claim has got. */
+export interface FreightClaim {
+  order: string;
+  placedAt: string | null;
+  month: string;
+  payment: 'COD' | 'Prepaid';
+  value: number;
+  courier: string | null;
+  awb: string | null;
+  shipmentStatus: string;
+  group: string;
+  reason: string | null;
+  attempts: number | null;
+  status: ClaimStatus;
+  /** Shiprocket ticket ids. */
+  tickets: string[];
+  lastMessageAt: string | null;
+  lastMessageFrom: 'us' | 'shiprocket' | null;
+  nextStep: string | null;
+  /** Forward and RTO freight, in rupees; null when no Shiprocket charge is on record. */
+  freight: { forward: number; rto: number; total: number } | null;
+  refund: { promisedAt: string | null; promisedAmount: number | null; receivedAt: string | null; receivedAmount: number | null } | null;
+  updatedAt: string | null;
+}
+
+/** One message in a claim's email thread with Shiprocket support. */
+export interface ClaimMessage {
+  id: string;
+  at: string | null;
+  from: 'us' | 'shiprocket';
+  author: string | null;
+  text: string;
+  /** Shiprocket's "rate my assistance" emails are surveys, not answers. */
+  kind: 'message' | 'survey';
+}
+
 /** One failed order with why it failed (the last failed delivery attempt before it came back). */
 export interface FailedOrderReason {
   order: string;
@@ -1330,6 +1376,25 @@ class ApiService {
     error?: string;
   }> {
     return this.request(`/api/admin/failure-reasons/${month}`);
+  }
+
+  async getFreightClaims(): Promise<{
+    success: boolean;
+    statuses?: ClaimStatus[];
+    counts?: Record<ClaimStatus, number>;
+    claims?: FreightClaim[];
+    error?: string;
+  }> {
+    return this.request('/api/admin/freight-claims');
+  }
+
+  async getFreightClaim(order: string): Promise<{
+    success: boolean;
+    claim?: FreightClaim & { richpanel: { id: string; number: number | null; url: string | null } | null; notes: string | null };
+    messages?: ClaimMessage[];
+    error?: string;
+  }> {
+    return this.request(`/api/admin/freight-claims/${encodeURIComponent(order)}`);
   }
 
   async getShipping(): Promise<{

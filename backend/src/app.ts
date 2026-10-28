@@ -22,6 +22,7 @@ import metaRoutes from './routes/meta';
 import stockRoutes from './routes/stock';
 import shippingRoutes from './routes/shipping';
 import failureReasonsRoutes from './routes/failureReasons';
+import freightClaimsRoutes from './routes/freightClaims';
 
 /**
  * The configured Express app — no `listen`, no DB connect at import time. Used by both the
@@ -94,6 +95,7 @@ app.use('/api/admin/meta', metaRoutes);
 app.use('/api/admin/stock', stockRoutes);
 app.use('/api/admin/shipping', shippingRoutes);
 app.use('/api/admin/failure-reasons', failureReasonsRoutes);
+app.use('/api/admin/freight-claims', freightClaimsRoutes);
 app.use('/api/upload', uploadRoutes);
 
 // 404 handler
