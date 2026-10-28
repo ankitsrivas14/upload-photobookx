@@ -48,6 +48,19 @@ export function FreightClaims() {
 
     useEffect(() => { load(); }, []);
 
+    // After a claim changes in the panel: new counts and stages, without blanking the list.
+    const refresh = async () => {
+        try {
+            const res = await api.getFreightClaims();
+            if (res.success) {
+                setClaims(res.claims ?? []);
+                setStatuses(res.statuses ?? []);
+            }
+        } catch {
+            // Keep the list as it is; the next load picks the change up.
+        }
+    };
+
     const rows = useMemo(() => (claims ?? []).filter((c) => tab === 'all' || c.status === tab), [claims, tab]);
 
     const open = (order: string) => navigate(`${BASE}/${encodeURIComponent(order)}`, { replace: Boolean(selected) });
@@ -130,7 +143,7 @@ export function FreightClaims() {
 
                 {selected ? (
                     <div className={styles.detailPane}>
-                        <ClaimDetail order={selected} onClose={close} />
+                        <ClaimDetail order={selected} onClose={close} onChanged={refresh} />
                     </div>
                 ) : null}
             </div>

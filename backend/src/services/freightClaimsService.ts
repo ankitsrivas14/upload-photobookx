@@ -6,11 +6,13 @@ import { getMany as getCharges } from '../db/shippingRepo';
  * forward and RTO freight back when the courier, not the customer, caused the failure. Every failed order outside
  * "Refused or cancelled at the door" is in the pipeline, newest first; it gets a claim doc once a ticket exists. The
  * local claims job (Claude Code, emailing support@shiprocket.com through Richpanel) writes the claims and copies each
- * thread's messages; this service only reads.
+ * thread's messages. The only write here is a refund you mark by hand after finding it in the wallet; `manual` records
+ * it, and the claims job leaves such a claim alone.
  *
  *   freightClaims/{order}                { order, status, richpanel: { id, number, url }, tickets, lastMessageAt,
  *                                          lastMessageFrom, nextStep, refund: { promisedAt, promisedAmount,
- *                                          receivedAt, receivedAmount }, notes, updatedAt }
+ *                                          receivedAt, receivedAmount }, manual: { status, by, at, note }, notes,
+ *                                          updatedAt }
  *   freightClaims/{order}/messages/{id}  { at, from: 'us' | 'shiprocket', author, text, kind: 'message' | 'survey' }
  */
 
@@ -91,6 +93,29 @@ export async function getFreightClaims() {
   };
 }
 
+/**
+ * Closes a claim as refunded with what you found in the Shiprocket wallet: the amount and the day (YYYY-MM-DD, India)
+ * it was credited. Returns the updated claim, or null when the order isn't in the pipeline.
+ */
+export async function markClaimRefunded(order: string, input: { amount: number; date: string; note?: string | null }, by: string) {
+  const db = getFirestore();
+  const f = await db.doc(`failureReasons/${order}`).get();
+  if (!f.exists || f.data()?.group === SKIPPED_GROUP) return null;
+  const now = new Date();
+  await db.doc(`${CLAIMS}/${order}`).set(
+    {
+      order,
+      status: 'refund_received',
+      nextStep: null,
+      refund: { receivedAmount: rupees(input.amount), receivedAt: new Date(`${input.date}T12:00:00+05:30`) },
+      manual: { status: 'refund_received', by, at: now, note: input.note?.trim() || null },
+      updatedAt: now,
+    },
+    { merge: true },
+  );
+  return getFreightClaim(order);
+}
+
 /** One order's claim and its conversation with Shiprocket, oldest message first; null when it isn't in the pipeline. */
 export async function getFreightClaim(order: string) {
   const db = getFirestore();
@@ -102,8 +127,9 @@ export async function getFreightClaim(order: string) {
   if (!f.exists || f.data()?.group === SKIPPED_GROUP) return null;
   const c = claim.data();
   const charge = (await getCharges([order])).get(order);
+  const manual = c?.manual ? { status: String(c.manual.status), by: c.manual.by ?? null, at: iso(c.manual.at), note: c.manual.note ?? null } : null;
   return {
-    claim: { ...row(f.data(), c, charge), richpanel: c?.richpanel ?? null, notes: c?.notes ?? null },
+    claim: { ...row(f.data(), c, charge), richpanel: c?.richpanel ?? null, notes: c?.notes ?? null, manual },
     messages: messages.docs.map((d) => {
       const m = d.data();
       return {

@@ -253,6 +253,13 @@ export interface FreightClaim {
   updatedAt: string | null;
 }
 
+/** A claim with its Richpanel thread, notes, and the stage you set by hand, if any. */
+export interface FreightClaimDetail extends FreightClaim {
+  richpanel: { id: string; number: number | null; url: string | null } | null;
+  notes: string | null;
+  manual: { status: string; by: string | null; at: string | null; note: string | null } | null;
+}
+
 /** One message in a claim's email thread with Shiprocket support. */
 export interface ClaimMessage {
   id: string;
@@ -1390,11 +1397,21 @@ class ApiService {
 
   async getFreightClaim(order: string): Promise<{
     success: boolean;
-    claim?: FreightClaim & { richpanel: { id: string; number: number | null; url: string | null } | null; notes: string | null };
+    claim?: FreightClaimDetail;
     messages?: ClaimMessage[];
     error?: string;
   }> {
     return this.request(`/api/admin/freight-claims/${encodeURIComponent(order)}`);
+  }
+
+  /** Closes a claim as refunded: the amount and the day (YYYY-MM-DD) the credit reached the Shiprocket wallet. */
+  async markClaimRefunded(order: string, body: { amount: number; date: string; note?: string }): Promise<{
+    success: boolean;
+    claim?: FreightClaimDetail;
+    messages?: ClaimMessage[];
+    error?: string;
+  }> {
+    return this.request(`/api/admin/freight-claims/${encodeURIComponent(order)}/refund`, { method: 'POST', body: JSON.stringify(body) });
   }
 
   async getShipping(): Promise<{

@@ -77,6 +77,13 @@
   }
 }
 
+/* Mark refunded: amount, day credited, note. */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
 /* The open order: its stage, the order, then the conversation. */
 .panel {
   display: flex;
