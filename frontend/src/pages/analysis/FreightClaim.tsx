@@ -87,6 +87,7 @@ export function FreightClaim() {
                             <Badge dot tone={CLAIM_TONE[c.status]}>{CLAIM_LABEL[c.status]}</Badge>
                             <p className={styles.stageHint}>{CLAIM_HINT[c.status]}</p>
                             {c.nextStep ? <p className={styles.nextStep}>{`Next: ${c.nextStep}`}</p> : null}
+                            {c.notes ? <p className={styles.stageHint}>{c.notes}</p> : null}
                         </div>
                     </Card>
                     <Card title="Order" padding="sm">
