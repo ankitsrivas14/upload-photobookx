@@ -950,20 +950,9 @@ export function SalesPage({ initialFilter, embedded = false }: SalesPageProps = 
   // Calculate Expected Profit for current month
   const expectedProfit = useMemo(() => {
     const calculateExpectedProfit = () => {
-    // Only calculate for current month or specific month selection
+    // Only calculate for current month, specific month or the rolling 30 days
     if (selectedMonthFilter === 'all') {
       return null;
-    }
-
-    let targetMonth: number;
-    let targetYear: number;
-    if (selectedMonthFilter === 'current') {
-      targetMonth = new Date().getMonth();
-      targetYear = new Date().getFullYear();
-    } else {
-      const [year, month] = selectedMonthFilter.split('-');
-      targetYear = parseInt(year);
-      targetMonth = parseInt(month) - 1;
     }
 
     const today = new Date();
@@ -971,19 +960,42 @@ export function SalesPage({ initialFilter, embedded = false }: SalesPageProps = 
     const currentMonth = today.getMonth();
     const currentYear = today.getFullYear();
 
-    // Check if selected month is current month
-    const isCurrentMonth = targetYear === currentYear && targetMonth === currentMonth;
+    // 'last30' is a rolling window, not a YYYY-MM month: it ends today, so all 30 of its days
+    // have passed and the projection only adds what its pending orders should bring
+    const isRollingWindow = selectedMonthFilter === 'last30';
+    let isCurrentMonth = false;
+    let totalDaysInMonth: number;
+    let daysElapsed: number;
 
-    // If it's not the current month and the month is in the past, return null (show actual P/L only)
-    if (!isCurrentMonth && (targetYear < currentYear || (targetYear === currentYear && targetMonth < currentMonth))) {
-      return null;
+    if (isRollingWindow) {
+      totalDaysInMonth = 30;
+      daysElapsed = 30;
+    } else {
+      let targetMonth: number;
+      let targetYear: number;
+      if (selectedMonthFilter === 'current') {
+        targetMonth = new Date().getMonth();
+        targetYear = new Date().getFullYear();
+      } else {
+        const [year, month] = selectedMonthFilter.split('-');
+        targetYear = parseInt(year);
+        targetMonth = parseInt(month) - 1;
+      }
+
+      // Check if selected month is current month
+      isCurrentMonth = targetYear === currentYear && targetMonth === currentMonth;
+
+      // If it's not the current month and the month is in the past, return null (show actual P/L only)
+      if (!isCurrentMonth && (targetYear < currentYear || (targetYear === currentYear && targetMonth < currentMonth))) {
+        return null;
+      }
+
+      // Calculate total days in the selected month
+      totalDaysInMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
+
+      // If current month, calculate based on days elapsed
+      daysElapsed = isCurrentMonth ? currentDay : totalDaysInMonth;
     }
-
-    // Calculate total days in the selected month
-    const totalDaysInMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
-
-    // If current month, calculate based on days elapsed
-    const daysElapsed = isCurrentMonth ? currentDay : totalDaysInMonth;
     const remainingDays = totalDaysInMonth - daysElapsed;
 
     // Calculate CURRENT P/L for the month (same logic as Total P/L stat)
@@ -1100,7 +1112,8 @@ export function SalesPage({ initialFilter, embedded = false }: SalesPageProps = 
     // Formula: (Total Booked / Days Elapsed) * Total Days in Month
 
     const avgPLPerDay = daysElapsed > 0 ? totalProfitBooked / daysElapsed : 0;
-    const expectedMonthEndPL = avgPLPerDay * totalDaysInMonth;
+    // A rolling window has no days left to run, so it projects exactly what is booked (rest ₹0)
+    const expectedMonthEndPL = isRollingWindow ? totalProfitBooked : avgPLPerDay * totalDaysInMonth;
 
     // Calculate the 'future' portion just for display/breakdown consistency if needed
     // Future = Expected Month End - Total Booked Already
