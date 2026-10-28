@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
 import { Alert, Badge, Button, Card, DataList, EmptyState, Skeleton } from '../../components/ui/pbx';
 import { cx, formatINR } from '../../components/ui/format';
 import { api, type ClaimMessage, type FreightClaim as Claim } from '../../services/api';
@@ -10,10 +9,11 @@ import styles from './FreightClaims.module.css';
 
 type Detail = Claim & { richpanel: { id: string; number: number | null; url: string | null } | null; notes: string | null };
 
-/** One order's freight claim: what failed, the freight at stake, where the claim stands, and the email thread. */
-export function FreightClaim() {
-    const { order = '' } = useParams();
-    const navigate = useNavigate();
+/**
+ * One order's freight claim, in the panel beside the claims list (full width on narrow screens): where the claim
+ * stands, what failed, the freight at stake, and the email thread with Shiprocket.
+ */
+export function ClaimDetail({ order, onClose }: { order: string; onClose: () => void }) {
     const [claim, setClaim] = useState<Detail | null>(null);
     const [messages, setMessages] = useState<ClaimMessage[]>([]);
     const [error, setError] = useState<string | null>(null);
@@ -39,21 +39,18 @@ export function FreightClaim() {
 
     useEffect(() => { load(); }, [order]);
 
-    const back = (
-        <div className={shared.toolbar}>
-            <Button variant="ghost" size="sm" icon="chevron-left" onClick={() => navigate('/admin/analysis/freight-claims')}>
-                All claims
-            </Button>
-        </div>
+    const close = <Button variant="ghost" size="sm" icon="x" iconOnly onClick={onClose}>Close</Button>;
+
+    if (isLoading) return (
+        <Card title={order} eyebrow="freight claim" padding="sm" actions={close}>
+            <Skeleton lines={8} />
+        </Card>
     );
 
-    if (isLoading) return <>{back}<Skeleton lines={8} /></>;
-
     if (error || !claim) return (
-        <>
-            {back}
+        <Card title={order} eyebrow="freight claim" padding="sm" actions={close}>
             <Alert tone="negative" action={<Button size="sm" onClick={load}>Retry</Button>}>{error ?? `${order} could not be loaded`}</Alert>
-        </>
+        </Card>
     );
 
     const c = claim;
@@ -77,58 +74,53 @@ export function FreightClaim() {
     ];
 
     return (
-        <>
-            {back}
-
-            <div className={styles.layout}>
-                <div className={styles.side}>
-                    <Card title={c.order} eyebrow="freight claim" padding="sm">
-                        <div className={styles.stage}>
-                            <Badge dot tone={CLAIM_TONE[c.status]}>{CLAIM_LABEL[c.status]}</Badge>
-                            <p className={styles.stageHint}>{CLAIM_HINT[c.status]}</p>
-                            {c.nextStep ? <p className={styles.nextStep}>{`Next: ${c.nextStep}`}</p> : null}
-                            {c.notes ? <p className={styles.stageHint}>{c.notes}</p> : null}
-                        </div>
-                    </Card>
-                    <Card title="Order" padding="sm">
-                        <p className={styles.failure}>
-                            <span className={styles.reasonGroup}>{c.group}</span>
-                            <span className={styles.reasonWords}>
-                                {`${c.reason ?? 'No courier wording'}${c.attempts == null ? '' : ` · ${c.attempts} delivery attempt${c.attempts === 1 ? '' : 's'}`}`}
-                            </span>
-                        </p>
-                        <DataList items={facts} />
-                    </Card>
+        <div className={styles.panel}>
+            <Card title={c.order} eyebrow="freight claim" padding="sm" actions={close}>
+                <div className={styles.stage}>
+                    <Badge dot tone={CLAIM_TONE[c.status]}>{CLAIM_LABEL[c.status]}</Badge>
+                    <p className={styles.stageHint}>{CLAIM_HINT[c.status]}</p>
+                    {c.nextStep ? <p className={styles.nextStep}>{`Next: ${c.nextStep}`}</p> : null}
+                    {c.notes ? <p className={styles.stageHint}>{c.notes}</p> : null}
                 </div>
+            </Card>
 
-                <Card
-                    title="Conversation"
-                    eyebrow="support@shiprocket.com"
-                    padding="sm"
-                    actions={
-                        c.richpanel?.url ? (
-                            <a className={shared.link} href={c.richpanel.url} target="_blank" rel="noreferrer">Open in Richpanel</a>
-                        ) : null
-                    }
-                >
-                    {messages.length ? (
-                        <ol className={styles.thread}>
-                            {messages.map((m) =>
-                                m.kind === 'survey' ? (
-                                    <li key={m.id} className={styles.survey}>{`Shiprocket sent a rating survey · ${istWhen(m.at)}`}</li>
-                                ) : (
-                                    <li key={m.id} className={cx(styles.message, m.from === 'us' ? styles.fromUs : styles.fromThem)}>
-                                        <span className={styles.messageHead}>{`${m.from === 'us' ? 'PhotoBookX' : 'Shiprocket'} · ${istWhen(m.at)}`}</span>
-                                        <p className={styles.messageText}>{m.text}</p>
-                                    </li>
-                                ),
-                            )}
-                        </ol>
-                    ) : (
-                        <EmptyState size="sm" icon="message-circle" title="No conversation yet" description="No ticket has been raised for this order yet." />
-                    )}
-                </Card>
-            </div>
-        </>
+            <Card title="Order" padding="sm">
+                <p className={styles.failure}>
+                    <span className={styles.reasonGroup}>{c.group}</span>
+                    <span className={styles.reasonWords}>
+                        {`${c.reason ?? 'No courier wording'}${c.attempts == null ? '' : ` · ${c.attempts} delivery attempt${c.attempts === 1 ? '' : 's'}`}`}
+                    </span>
+                </p>
+                <DataList items={facts} />
+            </Card>
+
+            <Card
+                title="Conversation"
+                eyebrow="support@shiprocket.com"
+                padding="sm"
+                actions={
+                    c.richpanel?.url ? (
+                        <a className={shared.link} href={c.richpanel.url} target="_blank" rel="noreferrer">Open in Richpanel</a>
+                    ) : null
+                }
+            >
+                {messages.length ? (
+                    <ol className={styles.thread}>
+                        {messages.map((m) =>
+                            m.kind === 'survey' ? (
+                                <li key={m.id} className={styles.survey}>{`Shiprocket sent a rating survey · ${istWhen(m.at)}`}</li>
+                            ) : (
+                                <li key={m.id} className={cx(styles.message, m.from === 'us' ? styles.fromUs : styles.fromThem)}>
+                                    <span className={styles.messageHead}>{`${m.from === 'us' ? 'PhotoBookX' : 'Shiprocket'} · ${istWhen(m.at)}`}</span>
+                                    <p className={styles.messageText}>{m.text}</p>
+                                </li>
+                            ),
+                        )}
+                    </ol>
+                ) : (
+                    <EmptyState size="sm" icon="message-circle" title="No conversation yet" description="No ticket has been raised for this order yet." />
+                )}
+            </Card>
+        </div>
     );
 }

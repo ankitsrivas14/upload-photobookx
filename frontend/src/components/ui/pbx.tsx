@@ -1592,6 +1592,8 @@ export interface DataTableProps<T> {
   loading?: boolean;
   density?: 'compact' | 'comfortable';
   onRowClick?: (row: T) => void;
+  /** The row open beside the table (a list–detail view): highlighted and marked aria-current. */
+  activeRowId?: string;
   maxHeight?: number | string;
   caption?: string;
   footer?: React.ReactNode;
@@ -1600,7 +1602,7 @@ export interface DataTableProps<T> {
 
 /** Rows of records with a sticky header, selection, bulk actions and empty/loading states. */
 export function DataTable<T>(props: DataTableProps<T>) {
-  const { columns, rows, getRowId, selectable, selected, onSelectionChange, bulkActions, empty, loading, density = 'compact', onRowClick, maxHeight, caption, footer, className } = props;
+  const { columns, rows, getRowId, selectable, selected, onSelectionChange, bulkActions, empty, loading, density = 'compact', onRowClick, activeRowId, maxHeight, caption, footer, className } = props;
   const sel = selected || new Set<string>();
   const ids = rows.map(getRowId);
   const all = ids.length > 0 && ids.every((id) => sel.has(id));
@@ -1644,7 +1646,12 @@ export function DataTable<T>(props: DataTableProps<T>) {
                 const id = getRowId(row);
                 const on = sel.has(id);
                 return (
-                  <tr key={id} className={cx(on && 'is-selected', onRowClick && 'is-clickable')} onClick={onRowClick ? () => onRowClick(row) : undefined}>
+                  <tr
+                    key={id}
+                    className={cx(on && 'is-selected', id === activeRowId && 'is-active', onRowClick && 'is-clickable')}
+                    aria-current={id === activeRowId ? 'true' : undefined}
+                    onClick={onRowClick ? () => onRowClick(row) : undefined}
+                  >
                     {selectable ? (
                       <td className="pbx-table__check" onClick={(e) => e.stopPropagation()}>
                         <Checkbox aria-label={'Select ' + id} checked={on} onChange={() => toggle(id)} />

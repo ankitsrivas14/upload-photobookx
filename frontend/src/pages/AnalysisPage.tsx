@@ -9,7 +9,6 @@ const FailedOrdersAnalysis = lazy(() => import('./analysis/FailedOrdersAnalysis'
 const FailureReasons = lazy(() => import('./analysis/FailureReasons').then((m) => ({ default: m.FailureReasons })));
 const FailureReasonsMonth = lazy(() => import('./analysis/FailureReasonsMonth').then((m) => ({ default: m.FailureReasonsMonth })));
 const FreightClaims = lazy(() => import('./analysis/FreightClaims').then((m) => ({ default: m.FreightClaims })));
-const FreightClaim = lazy(() => import('./analysis/FreightClaim').then((m) => ({ default: m.FreightClaim })));
 const PinCodesAnalysis = lazy(() => import('./analysis/PinCodesAnalysis').then((m) => ({ default: m.PinCodesAnalysis })));
 const StuckOrdersAnalysis = lazy(() => import('./analysis/StuckOrdersAnalysis').then((m) => ({ default: m.StuckOrdersAnalysis })));
 const TicketsAnalysis = lazy(() => import('./analysis/TicketsAnalysis').then((m) => ({ default: m.TicketsAnalysis })));
@@ -44,8 +43,8 @@ export function AnalysisPage() {
                     <Route path="failed-orders" element={<FailedOrdersAnalysis />} />
                     <Route path="failure-reasons" element={<FailureReasons />} />
                     <Route path="failure-reasons/:month" element={<FailureReasonsMonth />} />
-                    <Route path="freight-claims" element={<FreightClaims />} />
-                    <Route path="freight-claims/:order" element={<FreightClaim />} />
+                    {/* One route for the list and an open order, so the list stays put while you move between claims. */}
+                    <Route path="freight-claims/:order?" element={<FreightClaims />} />
                     <Route path="pin-codes" element={<PinCodesAnalysis />} />
                     <Route path="stuck-orders" element={<StuckOrdersAnalysis />} />
                     <Route path="tickets" element={<TicketsAnalysis />} />

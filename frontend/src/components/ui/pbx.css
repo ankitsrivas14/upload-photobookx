@@ -344,6 +344,7 @@ button.pbx-cal__title:hover { background: var(--surface-hover); }
 .pbx-table th:last-child, .pbx-table td:last-child { padding-right: 0; }
 .pbx-table tbody tr:hover td { background: var(--table-row-hover); }
 .pbx-table tbody tr.is-selected td { background: var(--table-row-selected); }
+.pbx-table tbody tr.is-active td { background: var(--table-row-selected); font-weight: 600; }
 .pbx-table tbody tr.is-clickable { cursor: pointer; }
 .pbx-table td.pbx-num { font-size: 13px; }
 .pbx-table__check { width: 15px; padding-right: var(--space-2) !important; }

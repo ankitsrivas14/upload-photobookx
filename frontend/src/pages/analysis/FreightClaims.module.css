@@ -43,21 +43,42 @@
   gap: 2px;
 }
 
-/* Order page: the facts beside the conversation; each card keeps its own height. */
-.layout {
+/* The claims list and, once an order is open, that order beside it: half the width each on wide screens, the order
+   alone on narrow ones. The open order stays in view while the list scrolls, and scrolls on its own. */
+.workspace {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   align-items: start;
   gap: var(--grid-gap);
 }
 
-@media (min-width: 960px) {
-  .layout {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr);
+.listPane,
+.detailPane {
+  min-width: 0;
+}
+
+@media (min-width: 1100px) {
+  .withDetail {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .detailPane {
+    position: sticky;
+    top: calc(var(--topbar) + var(--space-4));
+    max-height: calc(100vh - var(--topbar) - var(--space-8));
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
 }
 
-.side {
+@media (max-width: 1099px) {
+  .hideNarrow {
+    display: none;
+  }
+}
+
+/* The open order: its stage, the order, then the conversation. */
+.panel {
   display: flex;
   min-width: 0;
   flex-direction: column;
