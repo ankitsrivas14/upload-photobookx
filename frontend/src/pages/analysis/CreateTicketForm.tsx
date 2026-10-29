@@ -12,6 +12,14 @@ interface OrderSuggestion {
     shopifyOrderId?: string | number;
 }
 
+/** The address block pasted from Shopify admin as the message quotes it: without the phone number or blank lines. */
+const addressForMessage = (block: string) =>
+    block
+        .split('\n')
+        .map((line) => line.replace(/(?:\+?91[\s-]?)?[6789]\d{9}/g, '').replace(/\s+/g, ' ').trim())
+        .filter((line) => /[\p{L}\p{N}]/u.test(line))
+        .join('\n');
+
 export function CreateTicketForm() {
     const navigate = useNavigate();
     const dropdownRef = useRef<HTMLDivElement>(null);
@@ -27,6 +35,8 @@ export function CreateTicketForm() {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [showSuggestions, setShowSuggestions] = useState(false);
     const [customerPhone, setCustomerPhone] = useState('');
+    // The address block pasted from Shopify admin; the incomplete-address message quotes it.
+    const [address, setAddress] = useState('');
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
@@ -47,6 +57,7 @@ export function CreateTicketForm() {
 
         setIsSearching(true);
         setSelectedOrder(null);
+        setAddress('');
         setSuggestions([]);
         setShowSuggestions(false);
 
@@ -94,6 +105,7 @@ export function CreateTicketForm() {
         setSelectedOrder(order);
         setOrderNumber(order.name);
         setCustomerPhone(order.customerPhone || '');
+        setAddress('');
         setShowSuggestions(false);
 
         // Fetch full details to get Shopify ID and phone number if not available
@@ -119,6 +131,8 @@ export function CreateTicketForm() {
     const handlePhoneChange = (val: string) => {
         // Extract 10-digit phone number from long pasted strings
         if (val.length > 15) {
+            // A long string is the address block: it stays in the field for the message.
+            setAddress(val);
             const match = val.match(/(?:\+91|91)?[6789]\d{9}/);
             // If match found, take the last 10 digits
             if (match) {
@@ -127,7 +141,10 @@ export function CreateTicketForm() {
                 setCustomerPhone(phone);
                 return;
             }
+            setCustomerPhone('');
+            return;
         }
+        setAddress('');
         setCustomerPhone(val);
     };
 
@@ -171,7 +188,7 @@ export function CreateTicketForm() {
             if (issueType === 'multiple_orders') {
                 res = await api.generateMultipleOrdersMessage(selectedOrder.customerName, selectedOrder.name);
             } else if (issueType === 'incomplete_address') {
-                res = await api.generateIncompleteAddressMessage(selectedOrder.customerName, selectedOrder.name);
+                res = await api.generateIncompleteAddressMessage(selectedOrder.customerName, selectedOrder.name, addressForMessage(address));
             }
 
             if (res && res.success && res.message) {
@@ -296,10 +313,16 @@ export function CreateTicketForm() {
                             <span className={styles.muted}>Fetching the Shopify link…</span>
                         )}
                         <TextField
+                            multiline
+                            rows={3}
                             label="Phone, or the address from Shopify"
                             placeholder="Paste the address block from Shopify admin"
-                            hint="The phone number is picked out of a pasted address."
-                            value={customerPhone === 'xxxxxxxxxx' ? '' : customerPhone}
+                            hint={
+                                address && !phoneMissing
+                                    ? `Phone picked out: ${customerPhone}. The address goes into the message.`
+                                    : 'The phone number is picked out of a pasted address, and the address goes into the message.'
+                            }
+                            value={address || (customerPhone === 'xxxxxxxxxx' ? '' : customerPhone)}
                             onChange={(e) => handlePhoneChange(e.target.value)}
                             error={phoneMissing ? 'No phone number yet' : undefined}
                         />

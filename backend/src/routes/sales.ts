@@ -509,13 +509,16 @@ router.delete('/mark-rto', requireAdmin, async (req: AuthenticatedRequest, res: 
 
   router.post('/generate-incomplete-address-message', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { customerName, orderNumber } = req.body;
-      // Templated (no AI): the message only needs the first name and order number,
-      // so a fixed template is instant, free, and never hallucinates.
+      const { customerName, orderNumber, address } = req.body;
+      // Templated (no AI): the message only needs the first name, the order number and the address
+      // pasted from Shopify admin, so a fixed template is instant, free, and never hallucinates.
       const firstName = String(customerName || '').trim().split(/\s+/)[0] || 'there';
+      const onRecord = String(address || '').trim();
       const message =
         `Hi ${firstName},\n\n` +
-        `Thank you for your order ${orderNumber}. Could you please share your complete delivery address — ` +
+        `Thank you for your order ${orderNumber}. ` +
+        (onRecord ? `The delivery address we have on record is:\n\n${onRecord}\n\nSome details seem to be missing. ` : '') +
+        `Could you please share your complete delivery address — ` +
         `including House No., Area, Landmark, and Pincode — so we can make sure your photobook reaches you safely and quickly?\n\n` +
         `Thank you,\n- PhotobookX team`;
       res.json({ success: true, message });

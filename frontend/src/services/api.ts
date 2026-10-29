@@ -1527,10 +1527,10 @@ class ApiService {
     });
   }
 
-  async generateIncompleteAddressMessage(customerName: string, orderNumber: string): Promise<{ success: boolean; message?: string; error?: string }> {
+  async generateIncompleteAddressMessage(customerName: string, orderNumber: string, address?: string): Promise<{ success: boolean; message?: string; error?: string }> {
     return this.request('/api/admin/sales/generate-incomplete-address-message', {
       method: 'POST',
-      body: JSON.stringify({ customerName, orderNumber }),
+      body: JSON.stringify({ customerName, orderNumber, address }),
     });
   }
 
