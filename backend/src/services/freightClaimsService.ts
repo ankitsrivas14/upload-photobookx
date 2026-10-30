@@ -4,10 +4,11 @@ import { getMany as getCharges } from '../db/shippingRepo';
 /**
  * Freight claims (Analysis › Freight claims): failed Shiprocket orders we take up with Shiprocket support, to get the
  * forward and RTO freight back when the courier, not the customer, caused the failure. Every failed order outside
- * "Refused or cancelled at the door" is in the pipeline, newest first; it gets a claim doc once a ticket exists. The
- * local claims job (Claude Code, emailing support@shiprocket.com through Richpanel) writes the claims and copies each
- * thread's messages. The only write here is a refund you mark by hand after finding it in the wallet; `manual` records
- * it, and the claims job leaves such a claim alone.
+ * "Refused or cancelled at the door" placed on or after 1 Sept 2026 is in the pipeline, newest first (Shiprocket won't
+ * act on older ones); it gets a claim doc once a ticket exists. The local claims job (Claude Code, emailing
+ * support@shiprocket.com through Richpanel) writes the claims and copies each thread's messages. The only write here
+ * is a refund you mark by hand after finding it in the wallet; `manual` records it, and the claims job leaves such a
+ * claim alone.
  *
  *   freightClaims/{order}                { order, status, richpanel: { id, number, url }, tickets, lastMessageAt,
  *                                          lastMessageFrom, nextStep, refund: { promisedAt, promisedAmount,
@@ -18,6 +19,8 @@ import { getMany as getCharges } from '../db/shippingRepo';
 
 const CLAIMS = 'freightClaims';
 const SKIPPED_GROUP = 'Refused or cancelled at the door';
+/** Orders placed before this (1 Sept 2026, India) are out of the pipeline. */
+const CUTOFF = Date.parse('2026-09-01T00:00:00+05:30');
 
 /** A claim's stage; orders without a claim doc are not_started. */
 export const CLAIM_STATUSES = [
@@ -80,7 +83,7 @@ function row(f: any, claim: any, charge: any) {
 export async function getFreightClaims() {
   const db = getFirestore();
   const [failed, claims] = await Promise.all([db.collection('failureReasons').get(), db.collection(CLAIMS).get()]);
-  const eligible = failed.docs.map((d) => d.data()).filter((f) => f.group !== SKIPPED_GROUP);
+  const eligible = failed.docs.map((d) => d.data()).filter((f) => f.group !== SKIPPED_GROUP && placed(f) >= CUTOFF);
   const byOrder = new Map(claims.docs.map((d) => [d.id, d.data()]));
   const charges = await getCharges(eligible.map((f) => String(f.order)));
   const rows = eligible

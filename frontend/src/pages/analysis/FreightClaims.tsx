@@ -15,9 +15,9 @@ const lastMessage = (c: FreightClaim) =>
     c.lastMessageAt ? `${c.lastMessageFrom === 'us' ? 'Us' : 'Shiprocket'} · ${dayIst(c.lastMessageAt)}` : '–';
 
 /**
- * Freight claims: every failed order outside "Refused or cancelled at the door", newest first, with how far its claim
- * with Shiprocket has got. Clicking an order opens it beside the list (the list narrows to half the width), so you can
- * move from claim to claim; on narrow screens the order takes the whole width.
+ * Freight claims: every failed order since 1 Sept 2026 outside "Refused or cancelled at the door", newest first, with
+ * how far its claim with Shiprocket has got. Clicking an order opens it beside the list (the list narrows to half the
+ * width), so you can move from claim to claim; on narrow screens the order takes the whole width.
  */
 export function FreightClaims() {
     const navigate = useNavigate();
@@ -125,7 +125,7 @@ export function FreightClaims() {
                 <div className={cx(styles.listPane, selected && styles.hideNarrow)}>
                     <Card
                         title="Claims"
-                        description={selected ? undefined : 'Every failed order except those refused or cancelled at the door, newest first. Open an order for its conversation with Shiprocket.'}
+                        description={selected ? undefined : 'Every failed order since 1 Sept 2026 except those refused or cancelled at the door, newest first. Open an order for its conversation with Shiprocket.'}
                         padding="none"
                     >
                         <Tabs items={tabs} value={tab} onChange={setTab} label="Claim stages" className={styles.tabs} />
