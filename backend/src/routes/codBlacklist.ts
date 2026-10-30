@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { requireAdmin } from './adminAuth';
-import { addToBlacklist, getBlacklist, orderName, removeFromBlacklist } from '../services/codBlacklistService';
+import { addToBlacklist, entryId, getBlacklist, removeFromBlacklist } from '../services/codBlacklistService';
 import type { AuthenticatedRequest } from '../types';
 
 const router = Router();
@@ -18,12 +18,19 @@ router.get('/', requireAdmin, async (_req: AuthenticatedRequest, res: Response) 
 });
 
 /**
- * POST /api/admin/cod-blacklist { order, note? }: adds the order's delivery address (read from Shiprocket) by hand.
- * The booking job then holds COD orders to that address; only Remove takes it off.
+ * POST /api/admin/cod-blacklist { order?, address?, pincode?, note? }: adds an address by hand, either the order's
+ * delivery address (read from Shiprocket) or a typed one with its pincode. The booking job then holds COD orders to
+ * that address; only Remove takes it off.
  */
 router.post('/', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const result = await addToBlacklist(req.body?.order, noteOf(req.body), req.user?.email ?? 'admin');
+    const input = {
+      order: req.body?.order,
+      address: typeof req.body?.address === 'string' ? req.body.address.slice(0, 500) : undefined,
+      pincode: req.body?.pincode,
+      note: noteOf(req.body),
+    };
+    const result = await addToBlacklist(input, req.user?.email ?? 'admin');
     if (result.error) {
       res.status(result.status ?? 400).json({ success: false, error: result.error });
       return;
@@ -35,9 +42,9 @@ router.post('/', requireAdmin, async (req: AuthenticatedRequest, res: Response) 
   }
 });
 
-/** POST /api/admin/cod-blacklist/:order/remove { note? }: takes an address off the blacklist. */
+/** POST /api/admin/cod-blacklist/:id/remove { note? }: takes an address off the blacklist (an order or an ADDR- id). */
 router.post('/:order/remove', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
-  const order = orderName(req.params.order);
+  const order = entryId(req.params.order);
   if (!order) {
     res.status(404).json({ success: false, error: 'No such order' });
     return;

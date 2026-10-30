@@ -40,6 +40,8 @@ export function CodBlacklist() {
     const [view, setView] = useState<View>('active');
     const [query, setQuery] = useState('');
     const [order, setOrder] = useState('');
+    const [address, setAddress] = useState('');
+    const [pincode, setPincode] = useState('');
     const [note, setNote] = useState('');
     const [adding, setAdding] = useState(false);
     const [removing, setRemoving] = useState<CodBlacklistEntry | null>(null);
@@ -62,14 +64,27 @@ export function CodBlacklist() {
         load();
     }, [load]);
 
+    // An order alone takes its address from Shiprocket; a typed address needs its pincode, and the order is optional.
+    const typed = address.trim() !== '';
+    const pincodeOk = /^\d{6}$/.test(pincode.trim());
+    const canAdd = (order.trim() !== '' || typed) && (!typed || pincodeOk);
+
     const add = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!order.trim()) return;
+        if (!canAdd) return;
         setAdding(true);
         try {
-            const res = await api.addToCodBlacklist(order.trim(), note.trim() || undefined);
-            toast.success(`${res.entry?.order ?? order.trim().toUpperCase()} is on the blacklist`);
+            const res = await api.addToCodBlacklist({
+                order: order.trim() || undefined,
+                address: typed ? address.trim() : undefined,
+                pincode: typed ? pincode.trim() : undefined,
+                note: note.trim() || undefined,
+            });
+            const id = res.entry?.order ?? order.trim().toUpperCase();
+            toast.success(id.startsWith('ADDR-') ? 'The address is on the blacklist' : `${id} is on the blacklist`);
             setOrder('');
+            setAddress('');
+            setPincode('');
             setNote('');
             setView('active');
             await load();
@@ -108,8 +123,8 @@ export function CodBlacklist() {
             width: 112,
             render: (e) => (
                 <span className={styles.stack}>
-                    <span className="pbx-mono">{e.order}</span>
-                    <span className={styles.muted}>{e.payment ?? '—'}</span>
+                    {e.order.startsWith('ADDR-') ? <span className={styles.muted}>No order</span> : <span className="pbx-mono">{e.order}</span>}
+                    <span className={styles.muted}>{e.manual?.typed ? 'Typed address' : e.payment ?? '—'}</span>
                 </span>
             ),
         },
@@ -179,27 +194,55 @@ export function CodBlacklist() {
             )}
 
             <Card
-                title="Add an order"
-                description="Its delivery address is read from Shiprocket and goes on the list. The booking job then sets aside COD orders to that address until you remove it here; deliveries don't take off an order added by hand."
+                title="Add an address"
+                description="Enter an order number to blacklist its delivery address from Shiprocket, or type the address with its pincode (the order number is then optional). The booking job sets aside COD orders to that address until you remove it here; deliveries don't take off an address added by hand."
             >
                 <form className={styles.addForm} onSubmit={add}>
                     <TextField
+                        className={styles.orderField}
                         label="Order"
                         placeholder="PB1234S"
+                        hint={typed ? 'Optional with a typed address' : 'Its address comes from Shiprocket'}
                         value={order}
                         onChange={(e) => setOrder(e.target.value)}
                         disabled={adding}
                     />
                     <TextField
+                        className={styles.noteField}
                         label="Note"
                         placeholder="Optional: why it is on the list"
                         value={note}
                         onChange={(e) => setNote(e.target.value)}
                         disabled={adding}
                     />
-                    <Button type="submit" variant="primary" icon="plus" loading={adding} disabled={!order.trim()}>
-                        Add to blacklist
-                    </Button>
+                    <TextField
+                        className={styles.addressField}
+                        multiline
+                        rows={2}
+                        label="Address"
+                        placeholder="Optional: house, street, area, landmark"
+                        hint="Typed, it is used instead of the order's address in Shiprocket."
+                        value={address}
+                        onChange={(e) => setAddress(e.target.value)}
+                        disabled={adding}
+                    />
+                    <TextField
+                        className={styles.pincodeField}
+                        label="Pincode"
+                        placeholder="110001"
+                        inputMode="numeric"
+                        maxLength={6}
+                        hint={typed ? undefined : 'With a typed address'}
+                        error={typed && pincode.trim() && !pincodeOk ? 'Six digits' : undefined}
+                        value={pincode}
+                        onChange={(e) => setPincode(e.target.value.replace(/\D/g, ''))}
+                        disabled={adding}
+                    />
+                    <div className={styles.addActions}>
+                        <Button type="submit" variant="primary" icon="plus" loading={adding} disabled={!canAdd}>
+                            Add to blacklist
+                        </Button>
+                    </div>
                 </form>
             </Card>
 

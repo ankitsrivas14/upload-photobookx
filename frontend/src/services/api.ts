@@ -209,7 +209,8 @@ export interface CodBlacklistEntry {
   pincode: string | null;
   clearedAt: string | null;
   clearedBy: string | null;
-  manual: { by: string | null; at: string | null; note: string | null } | null;
+  /** Added by hand: who, when, why, and whether the address was typed rather than read from Shiprocket. */
+  manual: { by: string | null; at: string | null; note: string | null; typed: boolean } | null;
 }
 
 /** One month of Shiprocket orders (YYYY-MM) and how many failed: returned to us, lost, destroyed or disposed of. */
@@ -1515,9 +1516,12 @@ class ApiService {
     return this.request('/api/admin/cod-blacklist');
   }
 
-  /** Adds an order's delivery address (the server reads it from Shiprocket) to the COD blacklist by hand. */
-  async addToCodBlacklist(order: string, note?: string): Promise<{ success: boolean; entry?: CodBlacklistEntry; error?: string }> {
-    return this.request('/api/admin/cod-blacklist', { method: 'POST', body: JSON.stringify({ order, note }) });
+  /**
+   * Adds an address to the COD blacklist by hand: an order's delivery address (the server reads it from Shiprocket),
+   * or a typed address with its pincode, the order number then optional.
+   */
+  async addToCodBlacklist(input: { order?: string; address?: string; pincode?: string; note?: string }): Promise<{ success: boolean; entry?: CodBlacklistEntry; error?: string }> {
+    return this.request('/api/admin/cod-blacklist', { method: 'POST', body: JSON.stringify(input) });
   }
 
   async removeFromCodBlacklist(order: string, note?: string): Promise<{ success: boolean; entry?: CodBlacklistEntry; error?: string }> {

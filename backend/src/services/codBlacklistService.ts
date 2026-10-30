@@ -7,12 +7,13 @@ import shiprocketService from './shiprocketService';
  * Shopify, and some come back under another name, email and phone with nearly the same address. The local booking job
  * (Claude Code, photobookx-shipping lib/blacklist.mjs) keeps the delivery addresses of orders that were returned, lost
  * or had a failed delivery attempt, and holds a NEW COD order whose address matches an active entry instead of booking
- * it. That job clears an entry when its order, or any later order to the same address, is delivered. Orders added here
- * by hand are `manual`: no delivery clears them, only Remove here.
+ * it. That job clears an entry when its order, or any later order to the same address, is delivered. Entries added
+ * here by hand are `manual`: an order's address from Shiprocket, or an address typed here (id "ADDR-…" when no order
+ * goes with it). No delivery clears them, only Remove here.
  *
- *   codBlacklist/{order}  { order, orderId, payment, status: 'failed' | 'attempted' | 'manual', srStatus, placedAt,
- *                           knownAt, address, city, state, pincode, addedAt, clearedAt, clearedBy,
- *                           manual: { by, at, note } }
+ *   codBlacklist/{id}     { order (the id), orderId, payment, status: 'failed' | 'attempted' | 'manual', srStatus,
+ *                           placedAt, knownAt, address, city, state, pincode, addedAt, clearedAt, clearedBy,
+ *                           manual: { by, at, note, typed } }
  *   meta/codBlacklist     { refreshedAt, active, total }   the booking job's last sweep of Shiprocket's orders
  */
 
@@ -35,7 +36,8 @@ export interface BlacklistEntry {
   pincode: string | null;
   clearedAt: string | null;
   clearedBy: string | null;
-  manual: { by: string | null; at: string | null; note: string | null } | null;
+  /** Added by hand: who, when, why, and whether the address was typed rather than read from Shiprocket. */
+  manual: { by: string | null; at: string | null; note: string | null; typed: boolean } | null;
 }
 
 function entryOf(e: any): BlacklistEntry {
@@ -52,7 +54,7 @@ function entryOf(e: any): BlacklistEntry {
     pincode: e.pincode ?? null,
     clearedAt: iso(e.clearedAt),
     clearedBy: e.clearedBy ?? null,
-    manual: e.manual ? { by: e.manual.by ?? null, at: iso(e.manual.at), note: e.manual.note ?? null } : null,
+    manual: e.manual ? { by: e.manual.by ?? null, at: iso(e.manual.at), note: e.manual.note ?? null, typed: Boolean(e.manual.typed) } : null,
   };
 }
 
@@ -100,42 +102,83 @@ async function shiprocketOrder(order: string): Promise<any | null> {
   return data.find((o: any) => String(o.channel_order_id ?? '').replace(/^#/, '').toUpperCase() === order) ?? null;
 }
 
+/** An entry's id: an order number, or "ADDR-…" for an address typed in the admin; null when it is neither. */
+export function entryId(input: unknown): string | null {
+  const typed = String(input ?? '').trim().toUpperCase();
+  return orderName(typed) ?? (/^ADDR-[A-Z0-9]{4,16}$/.test(typed) ? typed : null);
+}
+
+/** India Post's district and state for a pincode: null when the pincode doesn't exist, undefined when the lookup failed. */
+async function pincodePlace(pincode: string): Promise<{ city: string; state: string } | null | undefined> {
+  try {
+    const res = await fetch(`https://api.postalpincode.in/pincode/${pincode}`, { signal: AbortSignal.timeout(5000) });
+    const body: any = await res.json();
+    const office = body?.[0]?.PostOffice?.[0];
+    if (body?.[0]?.Status !== 'Success' || !office) return null;
+    return { city: String(office.District ?? ''), state: String(office.State ?? '') };
+  } catch {
+    return undefined;
+  }
+}
+
+export interface BlacklistInput {
+  order?: unknown;
+  /** Typed address lines, one per line; used instead of Shiprocket's address when given. */
+  address?: unknown;
+  pincode?: unknown;
+  note?: string | null;
+}
+
 /**
- * Adds an order's delivery address to the blacklist by hand. `error` (with an HTTP status) when the order number is
- * wrong, already listed, not in Shiprocket, or has no address there.
+ * Adds an address to the blacklist by hand: an order's delivery address (read from Shiprocket), or an address typed
+ * here with its pincode, the order number then optional. `error` (with an HTTP status) when the input is incomplete
+ * or wrong, the order is already listed, or Shiprocket has no address for it.
  */
-export async function addToBlacklist(
-  input: unknown,
-  note: string | null,
-  by: string,
-): Promise<{ entry?: BlacklistEntry; status?: number; error?: string }> {
-  const order = orderName(input);
-  if (!order) return { status: 400, error: 'Enter an order number like PB1234S' };
-  const ref = getFirestore().doc(`${COLLECTION}/${order}`);
+export async function addToBlacklist(input: BlacklistInput, by: string): Promise<{ entry?: BlacklistEntry; status?: number; error?: string }> {
+  const typedAddress = String(input.address ?? '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const rawOrder = String(input.order ?? '').trim();
+  const order = rawOrder ? orderName(rawOrder) : null;
+  if (rawOrder && !order) return { status: 400, error: 'Enter an order number like PB1234S' };
+  if (!order && !typedAddress.length) return { status: 400, error: 'Enter an order number, an address, or both' };
+  const id = order ?? `ADDR-${Date.now().toString(36).toUpperCase()}`;
+  const ref = getFirestore().doc(`${COLLECTION}/${id}`);
   const existing = (await ref.get()).data();
-  if (existing && !existing.clearedAt) return { status: 409, error: `${order} is already on the blacklist` };
-  const o = await shiprocketOrder(order);
-  if (!o) return { status: 404, error: `${order} was not found in Shiprocket` };
-  const address = [o.customer_address, o.customer_address_2].map((s) => String(s ?? '').trim()).filter(Boolean);
-  const pincode = String(o.customer_pincode ?? '').trim();
-  if (!address.length || !pincode) return { status: 422, error: `Shiprocket has no delivery address for ${order}` };
+  if (existing && !existing.clearedAt) return { status: 409, error: `${id} is already on the blacklist` };
+
+  let fields: Record<string, unknown>;
+  if (typedAddress.length) {
+    const pincode = String(input.pincode ?? '').trim();
+    if (!/^\d{6}$/.test(pincode)) return { status: 400, error: 'Enter the 6-digit pincode of the address' };
+    const place = await pincodePlace(pincode);
+    if (place === null) return { status: 400, error: `Pincode ${pincode} doesn't exist` };
+    fields = { orderId: null, payment: null, srStatus: null, placedAt: null, address: typedAddress, city: place?.city ?? '', state: place?.state ?? '', pincode };
+  } else {
+    const o = await shiprocketOrder(id);
+    if (!o) return { status: 404, error: `${id} was not found in Shiprocket` };
+    const address = [o.customer_address, o.customer_address_2].map((s) => String(s ?? '').trim()).filter(Boolean);
+    const pincode = String(o.customer_pincode ?? '').trim();
+    if (!address.length || !pincode) return { status: 422, error: `Shiprocket has no delivery address for ${id}` };
+    fields = {
+      orderId: o.id ?? null,
+      payment: String(o.payment_method).toLowerCase() === 'cod' ? 'COD' : 'Prepaid',
+      srStatus: String(o.status ?? '').trim() || null,
+      placedAt: srDate(o.channel_created_at) ?? srDate(o.created_at),
+      address,
+      city: String(o.customer_city ?? '').trim(),
+      state: String(o.customer_state ?? '').trim(),
+      pincode,
+    };
+  }
   const now = new Date();
   await ref.set({
-    order,
-    orderId: o.id ?? null,
-    payment: String(o.payment_method).toLowerCase() === 'cod' ? 'COD' : 'Prepaid',
+    order: id,
     status: 'manual',
-    srStatus: String(o.status ?? '').trim() || null,
-    placedAt: srDate(o.channel_created_at) ?? srDate(o.created_at),
+    ...fields,
     knownAt: now,
-    address,
-    city: String(o.customer_city ?? '').trim(),
-    state: String(o.customer_state ?? '').trim(),
-    pincode,
     addedAt: existing?.addedAt ?? now,
     clearedAt: null,
     clearedBy: null,
-    manual: { by, at: now, note: note?.trim() || null },
+    manual: { by, at: now, note: input.note?.trim() || null, typed: typedAddress.length > 0 },
   });
   return { entry: entryOf((await ref.get()).data()) };
 }

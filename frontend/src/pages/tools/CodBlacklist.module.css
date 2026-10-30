@@ -8,17 +8,33 @@
   min-width: 0;
 }
 
-/* Order, note, then the button on the fields' baseline; stacked on narrow screens. */
+/* Order and note, then the typed address beside its pincode, then the button; stacked on narrow screens. */
 .addForm {
   display: grid;
-  grid-template-columns: minmax(140px, 200px) minmax(0, 1fr) auto;
-  align-items: end;
+  grid-template-columns: minmax(140px, 200px) minmax(0, 1fr) minmax(120px, 160px);
+  grid-template-areas:
+    'order note note'
+    'address address pincode'
+    'actions actions actions';
+  align-items: start;
   gap: var(--space-3);
+}
+
+.orderField { grid-area: order; }
+.noteField { grid-area: note; }
+.addressField { grid-area: address; }
+.pincodeField { grid-area: pincode; }
+
+.addActions {
+  grid-area: actions;
+  display: flex;
+  justify-content: flex-end;
 }
 
 @media (max-width: 720px) {
   .addForm {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: 'order' 'address' 'pincode' 'note' 'actions';
   }
 }
 
