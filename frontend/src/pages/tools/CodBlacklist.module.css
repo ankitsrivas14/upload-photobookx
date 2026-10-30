@@ -1,0 +1,51 @@
+/* COD blacklist: the add form, the list's toolbar, and two-line cells (Ledger tokens). */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-width: 1200px;
+  min-width: 0;
+}
+
+/* Order, note, then the button on the fields' baseline; stacked on narrow screens. */
+.addForm {
+  display: grid;
+  grid-template-columns: minmax(140px, 200px) minmax(0, 1fr) auto;
+  align-items: end;
+  gap: var(--space-3);
+}
+
+@media (max-width: 720px) {
+  .addForm {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--line);
+}
+
+.search {
+  flex: 1 1 240px;
+  max-width: 360px;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.muted {
+  font: 400 12px/16px var(--font-sans);
+  color: var(--ink-muted);
+}

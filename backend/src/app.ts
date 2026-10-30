@@ -23,6 +23,7 @@ import stockRoutes from './routes/stock';
 import shippingRoutes from './routes/shipping';
 import failureReasonsRoutes from './routes/failureReasons';
 import freightClaimsRoutes from './routes/freightClaims';
+import codBlacklistRoutes from './routes/codBlacklist';
 
 /**
  * The configured Express app — no `listen`, no DB connect at import time. Used by both the
@@ -96,6 +97,7 @@ app.use('/api/admin/stock', stockRoutes);
 app.use('/api/admin/shipping', shippingRoutes);
 app.use('/api/admin/failure-reasons', failureReasonsRoutes);
 app.use('/api/admin/freight-claims', freightClaimsRoutes);
+app.use('/api/admin/cod-blacklist', codBlacklistRoutes);
 app.use('/api/upload', uploadRoutes);
 
 // 404 handler

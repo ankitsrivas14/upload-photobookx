@@ -10,6 +10,7 @@ const StockPrediction = lazy(() => import('./StockPrediction').then((m) => ({ de
 const ProductsManager = lazy(() => import('./tools/ProductsManager').then((m) => ({ default: m.ProductsManager })));
 const VariantPerformance = lazy(() => import('./tools/VariantPerformance').then((m) => ({ default: m.VariantPerformance })));
 const Labels = lazy(() => import('./tools/Labels').then((m) => ({ default: m.Labels })));
+const CodBlacklist = lazy(() => import('./tools/CodBlacklist').then((m) => ({ default: m.CodBlacklist })));
 const GSTMonthlyReports = lazy(() => import('./GSTMonthlyReports').then((m) => ({ default: m.GSTMonthlyReports })));
 
 /** Tools: one page per tool; the shell lists them in the sidebar and handles the account and sign-out. */
@@ -30,6 +31,7 @@ export function ToolsPage() {
           <Route path="gst-reports" element={<GSTMonthlyReports />} />
           <Route path="variant-performance" element={<VariantPerformance />} />
           <Route path="labels" element={<Labels />} />
+          <Route path="cod-blacklist" element={<CodBlacklist />} />
           <Route path="*" element={<Navigate to="profit-calculator" replace />} />
         </Routes>
       </Suspense>

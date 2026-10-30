@@ -65,6 +65,7 @@ export const ADMIN_NAV: NavItem[] = [
       ['gst-reports', 'GST reports'],
       ['variant-performance', 'Variant performance'],
       ['labels', 'Labels'],
+      ['cod-blacklist', 'COD blacklist'],
     ]),
   },
 ];

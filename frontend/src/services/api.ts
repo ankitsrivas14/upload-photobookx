@@ -192,6 +192,26 @@ export interface SetAsideOrder {
   since: string | null;
 }
 
+/**
+ * An address on the COD blacklist: from an order that was returned or lost (failed), had a failed delivery attempt
+ * (attempted), or was added by hand (manual). The booking job holds COD orders to an active one.
+ */
+export interface CodBlacklistEntry {
+  order: string;
+  status: 'failed' | 'attempted' | 'manual';
+  srStatus: string | null;
+  payment: string | null;
+  placedAt: string | null;
+  knownAt: string | null;
+  address: string[];
+  city: string | null;
+  state: string | null;
+  pincode: string | null;
+  clearedAt: string | null;
+  clearedBy: string | null;
+  manual: { by: string | null; at: string | null; note: string | null } | null;
+}
+
 /** One month of Shiprocket orders (YYYY-MM) and how many failed: returned to us, lost, destroyed or disposed of. */
 export interface FailureMonth {
   month: string;
@@ -1489,6 +1509,19 @@ class ApiService {
     a.click();
     window.URL.revokeObjectURL(url);
     document.body.removeChild(a);
+  }
+
+  async getCodBlacklist(): Promise<{ success: boolean; entries?: CodBlacklistEntry[]; refreshedAt?: string | null; error?: string }> {
+    return this.request('/api/admin/cod-blacklist');
+  }
+
+  /** Adds an order's delivery address (the server reads it from Shiprocket) to the COD blacklist by hand. */
+  async addToCodBlacklist(order: string, note?: string): Promise<{ success: boolean; entry?: CodBlacklistEntry; error?: string }> {
+    return this.request('/api/admin/cod-blacklist', { method: 'POST', body: JSON.stringify({ order, note }) });
+  }
+
+  async removeFromCodBlacklist(order: string, note?: string): Promise<{ success: boolean; entry?: CodBlacklistEntry; error?: string }> {
+    return this.request(`/api/admin/cod-blacklist/${encodeURIComponent(order)}/remove`, { method: 'POST', body: JSON.stringify({ note }) });
   }
 
   async getMetaCpa(): Promise<{
